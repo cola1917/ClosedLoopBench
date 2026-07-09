@@ -297,7 +297,31 @@ def _spawn_ego_vehicle(carla_module: Any, world: Any, ego_config: dict[str, Any]
 
     spawn = ego_config.get("spawn") or {}
     transform = _carla_transform(carla_module, spawn)
-    return world.spawn_actor(blueprint, transform)
+    vehicle = _try_spawn(world, blueprint, transform)
+    if vehicle is not None:
+        return vehicle
+
+    fallback_transforms = []
+    if hasattr(world, "get_map"):
+        world_map = world.get_map()
+        if hasattr(world_map, "get_spawn_points"):
+            fallback_transforms = list(world_map.get_spawn_points())
+
+    for fallback_transform in fallback_transforms:
+        vehicle = _try_spawn(world, blueprint, fallback_transform)
+        if vehicle is not None:
+            return vehicle
+
+    raise RuntimeError("failed to spawn ego vehicle at planned pose or map fallback spawn points")
+
+
+def _try_spawn(world: Any, blueprint: Any, transform: Any) -> Any | None:
+    if hasattr(world, "try_spawn_actor"):
+        return world.try_spawn_actor(blueprint, transform)
+    try:
+        return world.spawn_actor(blueprint, transform)
+    except Exception:
+        return None
 
 
 def _carla_location(carla_module: Any, pose: dict[str, Any]) -> Any:

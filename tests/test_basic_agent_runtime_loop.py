@@ -72,12 +72,21 @@ class FakeVehicle:
 class FakeMap:
     name = "Town04"
 
+    def __init__(self, spawn_points=None):
+        self._spawn_points = spawn_points or []
+
+    def get_spawn_points(self):
+        return list(self._spawn_points)
+
 
 class FakeWorld:
     def __init__(self, events):
         self.events = events
         self.settings = FakeSettings(synchronous_mode=False, fixed_delta_seconds=None)
         self.vehicle = FakeVehicle(events)
+        self.spawn_points = [
+            FakeTransform(FakeLocation(50.0, 0.0, 0.0), FakeRotation(0.0)),
+        ]
 
     def get_settings(self):
         self.events.append("world.get_settings")
@@ -94,7 +103,7 @@ class FakeWorld:
 
     def get_map(self):
         self.events.append("world.get_map")
-        return FakeMap()
+        return FakeMap(self.spawn_points)
 
     def get_blueprint_library(self):
         self.events.append("world.get_blueprint_library")
@@ -102,6 +111,14 @@ class FakeWorld:
 
     def spawn_actor(self, blueprint, transform):
         self.events.append("world.spawn_actor")
+        self.spawn_blueprint = blueprint
+        self.spawn_transform = transform
+        return self.vehicle
+
+    def try_spawn_actor(self, blueprint, transform):
+        self.events.append(
+            "world.try_spawn_actor.x={}".format(getattr(transform.location, "x", None))
+        )
         self.spawn_blueprint = blueprint
         self.spawn_transform = transform
         return self.vehicle
@@ -197,7 +214,7 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(result["report"]["status"], "ego_closed_loop")
         self.assertEqual(len(result["report"]["metrics"]), 2)
         self.assertIn("world.apply_settings.sync=True.dt=0.05", events)
-        self.assertIn("world.spawn_actor", events)
+        self.assertIn("world.try_spawn_actor.x=1.0", events)
         self.assertIn("agent.set_destination", events)
         self.assertEqual(events.count("world.tick"), 2)
         self.assertEqual(events.count("agent.run_step"), 2)
@@ -225,6 +242,46 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertIn("planner failed", result["detail"])
         self.assertTrue(events[-2].startswith("world.apply_settings.sync=False"))
         self.assertEqual(events[-1], "vehicle.destroy")
+
+    def test_spawn_collision_falls_back_to_map_spawn_point(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class CollisionAtPlannedPoseWorld(FakeWorld):
+            def __init__(self, events):
+                super().__init__(events)
+                self.try_count = 0
+
+            def try_spawn_actor(self, blueprint, transform):
+                self.try_count += 1
+                self.events.append(
+                    "world.try_spawn_actor.x={}".format(getattr(transform.location, "x", None))
+                )
+                if self.try_count == 1:
+                    return None
+                return self.vehicle
+
+        class CollisionFallbackClient(FakeClient):
+            def __init__(self, events, host, port):
+                self.events = events
+                self.host = host
+                self.port = port
+                self.world = CollisionAtPlannedPoseWorld(events)
+                events.append("client.init")
+
+        class CollisionFallbackCarla(FakeCarlaModule):
+            def Client(self, host, port):
+                return CollisionFallbackClient(self.events, host, port)
+
+        events = []
+        result = run_basic_agent(
+            self._plan(),
+            carla_module=CollisionFallbackCarla(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "ego_closed_loop")
+        self.assertIn("world.try_spawn_actor.x=1.0", events)
+        self.assertIn("world.try_spawn_actor.x=50.0", events)
 
 
 if __name__ == "__main__":
