@@ -87,6 +87,18 @@ class OpenScenarioExportContractTests(unittest.TestCase):
             self.assertIsNotNone(private.find("PrivateAction/TeleportAction"), entity_name)
             self.assertIsNotNone(private.find("PrivateAction/LongitudinalAction/SpeedAction"), entity_name)
 
+    def test_maneuver_group_contains_required_actors_element(self):
+        from adapters.ir_to_openscenario import build_openscenario_xml
+
+        root = ET.fromstring(build_openscenario_xml(_scenario_ir()))
+        maneuver_group = root.find("Storyboard/Story/Act/ManeuverGroup")
+
+        self.assertIsNotNone(maneuver_group)
+        actors = maneuver_group.find("Actors")
+        self.assertIsNotNone(actors)
+        self.assertEqual(actors.attrib["selectTriggeringEntities"], "false")
+        self.assertEqual(actors.find("EntityRef").attrib["entityRef"], "ego")
+
 
 if __name__ == "__main__":
     unittest.main()

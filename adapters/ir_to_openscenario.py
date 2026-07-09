@@ -37,7 +37,9 @@ def build_openscenario_xml(scenario_ir: dict[str, Any], *, road_file: str = "roa
 
     story = ET.SubElement(storyboard, "Story", {"name": "story"})
     act = ET.SubElement(story, "Act", {"name": "act"})
-    ET.SubElement(act, "ManeuverGroup", {"maximumExecutionCount": "1", "name": "placeholder_maneuvers"})
+    maneuver_group = ET.SubElement(act, "ManeuverGroup", {"maximumExecutionCount": "1", "name": "placeholder_maneuvers"})
+    actors = ET.SubElement(maneuver_group, "Actors", {"selectTriggeringEntities": "false"})
+    ET.SubElement(actors, "EntityRef", {"entityRef": "ego"})
     ET.SubElement(act, "StartTrigger")
     stop = ET.SubElement(storyboard, "StopTrigger")
     condition_group = ET.SubElement(stop, "ConditionGroup")

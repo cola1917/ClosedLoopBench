@@ -454,7 +454,11 @@
       </Init>
     <Story name="story">
       <Act name="act">
-        <ManeuverGroup maximumExecutionCount="1" name="placeholder_maneuvers" />
+        <ManeuverGroup maximumExecutionCount="1" name="placeholder_maneuvers">
+          <Actors selectTriggeringEntities="false">
+            <EntityRef entityRef="ego" />
+            </Actors>
+          </ManeuverGroup>
         <StartTrigger />
         </Act>
       </Story>
