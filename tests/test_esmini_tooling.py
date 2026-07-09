@@ -24,10 +24,11 @@ class EsminiToolingContractTests(unittest.TestCase):
         from runners.esmini_smoke import build_esmini_command
 
         command = build_esmini_command(Path("tools/esmini/bin/esmini.exe"), Path("outputs/scene/scenario.xosc"))
+        normalized_command = [item.replace("\\", "/") for item in command]
 
         self.assertIn("--headless", command)
         self.assertIn("--osc", command)
-        self.assertIn("outputs\\scene\\scenario.xosc", command)
+        self.assertIn(Path("outputs/scene/scenario.xosc").as_posix(), normalized_command)
 
 
 if __name__ == "__main__":

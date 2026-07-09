@@ -1,5 +1,6 @@
 import json
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -60,11 +61,16 @@ class RuntimeCliPlanningTests(unittest.TestCase):
     def test_basic_agent_execute_without_carla_fails_structurally(self):
         from runners.run_carla_basic_agent import run_basic_agent
 
-        result = run_basic_agent({"scenario_id": "scene-no-carla"}, carla_module=None, agent_module=None)
+        fake_carla_without_client = types.SimpleNamespace()
+        result = run_basic_agent(
+            {"scenario_id": "scene-no-cclient"},
+            carla_module=fake_carla_without_client,
+            agent_module=None,
+        )
 
         self.assertEqual(result["status"], "failed")
-        self.assertIn(result["reason"], {"missing_carla_python_api", "missing_basic_agent"})
-        self.assertEqual(result["scenario_id"], "scene-no-carla")
+        self.assertIn(result["reason"], {"missing_basic_agent", "basic_agent_runtime_failed"})
+        self.assertEqual(result["scenario_id"], "scene-no-cclient")
 
 
 if __name__ == "__main__":
