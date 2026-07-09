@@ -18,6 +18,9 @@ def build_openscenario_xml(scenario_ir: dict[str, Any], *, road_file: str = "roa
         },
     )
 
+    ET.SubElement(root, "ParameterDeclarations")
+    ET.SubElement(root, "CatalogLocations")
+
     road_network = ET.SubElement(root, "RoadNetwork")
     ET.SubElement(road_network, "LogicFile", {"filepath": road_file})
 

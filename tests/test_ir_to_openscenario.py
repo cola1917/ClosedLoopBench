@@ -40,6 +40,8 @@ class OpenScenarioExportContractTests(unittest.TestCase):
 
         self.assertEqual(root.tag, "OpenSCENARIO")
         self.assertIsNotNone(root.find("FileHeader"))
+        self.assertIsNotNone(root.find("ParameterDeclarations"))
+        self.assertIsNotNone(root.find("CatalogLocations"))
         self.assertIsNotNone(root.find("RoadNetwork/LogicFile"))
         self.assertEqual(root.find("RoadNetwork/LogicFile").attrib["filepath"], "road.xodr")
         entities = root.findall("Entities/ScenarioObject")

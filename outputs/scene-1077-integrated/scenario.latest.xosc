@@ -1,5 +1,7 @@
 <OpenSCENARIO>
   <FileHeader revMajor="1" revMinor="0" date="2026-07-08T00:00:00" description="Generated from Scenario IR d25718445d89453381c659b9c8734939" author="ClosedLoopBench" />
+  <ParameterDeclarations />
+  <CatalogLocations />
   <RoadNetwork>
     <LogicFile filepath="road.xodr" />
     </RoadNetwork>
