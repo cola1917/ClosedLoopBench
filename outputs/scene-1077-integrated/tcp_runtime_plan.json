@@ -1,0 +1,90 @@
+{
+  "schema_version": "tcp_runtime_plan.mvp.v0",
+  "scenario_id": "scene-1077-integrated",
+  "plugin": "external_ros2_tcp",
+  "algorithm": "TCP",
+  "role_name": "ego_vehicle",
+  "io": {
+    "adapter": "tcp",
+    "boundary": "external_ego_policy",
+    "inputs": {
+      "sensor_profile": {
+        "name": "tcp_front",
+        "source": "carla_current_tick",
+        "role_name": "ego_vehicle",
+        "required_cameras": [
+          "rgb_front"
+        ],
+        "topics": {
+          "rgb_front": "/carla/ego_vehicle/rgb_front/image"
+        },
+        "timestamp_policy": "same_tick",
+        "calibration": {
+          "intrinsics": "from_carla_sensor",
+          "extrinsics": "from_carla_sensor_transform"
+        },
+        "preprocessing": {
+          "resize": null,
+          "crop": null,
+          "normalization": "adapter_owned"
+        },
+        "fallback": "fail_fast"
+      },
+      "ego_state": {
+        "source": "carla_current_tick",
+        "fields": [
+          "speed_mps",
+          "pose",
+          "velocity",
+          "acceleration"
+        ]
+      },
+      "route": {
+        "source": "closed_loop_route_planner",
+        "fields": [
+          "route_waypoints",
+          "route_command",
+          "target_point"
+        ]
+      }
+    },
+    "outputs": {
+      "control": {
+        "type": "vehicle_control",
+        "fields": [
+          "throttle",
+          "steer",
+          "brake",
+          "hand_brake",
+          "reverse"
+        ],
+        "topic": "/closed_loop/ego/control_cmd"
+      },
+      "optional_debug": {
+        "fields": [
+          "predicted_waypoints",
+          "confidence"
+        ],
+        "required": false
+      }
+    }
+  },
+  "runtime": {
+    "execution_mode": "external_process_or_ros2_node",
+    "repo_path": "E:\\models\\TCP",
+    "checkpoint_path": "E:\\models\\TCP\\tcp.pth",
+    "entrypoint": "tcp_ros2_adapter"
+  },
+  "safety": {
+    "invalid_command_policy": "reject_and_fallback",
+    "fallback_policy": "basic_agent"
+  },
+  "runtime_boundary": {
+    "vendors_model_code": false,
+    "requires_tcp_repo_for_execution": true,
+    "requires_tcp_repo_for_tests": false,
+    "owns_model_inference": false,
+    "owns_observation_packaging": true,
+    "owns_control_validation": true
+  }
+}

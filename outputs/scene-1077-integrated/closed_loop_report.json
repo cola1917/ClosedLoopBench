@@ -1,0 +1,19 @@
+{
+  "schema_version": "closed_loop_report.mvp.v0",
+  "scenario_id": "d25718445d89453381c659b9c8734939",
+  "status": "not_run",
+  "summary": {
+    "collision_count": 0,
+    "min_ttc": null,
+    "route_progress": 0.0,
+    "actor_policy_modes": {
+      "reactive_rule_based": 1,
+      "replay": 11
+    }
+  },
+  "metrics": [],
+  "artifacts": {
+    "run_config": "outputs\\scene-1077-integrated\\carla_run_config.json",
+    "reconstruction_package": "E:\\code\\NeuralSceneBridge\\outputs\\scene-1077-integrated\\reconstruction_package.json"
+  }
+}

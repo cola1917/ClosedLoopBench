@@ -1,0 +1,393 @@
+<OpenSCENARIO>
+  <FileHeader revMajor="1" revMinor="0" date="2026-07-08T00:00:00" description="Generated from Scenario IR d25718445d89453381c659b9c8734939" author="ClosedLoopBench" />
+  <RoadNetwork>
+    <LogicFile filepath="road.xodr" />
+    </RoadNetwork>
+  <Entities>
+    <ScenarioObject name="ego">
+      <Vehicle name="ego" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_ed634e83a0664c59b8d5e7cc84f8ae3e">
+      <Vehicle name="actor_ed634e83a0664c59b8d5e7cc84f8ae3e" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_b3551ff1bff84890a8ae2a3347715ff1">
+      <Vehicle name="actor_b3551ff1bff84890a8ae2a3347715ff1" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_899ad29ad80544f28c6c774002d8f707">
+      <Vehicle name="actor_899ad29ad80544f28c6c774002d8f707" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_93b97027abcc416cb31040c99df60180">
+      <Vehicle name="actor_93b97027abcc416cb31040c99df60180" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_38843e03ed134257878b7bf01c7f82b6">
+      <Vehicle name="actor_38843e03ed134257878b7bf01c7f82b6" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_0fb3d6d2627b43e198b743e8a9f24499">
+      <Vehicle name="actor_0fb3d6d2627b43e198b743e8a9f24499" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_9091a580e27b4c7a96060d109ce7ef4c">
+      <Vehicle name="actor_9091a580e27b4c7a96060d109ce7ef4c" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_8ec0a6ae7ae14950b2448ca4d25db3b2">
+      <Vehicle name="actor_8ec0a6ae7ae14950b2448ca4d25db3b2" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_437fe13d66554c51b1ea89f940e5bf4b">
+      <Vehicle name="actor_437fe13d66554c51b1ea89f940e5bf4b" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_f8cdbed0a8544e27b5d2f807a831cdbd">
+      <Vehicle name="actor_f8cdbed0a8544e27b5d2f807a831cdbd" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_a91020ac07ee4bf6b3495e2347d172be">
+      <Vehicle name="actor_a91020ac07ee4bf6b3495e2347d172be" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    <ScenarioObject name="actor_28b116c5493f4169b20bb64e25b9e9fe">
+      <Vehicle name="actor_28b116c5493f4169b20bb64e25b9e9fe" vehicleCategory="car">
+        <ParameterDeclarations />
+        <BoundingBox />
+        <Performance maxSpeed="69.4" maxAcceleration="10.0" maxDeceleration="10.0" />
+        <Axles />
+        <Properties />
+        </Vehicle>
+      </ScenarioObject>
+    </Entities>
+  <Storyboard>
+    <Init>
+      <Actions>
+        <Private entityRef="ego">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="0.0" y="0.0" z="0.0" h="-1.557497" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="1.899882" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_ed634e83a0664c59b8d5e7cc84f8ae3e">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="7.458249" y="-14.50022" z="0.788" h="-0.752254" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="8.372965" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_b3551ff1bff84890a8ae2a3347715ff1">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="16.657249" y="-48.08522" z="1.036" h="2.403685" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="17.459902" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_899ad29ad80544f28c6c774002d8f707">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="2.063249" y="13.80278" z="0.253" h="-2.144922" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="0.376215" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_93b97027abcc416cb31040c99df60180">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="6.742249" y="-29.69622" z="0.787" h="2.40596" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="8.678491" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_38843e03ed134257878b7bf01c7f82b6">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="7.036249" y="27.62078" z="-0.469" h="1.000754" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="12.005889" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_0fb3d6d2627b43e198b743e8a9f24499">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="-10.615751" y="-11.86922" z="0.85" h="1.997582" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="6.315398" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_9091a580e27b4c7a96060d109ce7ef4c">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="-13.344751" y="13.05078" z="1.163" h="0.009582" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="0.205113" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_8ec0a6ae7ae14950b2448ca4d25db3b2">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="-11.262751" y="-4.23222" z="0.863" h="1.521386" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="5.867579" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_437fe13d66554c51b1ea89f940e5bf4b">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="18.165249" y="-32.51322" z="0.976" h="-0.63441" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="13.667702" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_f8cdbed0a8544e27b5d2f807a831cdbd">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="-8.044751" y="4.90178" z="0.893" h="1.15375" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="7.401831" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_a91020ac07ee4bf6b3495e2347d172be">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="-0.878751" y="9.91278" z="0.511" h="-2.162376" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="0.266355" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        <Private entityRef="actor_28b116c5493f4169b20bb64e25b9e9fe">
+          <PrivateAction>
+            <TeleportAction>
+              <Position>
+                <WorldPosition x="21.588249" y="46.79978" z="-2.321" h="1.000754" />
+                </Position>
+              </TeleportAction>
+            </PrivateAction>
+          <PrivateAction>
+            <LongitudinalAction>
+              <SpeedAction>
+                <SpeedActionDynamics dynamicsShape="step" value="0" dynamicsDimension="time" />
+                <SpeedActionTarget>
+                  <AbsoluteTargetSpeed value="11.602201" />
+                  </SpeedActionTarget>
+                </SpeedAction>
+              </LongitudinalAction>
+            </PrivateAction>
+          </Private>
+        </Actions>
+      </Init>
+    <Story name="story">
+      <Act name="act">
+        <ManeuverGroup maximumExecutionCount="1" name="placeholder_maneuvers" />
+        <StartTrigger />
+        </Act>
+      </Story>
+    <StopTrigger>
+      <ConditionGroup>
+        <Condition name="event_window_end" delay="0" conditionEdge="rising">
+          <ByValueCondition>
+            <SimulationTimeCondition value="8.001758" rule="greaterThan" />
+            </ByValueCondition>
+          </Condition>
+        </ConditionGroup>
+      </StopTrigger>
+    </Storyboard>
+  </OpenSCENARIO>

@@ -1,0 +1,67 @@
+{
+  "schema_version": "closed_loop_report.mvp.v0",
+  "scenario_id": "scene-basic-agent-runtime",
+  "status": "ego_closed_loop",
+  "summary": {
+    "collision_count": 0,
+    "min_ttc": null,
+    "route_progress": 1.0,
+    "hard_brake_count": 0,
+    "max_jerk": null,
+    "actor_policy_modes": {},
+    "actor_closed_loop_levels": {}
+  },
+  "metrics": [
+    {
+      "t_sec": 0.05,
+      "ego": {
+        "pose": {
+          "x": 1.0,
+          "y": 2.0,
+          "z": 0.0,
+          "yaw": 5.0
+        },
+        "speed_mps": 5.0,
+        "control": {
+          "throttle": 0.3,
+          "brake": 0.0,
+          "steer": 0.1
+        }
+      },
+      "actor_distances_m": {},
+      "ttc": null,
+      "min_ttc": null,
+      "collision": false,
+      "route_progress": 0.5,
+      "hard_brake": false,
+      "jerk": null
+    },
+    {
+      "t_sec": 0.1,
+      "ego": {
+        "pose": {
+          "x": 1.0,
+          "y": 2.0,
+          "z": 0.0,
+          "yaw": 5.0
+        },
+        "speed_mps": 5.0,
+        "control": {
+          "throttle": 0.3,
+          "brake": 0.0,
+          "steer": 0.1
+        }
+      },
+      "actor_distances_m": {},
+      "ttc": null,
+      "min_ttc": null,
+      "collision": false,
+      "route_progress": 1.0,
+      "hard_brake": false,
+      "jerk": null
+    }
+  ],
+  "artifacts": {
+    "run_config": "in_memory"
+  }
+}

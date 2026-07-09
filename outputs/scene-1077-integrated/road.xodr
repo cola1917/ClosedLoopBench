@@ -1,0 +1,27 @@
+<OpenDRIVE>
+  <header revMajor="1" revMinor="4" name="minimal_d25718445d89453381c659b9c8734939" version="1.00" date="2026-07-08T00:00:00" north="0" south="0" east="0" west="0" />
+  <road name="semantic_equivalent_road" length="248.960" id="1" junction="-1">
+    <planView>
+      <geometry s="0.000" x="0.0" y="0.0" hdg="-1.557497" length="248.960">
+        <line />
+        </geometry>
+      </planView>
+    <lanes>
+      <laneSection s="0.000">
+        <center>
+          <lane id="0" type="none" level="false" />
+          </center>
+        <left>
+          <lane id="1" type="driving" level="false">
+            <width sOffset="0.000" a="3.500" b="0" c="0" d="0" />
+            </lane>
+          </left>
+        <right>
+          <lane id="-1" type="driving" level="false">
+            <width sOffset="0.000" a="3.500" b="0" c="0" d="0" />
+            </lane>
+          </right>
+        </laneSection>
+      </lanes>
+    </road>
+  </OpenDRIVE>

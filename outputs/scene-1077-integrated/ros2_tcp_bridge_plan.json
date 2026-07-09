@@ -1,0 +1,30 @@
+{
+  "schema_version": "ros2_tcp_bridge_plan.mvp.v0",
+  "scenario_id": "scene-1077-integrated",
+  "plugin": "external_ros2_tcp",
+  "algorithm": "TCP",
+  "role_name": "ego_vehicle",
+  "camera_profile": "tcp_front",
+  "timeout_sec": 0.5,
+  "qos": 10,
+  "topics": {
+    "sensors": {
+      "rgb_front": "/carla/ego_vehicle/rgb_front/image"
+    },
+    "ego_state": "/closed_loop/ego/state",
+    "route": "/closed_loop/route",
+    "control_cmd": "/carla/ego_vehicle/vehicle_control_cmd"
+  },
+  "message_contract": {
+    "input_messages": "adapter_owned_dict_or_ros2_decoded_payload",
+    "output_message": "vehicle_control_dict_for_runtime_binding"
+  },
+  "runtime_boundary": {
+    "requires_rclpy_for_tests": false,
+    "requires_tcp_repo_for_tests": false,
+    "loads_tcp_model": false,
+    "owns_ros2_topic_wiring": true,
+    "owns_model_inference": false,
+    "uses_tcp_runtime_adapter_backend_interface": true
+  }
+}

@@ -1,0 +1,65 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Closed Loop Run MVP",
+  "type": "object",
+  "required": ["schema_version", "run_id", "scenario_id", "carla", "ego", "actors", "metrics"],
+  "properties": {
+    "schema_version": { "const": "closed_loop_run.mvp.v0" },
+    "run_id": { "type": "string" },
+    "scenario_id": { "type": "string" },
+    "carla": {
+      "type": "object",
+      "required": ["version", "map", "fixed_delta_seconds"],
+      "properties": {
+        "version": { "type": "string" },
+        "map": { "type": "string" },
+        "fixed_delta_seconds": { "type": "number" }
+      }
+    },
+    "ego": {
+      "type": "object",
+      "required": ["agent", "initial_state"],
+      "properties": {
+        "agent": { "type": "string" },
+        "initial_state": { "$ref": "#/$defs/state" }
+      }
+    },
+    "actors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["actor_id", "role", "policy", "initial_state"],
+        "properties": {
+          "actor_id": { "type": "string" },
+          "role": { "type": "string" },
+          "policy": { "enum": ["replay", "scripted", "reactive_rule_based", "learned"] },
+          "initial_state": { "$ref": "#/$defs/state" }
+        }
+      }
+    },
+    "reconstruction_package": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "package_path": { "type": "string" }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "$defs": {
+    "state": {
+      "type": "object",
+      "required": ["x", "y", "z", "yaw", "speed_mps"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "yaw": { "type": "number" },
+        "speed_mps": { "type": "number" }
+      }
+    }
+  }
+}

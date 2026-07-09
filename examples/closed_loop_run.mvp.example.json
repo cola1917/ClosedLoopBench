@@ -1,0 +1,28 @@
+﻿{
+  "schema_version": "closed_loop_run.mvp.v0",
+  "run_id": "carla_cut_in_seed_001_baseline_v0",
+  "scenario_id": "cut_in_seed_001",
+  "carla": {
+    "version": "0.9.16",
+    "map": "Town04",
+    "fixed_delta_seconds": 0.05
+  },
+  "ego": {
+    "agent": "baseline_lane_following",
+    "initial_state": { "x": 0.0, "y": 0.0, "z": 0.2, "yaw": 0.0, "speed_mps": 10.0 }
+  },
+  "actors": [
+    {
+      "actor_id": "trigger_vehicle_001",
+      "role": "trigger",
+      "policy": "reactive_rule_based",
+      "initial_state": { "x": 15.0, "y": -3.5, "z": 0.2, "yaw": 0.0, "speed_mps": 9.0 }
+    }
+  ],
+  "reconstruction_package": {
+    "enabled": false,
+    "package_path": "../NeuralSceneBridge_NuRec_Cosmos_Reconstruction/examples/reconstruction_package.mvp.example.json"
+  },
+  "metrics": ["collision", "min_ttc", "route_progress", "comfort_jerk", "rule_violation"]
+}
+
