@@ -15,7 +15,8 @@ class FakeLocation:
 
 
 class FakeRotation:
-    def __init__(self, yaw=0.0):
+    def __init__(self, pitch=0.0, yaw=0.0):
+        self.pitch = pitch
         self.yaw = yaw
 
 
@@ -56,7 +57,7 @@ class FakeVehicle:
         self.controls = []
 
     def get_transform(self):
-        return FakeTransform(FakeLocation(1.0, 2.0, 0.0), FakeRotation(5.0))
+        return FakeTransform(FakeLocation(1.0, 2.0, 0.0), FakeRotation(yaw=5.0))
 
     def get_velocity(self):
         return FakeVelocity()
@@ -67,6 +68,16 @@ class FakeVehicle:
 
     def destroy(self):
         self.events.append("vehicle.destroy")
+
+
+class FakeSpectator:
+    def __init__(self, events):
+        self.events = events
+        self.transforms = []
+
+    def set_transform(self, transform):
+        self.events.append("spectator.set_transform")
+        self.transforms.append(transform)
 
 
 class FakeMap:
@@ -84,8 +95,9 @@ class FakeWorld:
         self.events = events
         self.settings = FakeSettings(synchronous_mode=False, fixed_delta_seconds=None)
         self.vehicle = FakeVehicle(events)
+        self.spectator = FakeSpectator(events)
         self.spawn_points = [
-            FakeTransform(FakeLocation(50.0, 0.0, 0.0), FakeRotation(0.0)),
+            FakeTransform(FakeLocation(50.0, 0.0, 0.0), FakeRotation(yaw=0.0)),
         ]
 
     def get_settings(self):
@@ -104,6 +116,10 @@ class FakeWorld:
     def get_map(self):
         self.events.append("world.get_map")
         return FakeMap(self.spawn_points)
+
+    def get_spectator(self):
+        self.events.append("world.get_spectator")
+        return self.spectator
 
     def get_blueprint_library(self):
         self.events.append("world.get_blueprint_library")
@@ -270,6 +286,22 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(first_tick["actor_distances_m"]["trigger"], 2.0)
         self.assertAlmostEqual(first_tick["min_ttc"], 0.5)
         self.assertTrue(first_tick["actor_decisions"]["trigger"]["should_yield"])
+
+    def test_follow_ego_moves_spectator_each_tick(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        plan = self._plan()
+        plan["visualization"]["follow_ego"] = True
+        events = []
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "ego_closed_loop")
+        self.assertEqual(events.count("world.get_spectator"), 2)
+        self.assertEqual(events.count("spectator.set_transform"), 2)
 
     def test_real_loop_reports_structured_failure_and_restores_settings(self):
         from runners.run_carla_basic_agent import run_basic_agent

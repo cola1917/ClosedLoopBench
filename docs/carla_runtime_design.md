@@ -100,6 +100,10 @@ Runtime boundary:
 - Tick CARLA synchronously.
 - Let `BasicAgent` compute control every tick.
 - Apply vehicle control to ego.
+- Optionally move the CARLA spectator behind ego every tick for visual debugging
+  when `--follow-ego` is enabled.
+- Optionally draw ego spawn, destination, and actor initial-state markers when
+  `--debug-draw` is enabled.
 - Collect primitive metrics per tick.
 - Emit the same `closed_loop_report.mvp.v0` shape as dry-run mode, with `status="ego_closed_loop"` or `status="failed"`.
 
@@ -111,6 +115,16 @@ Current implementation status:
   connect/load world, sync settings, spawn ego, set destination, `world.tick`,
   `agent.run_step`, `vehicle.apply_control`, metric collection, settings restore,
   and ego destroy.
+- Visual debugging is intentionally a runner option, not part of the control
+  contract. To watch ego in the CARLA viewer, run:
+
+```text
+python runners/run_carla_basic_agent.py \
+  --run-config outputs/scene-1077-integrated/carla_run_config.json \
+  --host 127.0.0.1 --port 2000 --max-ticks 600 \
+  --execute --follow-ego --debug-draw
+```
+
 - Real CARLA 0.9.16 execution is intentionally marked as environment integration
   work. The skeleton is ready for debug once CARLA, ScenarioRunner, and the Python
   API are available on the target machine.

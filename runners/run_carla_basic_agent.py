@@ -23,6 +23,8 @@ def build_basic_agent_plan(
     max_ticks: int = 600,
     synchronous: bool = True,
     output: str | None = None,
+    follow_ego: bool = False,
+    debug_draw: bool = False,
 ) -> dict[str, Any]:
     ego = run_config.get("ego") or {}
     carla_config = run_config.get("carla") or {}
@@ -55,6 +57,15 @@ def build_basic_agent_plan(
         "limits": {
             "max_ticks": int(max_ticks),
         },
+        "visualization": {
+            "follow_ego": bool(follow_ego),
+            "debug_draw": bool(debug_draw),
+            "spectator": {
+                "distance_m": 8.0,
+                "height_m": 4.0,
+                "pitch_deg": -15.0,
+            },
+        },
         "artifacts": {
             "closed_loop_report": output or "closed_loop_report.json",
         },
@@ -69,6 +80,8 @@ def write_basic_agent_plan(
     port: int = 2000,
     max_ticks: int = 600,
     synchronous: bool = True,
+    follow_ego: bool = False,
+    debug_draw: bool = False,
 ) -> Path:
     run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
     plan = build_basic_agent_plan(
@@ -77,6 +90,8 @@ def write_basic_agent_plan(
         port=port,
         max_ticks=max_ticks,
         synchronous=synchronous,
+        follow_ego=follow_ego,
+        debug_draw=debug_draw,
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -153,6 +168,7 @@ def _run_basic_agent_loop(
         world_config = plan.get("world") or {}
         ego_config = plan.get("ego") or {}
         limits = plan.get("limits") or {}
+        visualization_config = plan.get("visualization") or {}
 
         client = carla_module.Client(
             connection.get("host", "127.0.0.1"),
@@ -185,6 +201,8 @@ def _run_basic_agent_loop(
             target_speed=_mps_to_kmh(float(ego_config.get("target_speed_mps", 8.0))),
         )
         _set_agent_destination(agent, carla_module, ego_config.get("destination") or {})
+        if visualization_config.get("debug_draw"):
+            _draw_debug_markers(carla_module, world, ego_config, plan.get("actors", []))
 
         max_ticks = int(limits.get("max_ticks", 600))
         dt_sec = float(world_config.get("fixed_delta_seconds", 0.05))
@@ -195,6 +213,8 @@ def _run_basic_agent_loop(
                 world.tick()
             control = agent.run_step()
             ego_vehicle.apply_control(control)
+            if visualization_config.get("follow_ego"):
+                _follow_ego_spectator(carla_module, world, ego_vehicle, visualization_config.get("spectator") or {})
             ticks_completed += 1
             ego_pose = _vehicle_pose(ego_vehicle)
             ego_speed_mps = _vehicle_speed_mps(ego_vehicle)
@@ -380,6 +400,69 @@ def _vehicle_speed_mps(vehicle: Any) -> float:
     return math.sqrt(vx * vx + vy * vy + vz * vz)
 
 
+def _follow_ego_spectator(
+    carla_module: Any,
+    world: Any,
+    ego_vehicle: Any,
+    spectator_config: dict[str, Any],
+) -> None:
+    if not hasattr(world, "get_spectator") or not hasattr(ego_vehicle, "get_transform"):
+        return
+    spectator = world.get_spectator()
+    if spectator is None or not hasattr(spectator, "set_transform"):
+        return
+
+    ego_transform = ego_vehicle.get_transform()
+    ego_location = getattr(ego_transform, "location", None)
+    ego_rotation = getattr(ego_transform, "rotation", None)
+    yaw_deg = float(getattr(ego_rotation, "yaw", 0.0))
+    yaw_rad = math.radians(yaw_deg)
+    distance_m = float(spectator_config.get("distance_m", 8.0))
+    height_m = float(spectator_config.get("height_m", 4.0))
+    pitch_deg = float(spectator_config.get("pitch_deg", -15.0))
+
+    location = carla_module.Location(
+        x=float(getattr(ego_location, "x", 0.0)) - math.cos(yaw_rad) * distance_m,
+        y=float(getattr(ego_location, "y", 0.0)) - math.sin(yaw_rad) * distance_m,
+        z=float(getattr(ego_location, "z", 0.0)) + height_m,
+    )
+    rotation = carla_module.Rotation(pitch=pitch_deg, yaw=yaw_deg)
+    spectator.set_transform(carla_module.Transform(location, rotation))
+
+
+def _draw_debug_markers(carla_module: Any, world: Any, ego_config: dict[str, Any], actors: list[dict[str, Any]]) -> None:
+    debug = getattr(world, "debug", None)
+    if debug is None or not hasattr(debug, "draw_point"):
+        return
+    lifetime = 30.0
+    _draw_debug_point(carla_module, debug, ego_config.get("spawn") or {}, "ego_spawn", lifetime)
+    _draw_debug_point(carla_module, debug, ego_config.get("destination") or {}, "ego_destination", lifetime)
+    for actor in actors:
+        _draw_debug_point(
+            carla_module,
+            debug,
+            actor.get("initial_state") or {},
+            str(actor.get("actor_id", "actor")),
+            lifetime,
+        )
+
+
+def _draw_debug_point(
+    carla_module: Any,
+    debug: Any,
+    pose: dict[str, Any],
+    label: str,
+    lifetime: float,
+) -> None:
+    location = _carla_location(carla_module, pose)
+    try:
+        debug.draw_point(location, size=0.2, life_time=lifetime)
+        if hasattr(debug, "draw_string"):
+            debug.draw_string(location, label, life_time=lifetime)
+    except TypeError:
+        debug.draw_point(location)
+
+
 def _reactive_actor_tick(
     actors: list[dict[str, Any]],
     *,
@@ -494,6 +577,8 @@ def main(argv=None) -> int:
     parser.add_argument("--max-ticks", default=600, type=int)
     parser.add_argument("--async-world", action="store_true", help="Do not request synchronous stepping.")
     parser.add_argument("--execute", action="store_true", help="Attempt real CARLA execution instead of dry-run planning.")
+    parser.add_argument("--follow-ego", action="store_true", help="Move CARLA spectator behind the ego vehicle each tick.")
+    parser.add_argument("--debug-draw", action="store_true", help="Draw ego and actor debug markers in the CARLA world.")
     args = parser.parse_args(argv)
 
     run_config_path = Path(args.run_config)
@@ -505,6 +590,8 @@ def main(argv=None) -> int:
         port=args.port,
         max_ticks=args.max_ticks,
         synchronous=not args.async_world,
+        follow_ego=args.follow_ego,
+        debug_draw=args.debug_draw,
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
