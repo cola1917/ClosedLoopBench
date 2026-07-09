@@ -105,6 +105,32 @@ class TrafficManagerExecutorTests(unittest.TestCase):
         self.assertIn(("vehicle_percentage_speed_difference", 100, 20.0), tm.calls)
         self.assertIn(("auto_lane_change", 100, False), tm.calls)
 
+    def test_closed_loop_level_drives_tm_style_configuration_for_reactive_and_scripted_plans(self):
+        from actors.traffic_manager_executor import build_traffic_manager_actor_settings
+
+        reactive = {
+            "actor_id": "reactive",
+            "runtime_mode": "traffic_manager",
+            "closed_loop_level": "traffic_manager_reactive",
+            "style": "aggressive",
+            "controller": {"parameters": {}},
+        }
+        scripted = {
+            "actor_id": "scripted",
+            "runtime_mode": "scripted",
+            "closed_loop_level": "scripted",
+            "style": "defensive",
+            "controller": {"parameters": {}},
+        }
+
+        reactive_settings = build_traffic_manager_actor_settings(reactive)
+        scripted_settings = build_traffic_manager_actor_settings(scripted)
+
+        self.assertLess(reactive_settings["min_gap_m"], scripted_settings["min_gap_m"])
+        self.assertLess(reactive_settings["speed_difference_percent"], scripted_settings["speed_difference_percent"])
+        self.assertTrue(reactive_settings["auto_lane_change"])
+        self.assertFalse(scripted_settings["auto_lane_change"])
+
     def test_scripted_and_replay_are_plan_only_fallbacks(self):
         from actors.traffic_manager_executor import execute_traffic_manager_plan_set
 
@@ -117,6 +143,9 @@ class TrafficManagerExecutorTests(unittest.TestCase):
         self.assertEqual(statuses["background-replay"], "plan_only_fallback")
         self.assertEqual(statuses["scripted"], "plan_only_fallback")
         self.assertEqual(statuses["reactive-actor"], "traffic_manager_bound")
+
+        scripted_result = next(actor for actor in result["actors"] if actor["actor_id"] == "scripted")
+        self.assertIn("traffic_manager_settings", scripted_result)
 
     def test_missing_traffic_manager_can_be_resolved_from_client(self):
         from actors.traffic_manager_executor import execute_traffic_manager_plan_set

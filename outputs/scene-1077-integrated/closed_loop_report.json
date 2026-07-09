@@ -6,10 +6,47 @@
     "collision_count": 0,
     "min_ttc": null,
     "route_progress": 0.0,
+    "hard_brake_count": 0,
+    "max_jerk": null,
     "actor_policy_modes": {
-      "reactive_rule_based": 1,
+      "scripted_trigger": 1,
+      "replay": 11
+    },
+    "actor_closed_loop_levels": {
+      "scripted": 1,
       "replay": 11
     }
+  },
+  "evaluation": {
+    "overall_result": "unknown",
+    "criteria": [
+      {
+        "name": "collision_count",
+        "metric": "collision_count",
+        "op": "==",
+        "expected": 0,
+        "actual": 0,
+        "result": "pass"
+      },
+      {
+        "name": "route_progress",
+        "metric": "route_progress",
+        "op": ">=",
+        "expected": 0.95,
+        "actual": 0.0,
+        "result": "unknown",
+        "reason": "run has not produced metric samples"
+      },
+      {
+        "name": "min_ttc",
+        "metric": "min_ttc",
+        "op": ">=",
+        "expected": 1.0,
+        "actual": null,
+        "result": "unknown",
+        "reason": "run has not produced metric samples"
+      }
+    ]
   },
   "metrics": [],
   "artifacts": {

@@ -11,6 +11,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from actors.reactive_actor import plan_reactive_actor_control
 from metrics.report import build_closed_loop_report
 from metrics.collector import TickMetricCollector
 
@@ -195,24 +196,33 @@ def _run_basic_agent_loop(
             control = agent.run_step()
             ego_vehicle.apply_control(control)
             ticks_completed += 1
+            ego_pose = _vehicle_pose(ego_vehicle)
+            ego_speed_mps = _vehicle_speed_mps(ego_vehicle)
+            actor_distances_m, actor_decisions, min_ttc = _reactive_actor_tick(
+                plan.get("actors", []),
+                ego_pose=ego_pose,
+                ego_speed_mps=ego_speed_mps,
+            )
             collector.add_tick(
                 t_sec=(tick_index + 1) * dt_sec,
-                ego_pose=_vehicle_pose(ego_vehicle),
-                ego_speed_mps=_vehicle_speed_mps(ego_vehicle),
+                ego_pose=ego_pose,
+                ego_speed_mps=ego_speed_mps,
                 ego_control=_control_dict(control),
-                actor_distances_m={},
-                ttc=None,
+                actor_distances_m=actor_distances_m,
+                ttc=min_ttc,
                 collision=False,
                 route_progress=_route_progress(tick_index + 1, max_ticks),
                 hard_brake=_control_brake(control) > 0.6,
                 jerk=None,
+                actor_decisions=actor_decisions,
             )
 
         rows = collector.to_report_rows()
-        report = build_closed_loop_report(runtime_config, tick_metrics=rows, status="ego_closed_loop")
+        status = "interactive_closed_loop" if _has_interactive_actor(plan) else "ego_closed_loop"
+        report = build_closed_loop_report(runtime_config, tick_metrics=rows, status=status)
         _write_report_if_requested(plan, report)
         return {
-            "status": "ego_closed_loop",
+            "status": status,
             "scenario_id": plan.get("scenario_id"),
             "summary": {
                 "ticks": ticks_completed,
@@ -370,6 +380,69 @@ def _vehicle_speed_mps(vehicle: Any) -> float:
     return math.sqrt(vx * vx + vy * vy + vz * vz)
 
 
+def _reactive_actor_tick(
+    actors: list[dict[str, Any]],
+    *,
+    ego_pose: dict[str, float],
+    ego_speed_mps: float,
+) -> tuple[dict[str, float], dict[str, dict[str, Any]], float | None]:
+    actor_distances_m: dict[str, float] = {}
+    actor_decisions: dict[str, dict[str, Any]] = {}
+    finite_ttc_values: list[float] = []
+
+    for actor in actors:
+        if not _is_interactive_actor(actor):
+            continue
+        actor_id = str(actor.get("actor_id", "actor"))
+        actor_state = dict(actor.get("initial_state") or {})
+        actor_speed_mps = float(actor_state.get("speed_mps", 0.0))
+        distance_m = _xy_distance(actor_state, ego_pose)
+        decision = plan_reactive_actor_control(
+            actor_state,
+            {
+                "x": ego_pose.get("x", 0.0),
+                "y": ego_pose.get("y", 0.0),
+                "speed_mps": ego_speed_mps,
+                "distance_m": distance_m,
+                "relative_speed_mps": max(0.0, ego_speed_mps - actor_speed_mps),
+            },
+            style=_actor_style(actor),
+            reference_speed_mps=_actor_reference_speed(actor),
+        )
+        actor_distances_m[actor_id] = float(decision["distance_m"])
+        actor_decisions[actor_id] = decision
+        ttc_sec = decision.get("ttc_sec")
+        if isinstance(ttc_sec, (int, float)) and math.isfinite(float(ttc_sec)):
+            finite_ttc_values.append(float(ttc_sec))
+
+    return actor_distances_m, actor_decisions, min(finite_ttc_values) if finite_ttc_values else None
+
+
+def _is_interactive_actor(actor: dict[str, Any]) -> bool:
+    if actor.get("closed_loop_level") in {"scripted", "traffic_manager_reactive"}:
+        return True
+    closed_loop = actor.get("closed_loop") or {}
+    return bool(closed_loop.get("ego_responsive", False))
+
+
+def _xy_distance(actor_state: dict[str, Any], ego_pose: dict[str, float]) -> float:
+    dx = float(ego_pose.get("x", 0.0)) - float(actor_state.get("x", 0.0))
+    dy = float(ego_pose.get("y", 0.0)) - float(actor_state.get("y", 0.0))
+    return math.sqrt(dx * dx + dy * dy)
+
+
+def _actor_style(actor: dict[str, Any]) -> str:
+    style_profile = actor.get("style_profile") or {}
+    return str(actor.get("style", style_profile.get("name", "normal")))
+
+
+def _actor_reference_speed(actor: dict[str, Any]) -> float | None:
+    trajectory = actor.get("reference_trajectory") or []
+    if trajectory and isinstance(trajectory[-1], dict) and trajectory[-1].get("speed_mps") is not None:
+        return float(trajectory[-1]["speed_mps"])
+    return None
+
+
 def _control_dict(control: Any) -> dict[str, float]:
     return {
         "throttle": float(getattr(control, "throttle", 0.0)),
@@ -439,7 +512,7 @@ def main(argv=None) -> int:
 
     result = run_basic_agent(plan) if args.execute else {"status": "planned", "plan": str(output)}
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0 if result["status"] in {"planned", "completed", "ego_closed_loop"} else 2
+    return 0 if result["status"] in {"planned", "completed", "ego_closed_loop", "interactive_closed_loop"} else 2
 
 
 if __name__ == "__main__":

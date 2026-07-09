@@ -60,6 +60,43 @@ and lane-change gap acceptance.
 The plan does not call TrafficManager. It only records deferred runtime binding
 and parameters.
 
+## Reactive Actor Runtime
+
+Project 3 now has a lightweight ego-reactive actor runtime that can be tested
+without CARLA:
+
+- entry point: `actors.reactive_actor.plan_reactive_actor_control`
+- inputs: actor state, optional ego state, actor style, optional reference speed
+- ego signals: distance and relative closing speed, or x/y position fallback
+- outputs: desired speed, brake flag, yield flag, abort flag, lane-change flag,
+  TTC, distance, and an explainable reason
+
+The runtime reuses `actors.style_profiles.ActorStyleProfile`:
+
+- `defensive`: larger minimum gap and TTC threshold, disables lane changes in
+  tight interactions, aborts on low TTC
+- `normal`: moderate minimum gap and TTC threshold, aborts on low TTC
+- `aggressive`: smaller accepted gap and TTC threshold, can keep lane changes
+  enabled, does not abort on low TTC
+
+When no ego state is available, the runtime falls back to reference speed if
+provided, otherwise a safe stopped default. This keeps replay/reference behavior
+available while making ego-conditioned decisions explicit when sensor state is
+present.
+
+CARLA TrafficManager execution remains a binding layer rather than the actor
+control loop. `actors.traffic_manager_executor.build_traffic_manager_actor_settings`
+maps `traffic_manager_reactive` and `scripted` actor plans to TrafficManager
+configuration knobs:
+
+- `min_gap_m` -> `distance_to_leading_vehicle`
+- style speed policy -> `vehicle_percentage_speed_difference`
+- style gap policy -> `auto_lane_change`
+
+Only `runtime_mode=traffic_manager` is spawned by the executor. `scripted` plans
+remain plan-only fallbacks in this executor, but they now carry the same
+TrafficManager-compatible configuration so a runner can bind them later.
+
 ## Output Contract
 
 `build_actor_runtime_plan_set(run_config)` emits:
@@ -87,7 +124,6 @@ This batch does not implement:
 - real CARLA actor spawning
 - `world.tick()` loops
 - `vehicle.apply_control`
-- TrafficManager API calls
 - complex behavior trees or custom actor rule engines
 - ROS2 actor control
 

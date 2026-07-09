@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from actors.style_profiles import ActorStyleProfile
+
 
 TransformFactory = Callable[[Mapping[str, Any]], Any]
 
@@ -76,12 +78,18 @@ class TrafficManagerActorExecutor:
     def execute_actor_plan(self, actor_plan: Mapping[str, Any]) -> dict[str, Any]:
         actor_id = str(actor_plan.get("actor_id", "actor"))
         runtime_mode = str(actor_plan.get("runtime_mode", "replay"))
+        closed_loop_level = str(actor_plan.get("closed_loop_level", "replay"))
         if runtime_mode != "traffic_manager":
-            return {
+            result = {
                 "actor_id": actor_id,
                 "runtime_mode": runtime_mode,
                 "runtime_status": "plan_only_fallback",
                 "reason": "only_traffic_manager_mode_is_bound_by_this_executor",
+            }
+            if runtime_mode == "scripted" or closed_loop_level in {"traffic_manager_reactive", "scripted"}:
+                result["traffic_manager_settings"] = build_traffic_manager_actor_settings(actor_plan)
+            return {
+                **result,
             }
 
         try:
@@ -129,12 +137,10 @@ class TrafficManagerActorExecutor:
 
     def _apply_traffic_manager_settings(self, actor_handle: Any, actor_plan: Mapping[str, Any]) -> dict[str, Any]:
         traffic_manager = self._traffic_manager_or_raise()
-        parameters = dict(actor_plan.get("controller", {}).get("parameters", {}))
-        style = str(actor_plan.get("style", actor_plan.get("style_profile", {}).get("name", "normal")))
-
-        min_gap_m = _float_or_none(parameters.get("min_gap_m"))
-        speed_difference_percent = _speed_difference_percent(style, parameters)
-        auto_lane_change = _auto_lane_change_enabled(style, parameters)
+        tm_settings = build_traffic_manager_actor_settings(actor_plan)
+        min_gap_m = tm_settings["min_gap_m"]
+        speed_difference_percent = tm_settings["speed_difference_percent"]
+        auto_lane_change = tm_settings["auto_lane_change"]
 
         if min_gap_m is not None and hasattr(traffic_manager, "distance_to_leading_vehicle"):
             traffic_manager.distance_to_leading_vehicle(actor_handle, min_gap_m)
@@ -143,11 +149,35 @@ class TrafficManagerActorExecutor:
         if hasattr(traffic_manager, "auto_lane_change"):
             traffic_manager.auto_lane_change(actor_handle, auto_lane_change)
 
-        return {
-            "min_gap_m": min_gap_m,
-            "speed_difference_percent": speed_difference_percent,
-            "auto_lane_change": auto_lane_change,
-        }
+        return tm_settings
+
+
+def build_traffic_manager_actor_settings(actor_plan: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert a reactive/scripted actor plan into CARLA TrafficManager knobs."""
+    parameters = dict(actor_plan.get("controller", {}).get("parameters", {}))
+    style_profile = dict(actor_plan.get("style_profile", {}))
+    style = str(actor_plan.get("style", style_profile.get("name", "normal")))
+    profile = ActorStyleProfile.for_style(style)
+
+    min_gap_m = _float_or_none(parameters.get("min_gap_m"))
+    if min_gap_m is None:
+        min_gap_m = _float_or_none(style_profile.get("min_gap_m"))
+    if min_gap_m is None:
+        min_gap_m = profile.min_gap_m
+
+    lane_change_gap = _float_or_none(parameters.get("lane_change_gap_acceptance_m"))
+    if lane_change_gap is None:
+        lane_change_gap = _float_or_none(style_profile.get("lane_change_gap_acceptance_m"))
+    if lane_change_gap is None:
+        lane_change_gap = profile.lane_change_gap_acceptance_m
+
+    return {
+        "min_gap_m": min_gap_m,
+        "speed_difference_percent": _speed_difference_percent(style, parameters),
+        "auto_lane_change": _auto_lane_change_enabled(style, parameters, lane_change_gap),
+        "closed_loop_level": str(actor_plan.get("closed_loop_level", "replay")),
+        "source": "style_profile",
+    }
 
 
 def execute_traffic_manager_plan_set(
@@ -202,12 +232,18 @@ def _speed_difference_percent(style: str, parameters: Mapping[str, Any]) -> floa
     return by_style.get(style, 0.0)
 
 
-def _auto_lane_change_enabled(style: str, parameters: Mapping[str, Any]) -> bool:
+def _auto_lane_change_enabled(
+    style: str,
+    parameters: Mapping[str, Any],
+    lane_change_gap_acceptance_m: float | None = None,
+) -> bool:
     if parameters.get("auto_lane_change") is not None:
         return bool(parameters["auto_lane_change"])
     if style in {"defensive", "delayed"}:
         return False
-    gap = _float_or_none(parameters.get("lane_change_gap_acceptance_m"))
+    gap = lane_change_gap_acceptance_m
+    if gap is None:
+        gap = _float_or_none(parameters.get("lane_change_gap_acceptance_m"))
     if gap is not None and gap >= 10.0:
         return False
     return True

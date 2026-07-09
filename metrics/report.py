@@ -4,6 +4,8 @@ from collections import Counter
 from copy import deepcopy
 from typing import Any
 
+from metrics.criteria import evaluate_report
+
 
 SCHEMA_VERSION = "closed_loop_report.mvp.v0"
 RUNTIME_STATUSES = {
@@ -27,19 +29,21 @@ def build_closed_loop_report(
         raise ValueError(f"unknown closed-loop report status: {status}")
 
     metric_rows = list(tick_metrics or [])
+    summary = {
+        "collision_count": _collision_count(metric_rows),
+        "min_ttc": _min_numeric(metric_rows, ("min_ttc", "ttc")),
+        "route_progress": _route_progress(metric_rows),
+        "hard_brake_count": _hard_brake_count(metric_rows),
+        "max_jerk": _max_abs_numeric(metric_rows, ("max_jerk", "jerk")),
+        "actor_policy_modes": _actor_policy_modes(run_config),
+        "actor_closed_loop_levels": _actor_closed_loop_levels(run_config),
+    }
     return {
         "schema_version": SCHEMA_VERSION,
         "scenario_id": run_config["scenario_id"],
         "status": status,
-        "summary": {
-            "collision_count": _collision_count(metric_rows),
-            "min_ttc": _min_numeric(metric_rows, ("min_ttc", "ttc")),
-            "route_progress": _route_progress(metric_rows),
-            "hard_brake_count": _hard_brake_count(metric_rows),
-            "max_jerk": _max_abs_numeric(metric_rows, ("max_jerk", "jerk")),
-            "actor_policy_modes": _actor_policy_modes(run_config),
-            "actor_closed_loop_levels": _actor_closed_loop_levels(run_config),
-        },
+        "summary": summary,
+        "evaluation": evaluate_report(run_config, summary, metric_rows, status),
         "metrics": deepcopy(metric_rows),
         "artifacts": _artifacts(run_config),
     }

@@ -38,6 +38,7 @@ class ClosedLoopReportTests(unittest.TestCase):
         self.assertEqual(report["summary"]["collision_count"], 0)
         self.assertIsNone(report["summary"]["min_ttc"])
         self.assertEqual(report["summary"]["route_progress"], 0.0)
+        self.assertEqual(report["evaluation"]["overall_result"], "unknown")
         self.assertEqual(
             report["summary"]["actor_policy_modes"],
             {"reactive_rule_based": 1, "replay": 2},

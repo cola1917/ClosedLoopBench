@@ -196,7 +196,38 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
             "actors": [],
             "metrics": ["collision", "route_progress"],
         }
-        return build_basic_agent_plan(run_config, max_ticks=2)
+        plan = build_basic_agent_plan(run_config, max_ticks=2)
+        plan["artifacts"]["closed_loop_report"] = None
+        return plan
+
+    def _interactive_plan(self):
+        from runners.run_carla_basic_agent import build_basic_agent_plan
+
+        run_config = {
+            "schema_version": "carla_run_config.mvp.v0",
+            "scenario_id": "scene-basic-agent-interactive-runtime",
+            "carla": {"map": "Town04", "fixed_delta_seconds": 0.05},
+            "ego": {
+                "initial_state": {"x": 1.0, "y": 2.0, "z": 0.0, "yaw": 5.0, "speed_mps": 3.0},
+                "reference_trajectory": [
+                    {"x": 1.0, "y": 2.0, "z": 0.0, "yaw": 5.0, "speed_mps": 3.0},
+                    {"x": 10.0, "y": 2.0, "z": 0.0, "yaw": 5.0, "speed_mps": 6.0},
+                ],
+            },
+            "actors": [
+                {
+                    "actor_id": "trigger",
+                    "policy": "scripted_trigger",
+                    "closed_loop_level": "scripted",
+                    "style": "defensive",
+                    "initial_state": {"x": 3.0, "y": 2.0, "z": 0.0, "speed_mps": 1.0},
+                }
+            ],
+            "metrics": ["collision", "route_progress", "min_ttc"],
+        }
+        plan = build_basic_agent_plan(run_config, max_ticks=2)
+        plan["artifacts"]["closed_loop_report"] = None
+        return plan
 
     def test_real_loop_skeleton_accepts_fake_carla_and_agent(self):
         from runners.run_carla_basic_agent import run_basic_agent
@@ -221,6 +252,24 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(events.count("vehicle.apply_control"), 2)
         self.assertTrue(events[-2].startswith("world.apply_settings.sync=False"))
         self.assertEqual(events[-1], "vehicle.destroy")
+
+    def test_real_loop_records_reactive_actor_decisions_for_interactive_actors(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        events = []
+        result = run_basic_agent(
+            self._interactive_plan(),
+            carla_module=FakeCarlaModule(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "interactive_closed_loop")
+        self.assertEqual(result["report"]["status"], "interactive_closed_loop")
+        first_tick = result["report"]["metrics"][0]
+        self.assertIn("trigger", first_tick["actor_decisions"])
+        self.assertEqual(first_tick["actor_distances_m"]["trigger"], 2.0)
+        self.assertAlmostEqual(first_tick["min_ttc"], 0.5)
+        self.assertTrue(first_tick["actor_decisions"]["trigger"]["should_yield"])
 
     def test_real_loop_reports_structured_failure_and_restores_settings(self):
         from runners.run_carla_basic_agent import run_basic_agent
