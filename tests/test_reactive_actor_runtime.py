@@ -61,6 +61,18 @@ class ReactiveActorRuntimeTests(unittest.TestCase):
         self.assertEqual(without_reference["desired_speed_mps"], 0.0)
         self.assertEqual(without_reference["reason"], "no_ego_state_safe_default")
 
+    def test_non_closing_ego_reports_missing_ttc_instead_of_infinity(self):
+        from actors.reactive_actor import plan_reactive_actor_control
+
+        decision = plan_reactive_actor_control(
+            {"speed_mps": 8.0},
+            {"distance_m": 20.0, "relative_speed_mps": 0.0},
+            style="normal",
+        )
+
+        self.assertIsNone(decision["ttc_sec"])
+        self.assertEqual(decision["reason"], "ego_state_within_style_gap")
+
 
 if __name__ == "__main__":
     unittest.main()

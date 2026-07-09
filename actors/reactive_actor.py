@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from math import inf
+from math import inf, isfinite
 from typing import Any, Mapping
 
 from actors.style_profiles import ActorStyleProfile
@@ -88,7 +88,7 @@ def _decision(
         "lane_change_enabled": bool(lane_change_enabled),
         "min_gap_m": float(profile.min_gap_m),
         "yield_ttc_threshold_sec": float(profile.yield_ttc_threshold_sec),
-        "ttc_sec": None if ttc_sec is None else float(ttc_sec),
+        "ttc_sec": _finite_float_or_none(ttc_sec),
         "distance_m": None if distance_m is None else float(distance_m),
         "reason": reason,
     }
@@ -126,3 +126,10 @@ def _float(value: Any, default: float) -> float:
     if value is None:
         return float(default)
     return float(value)
+
+
+def _finite_float_or_none(value: float | None) -> float | None:
+    if value is None:
+        return None
+    value = float(value)
+    return value if isfinite(value) else None
