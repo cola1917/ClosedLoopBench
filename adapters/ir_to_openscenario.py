@@ -4,6 +4,9 @@ import xml.etree.ElementTree as ET
 from typing import Any
 
 
+DEFAULT_CARLA_VEHICLE_MODEL = "vehicle.tesla.model3"
+
+
 def build_openscenario_xml(scenario_ir: dict[str, Any], *, road_file: str = "road.xodr") -> str:
     root = ET.Element("OpenSCENARIO")
     ET.SubElement(
@@ -62,7 +65,7 @@ def build_openscenario_xml(scenario_ir: dict[str, Any], *, road_file: str = "roa
 def _add_vehicle_entity(parent, name: str, dimensions: dict[str, Any] | None = None) -> None:
     vehicle_dimensions = _vehicle_dimensions(dimensions)
     obj = ET.SubElement(parent, "ScenarioObject", {"name": name})
-    vehicle = ET.SubElement(obj, "Vehicle", {"name": name, "vehicleCategory": "car"})
+    vehicle = ET.SubElement(obj, "Vehicle", {"name": DEFAULT_CARLA_VEHICLE_MODEL, "vehicleCategory": "car"})
     ET.SubElement(vehicle, "ParameterDeclarations")
     bounding_box = ET.SubElement(vehicle, "BoundingBox")
     ET.SubElement(

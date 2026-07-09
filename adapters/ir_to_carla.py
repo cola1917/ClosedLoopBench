@@ -3,6 +3,8 @@
 from copy import deepcopy
 from typing import Any
 
+from actors.policy_config import build_actor_policy_config
+
 
 DEFAULT_METRICS = ["collision", "min_ttc", "route_progress", "comfort_jerk", "rule_violation"]
 
@@ -62,20 +64,34 @@ def build_carla_run_config(
 
 def _actor_config(actor: dict[str, Any]) -> dict[str, Any]:
     role = actor.get("role", "context")
-    policy = "reactive_rule_based" if role == "trigger" else "replay"
+    policy_config = build_actor_policy_config(actor, style=str(actor.get("style", "normal")))
+    policy = str(policy_config["policy_mode"])
     return {
         "actor_id": str(actor.get("actor_id")),
         "source_track_id": actor.get("source_track_id"),
         "role": role,
         "type": actor.get("type", "vehicle"),
         "policy": policy,
+        "closed_loop_level": policy_config["closed_loop_level"],
+        "closed_loop": deepcopy(policy_config["closed_loop"]),
+        "conditioning": policy_config["conditioning"],
+        "style": policy_config["style"],
+        "style_profile": deepcopy(policy_config["style_profile"]),
         "initial_state": _carla_state(actor.get("initial_state")),
         "reference_trajectory": [_carla_state(state) for state in actor.get("reference_trajectory", [])],
         "behavior": {
-            "source": "reference_conditioned_rule_based" if policy == "reactive_rule_based" else "log_replay",
+            "source": _behavior_source(policy),
             "reference_actor_id": str(actor.get("actor_id")),
         },
     }
+
+
+def _behavior_source(policy: str) -> str:
+    if policy == "replay":
+        return "log_replay"
+    if policy == "scripted_trigger":
+        return "reference_conditioned_script"
+    return "reference_conditioned_rule_based"
 
 
 def _carla_state(state: dict[str, Any] | None) -> dict[str, float] | None:

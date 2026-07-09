@@ -366,7 +366,26 @@
       "source_track_id": "ed634e83a0664c59b8d5e7cc84f8ae3e",
       "role": "trigger",
       "type": "vehicle",
-      "policy": "reactive_rule_based",
+      "policy": "scripted_trigger",
+      "closed_loop_level": "scripted",
+      "closed_loop": {
+        "name": "scripted",
+        "description": "Actor follows a reference-conditioned maneuver and can react to ego state or trigger conditions.",
+        "ego_responsive": true,
+        "actor_state_mutates_from_ego": true,
+        "requires_carla_runtime": true
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": 7.458249,
@@ -706,7 +725,7 @@
         }
       ],
       "behavior": {
-        "source": "reference_conditioned_rule_based",
+        "source": "reference_conditioned_script",
         "reference_actor_id": "ed634e83a0664c59b8d5e7cc84f8ae3e"
       }
     },
@@ -716,6 +735,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": 16.657249,
@@ -817,6 +855,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": 2.063249,
@@ -894,6 +951,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": 6.742249,
@@ -1019,6 +1095,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": 7.036249,
@@ -1064,6 +1159,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": -10.615751,
@@ -1149,6 +1263,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": -13.344751,
@@ -1266,6 +1399,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": -11.262751,
@@ -1335,6 +1487,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": 18.165249,
@@ -1684,6 +1855,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": -8.044751,
@@ -1753,6 +1943,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": -0.878751,
@@ -1878,6 +2087,25 @@
       "role": "context",
       "type": "vehicle",
       "policy": "replay",
+      "closed_loop_level": "replay",
+      "closed_loop": {
+        "name": "replay",
+        "description": "Recorded actor trajectory is replayed; ego behavior does not change actor motion.",
+        "ego_responsive": false,
+        "actor_state_mutates_from_ego": false,
+        "requires_carla_runtime": false
+      },
+      "conditioning": "reference",
+      "style": "normal",
+      "style_profile": {
+        "name": "normal",
+        "desired_time_headway_sec": 1.6,
+        "min_gap_m": 5.0,
+        "reaction_time_sec": 1.0,
+        "yield_ttc_threshold_sec": 3.0,
+        "lane_change_gap_acceptance_m": 8.0,
+        "abort_on_low_ttc": true
+      },
       "initial_state": {
         "t_sec": 0.0,
         "x": 21.588249,

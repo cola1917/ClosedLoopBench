@@ -65,6 +65,16 @@ class OpenScenarioExportContractTests(unittest.TestCase):
             self.assertIn("width", dimensions.attrib)
             self.assertIn("height", dimensions.attrib)
 
+    def test_vehicle_model_name_is_carla_blueprint_not_entity_id(self):
+        from adapters.ir_to_openscenario import build_openscenario_xml
+
+        root = ET.fromstring(build_openscenario_xml(_scenario_ir()))
+
+        for scenario_object in root.findall("Entities/ScenarioObject"):
+            vehicle = scenario_object.find("Vehicle")
+            self.assertEqual(vehicle.attrib["name"], "vehicle.tesla.model3")
+            self.assertNotEqual(vehicle.attrib["name"], scenario_object.attrib["name"])
+
     def test_stop_trigger_uses_event_window_end(self):
         from adapters.ir_to_openscenario import build_openscenario_xml
 

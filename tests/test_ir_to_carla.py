@@ -44,7 +44,10 @@ class CarlaAdapterContractTests(unittest.TestCase):
         self.assertEqual(config["ego"]["agent"], "baseline_lane_following")
         self.assertIsNotNone(config["ego"]["initial_state"])
         self.assertGreaterEqual(len(config["actors"]), 1)
-        self.assertIn(config["actors"][0]["policy"], {"replay", "reactive_rule_based"})
+        self.assertIn(config["actors"][0]["policy"], {"replay", "scripted_trigger", "reactive_rule_based"})
+        self.assertEqual(config["actors"][0]["closed_loop_level"], "scripted")
+        self.assertEqual(config["actors"][0]["style"], "normal")
+        self.assertEqual(config["actors"][0]["style_profile"]["name"], "normal")
         self.assertIn("collision", config["metrics"])
         self.assertEqual(config["reconstruction_package"]["enabled"], False)
 

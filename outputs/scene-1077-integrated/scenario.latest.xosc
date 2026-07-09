@@ -7,7 +7,7 @@
     </RoadNetwork>
   <Entities>
     <ScenarioObject name="ego">
-      <Vehicle name="ego" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.8" />
@@ -22,7 +22,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_ed634e83a0664c59b8d5e7cc84f8ae3e">
-      <Vehicle name="actor_ed634e83a0664c59b8d5e7cc84f8ae3e" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.825" />
@@ -37,7 +37,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_b3551ff1bff84890a8ae2a3347715ff1">
-      <Vehicle name="actor_b3551ff1bff84890a8ae2a3347715ff1" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.8365" />
@@ -52,7 +52,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_899ad29ad80544f28c6c774002d8f707">
-      <Vehicle name="actor_899ad29ad80544f28c6c774002d8f707" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.818" />
@@ -67,7 +67,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_93b97027abcc416cb31040c99df60180">
-      <Vehicle name="actor_93b97027abcc416cb31040c99df60180" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.8745" />
@@ -82,7 +82,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_38843e03ed134257878b7bf01c7f82b6">
-      <Vehicle name="actor_38843e03ed134257878b7bf01c7f82b6" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.8395" />
@@ -97,7 +97,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_0fb3d6d2627b43e198b743e8a9f24499">
-      <Vehicle name="actor_0fb3d6d2627b43e198b743e8a9f24499" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.7975" />
@@ -112,7 +112,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_9091a580e27b4c7a96060d109ce7ef4c">
-      <Vehicle name="actor_9091a580e27b4c7a96060d109ce7ef4c" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="1.0605" />
@@ -127,7 +127,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_8ec0a6ae7ae14950b2448ca4d25db3b2">
-      <Vehicle name="actor_8ec0a6ae7ae14950b2448ca4d25db3b2" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.782" />
@@ -142,7 +142,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_437fe13d66554c51b1ea89f940e5bf4b">
-      <Vehicle name="actor_437fe13d66554c51b1ea89f940e5bf4b" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.785" />
@@ -157,7 +157,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_f8cdbed0a8544e27b5d2f807a831cdbd">
-      <Vehicle name="actor_f8cdbed0a8544e27b5d2f807a831cdbd" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.819" />
@@ -172,7 +172,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_a91020ac07ee4bf6b3495e2347d172be">
-      <Vehicle name="actor_a91020ac07ee4bf6b3495e2347d172be" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.772" />
@@ -187,7 +187,7 @@
         </Vehicle>
       </ScenarioObject>
     <ScenarioObject name="actor_28b116c5493f4169b20bb64e25b9e9fe">
-      <Vehicle name="actor_28b116c5493f4169b20bb64e25b9e9fe" vehicleCategory="car">
+      <Vehicle name="vehicle.tesla.model3" vehicleCategory="car">
         <ParameterDeclarations />
         <BoundingBox>
           <Center x="0.0" y="0.0" z="0.7765" />
