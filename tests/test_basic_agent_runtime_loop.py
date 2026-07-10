@@ -46,28 +46,37 @@ class FakeControl:
 
 
 class FakeVelocity:
-    x = 3.0
-    y = 4.0
-    z = 0.0
+    def __init__(self, x=3.0, y=4.0, z=0.0):
+        self.x = x
+        self.y = y
+        self.z = z
 
 
 class FakeVehicle:
-    def __init__(self, events):
+    def __init__(self, events, label="vehicle", transforms=None, velocity=None):
         self.events = events
+        self.label = label
         self.controls = []
+        self.transforms = transforms or [
+            FakeTransform(FakeLocation(1.0, 2.0, 0.0), FakeRotation(yaw=5.0)),
+        ]
+        self.transform_reads = 0
+        self.velocity = velocity or FakeVelocity()
 
     def get_transform(self):
-        return FakeTransform(FakeLocation(1.0, 2.0, 0.0), FakeRotation(yaw=5.0))
+        transform = self.transforms[min(self.transform_reads, len(self.transforms) - 1)]
+        self.transform_reads += 1
+        return transform
 
     def get_velocity(self):
-        return FakeVelocity()
+        return self.velocity
 
     def apply_control(self, control):
-        self.events.append("vehicle.apply_control")
+        self.events.append("{}.apply_control".format(self.label))
         self.controls.append(control)
 
     def destroy(self):
-        self.events.append("vehicle.destroy")
+        self.events.append("{}.destroy".format(self.label))
 
 
 class FakeSpectator:
@@ -95,6 +104,7 @@ class FakeWorld:
         self.events = events
         self.settings = FakeSettings(synchronous_mode=False, fixed_delta_seconds=None)
         self.vehicle = FakeVehicle(events)
+        self.actor_vehicles = {}
         self.spectator = FakeSpectator(events)
         self.spawn_points = [
             FakeTransform(FakeLocation(50.0, 0.0, 0.0), FakeRotation(yaw=0.0)),
@@ -129,19 +139,42 @@ class FakeWorld:
         self.events.append("world.spawn_actor")
         self.spawn_blueprint = blueprint
         self.spawn_transform = transform
-        return self.vehicle
+        return self._vehicle_for_blueprint(blueprint)
 
     def try_spawn_actor(self, blueprint, transform):
         self.events.append(
             "world.try_spawn_actor.x={}".format(getattr(transform.location, "x", None))
         )
+        role_name = blueprint.attributes.get("role_name", "vehicle")
+        self.events.append(
+            "world.try_spawn_actor.role={}.x={}".format(
+                role_name,
+                getattr(transform.location, "x", None),
+            )
+        )
         self.spawn_blueprint = blueprint
         self.spawn_transform = transform
-        return self.vehicle
+        return self._vehicle_for_blueprint(blueprint)
 
     def tick(self):
         self.events.append("world.tick")
         return 1
+
+    def _vehicle_for_blueprint(self, blueprint):
+        role_name = blueprint.attributes.get("role_name", "vehicle")
+        if role_name == "ego_vehicle":
+            return self.vehicle
+        if role_name not in self.actor_vehicles:
+            self.actor_vehicles[role_name] = FakeVehicle(
+                self.events,
+                label="actor.{}".format(role_name),
+                transforms=[
+                    FakeTransform(FakeLocation(6.0, 2.0, 0.0), FakeRotation(yaw=0.0)),
+                    FakeTransform(FakeLocation(8.0, 2.0, 0.0), FakeRotation(yaw=0.0)),
+                ],
+                velocity=FakeVelocity(x=1.0, y=0.0, z=0.0),
+            )
+        return self.actor_vehicles[role_name]
 
 
 class FakeClient:
@@ -281,11 +314,98 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "interactive_closed_loop")
         self.assertEqual(result["report"]["status"], "interactive_closed_loop")
+        self.assertIn("world.try_spawn_actor.role=trigger.x=3.0", events)
         first_tick = result["report"]["metrics"][0]
+        second_tick = result["report"]["metrics"][1]
         self.assertIn("trigger", first_tick["actor_decisions"])
-        self.assertEqual(first_tick["actor_distances_m"]["trigger"], 2.0)
-        self.assertAlmostEqual(first_tick["min_ttc"], 0.5)
+        self.assertEqual(first_tick["actor_distances_m"]["trigger"], 5.0)
+        self.assertEqual(second_tick["actor_distances_m"]["trigger"], 7.0)
+        self.assertAlmostEqual(first_tick["min_ttc"], 1.25)
         self.assertTrue(first_tick["actor_decisions"]["trigger"]["should_yield"])
+        self.assertTrue(events[-2].startswith("actor.trigger.destroy"))
+        self.assertEqual(events[-1], "vehicle.destroy")
+
+    def test_real_loop_does_not_spawn_replay_actors(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        plan = self._interactive_plan()
+        plan["actors"][0]["closed_loop_level"] = "replay"
+        plan["actors"][0].pop("closed_loop", None)
+        events = []
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "ego_closed_loop")
+        self.assertNotIn("world.try_spawn_actor.role=trigger.x=3.0", events)
+        self.assertEqual(result["report"]["metrics"][0]["actor_distances_m"], {})
+        self.assertNotIn("actor.trigger.destroy", events)
+
+    def test_real_loop_spawns_ego_responsive_actor(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        plan = self._interactive_plan()
+        plan["actors"][0]["closed_loop_level"] = "replay"
+        plan["actors"][0]["closed_loop"] = {"ego_responsive": True}
+        events = []
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "interactive_closed_loop")
+        self.assertIn("world.try_spawn_actor.role=trigger.x=3.0", events)
+        self.assertEqual(result["report"]["metrics"][0]["actor_distances_m"]["trigger"], 5.0)
+        self.assertIn("actor.trigger.destroy", events)
+
+    def test_interactive_actor_spawn_collision_falls_back_to_map_spawn_point(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class ActorCollisionAtPlannedPoseWorld(FakeWorld):
+            def __init__(self, events):
+                super().__init__(events)
+                self.actor_try_count = 0
+
+            def try_spawn_actor(self, blueprint, transform):
+                role_name = blueprint.attributes.get("role_name", "vehicle")
+                self.events.append(
+                    "world.try_spawn_actor.role={}.x={}".format(
+                        role_name,
+                        getattr(transform.location, "x", None),
+                    )
+                )
+                if role_name != "ego_vehicle":
+                    self.actor_try_count += 1
+                    if self.actor_try_count == 1:
+                        return None
+                return self._vehicle_for_blueprint(blueprint)
+
+        class ActorCollisionFallbackClient(FakeClient):
+            def __init__(self, events, host, port):
+                self.events = events
+                self.host = host
+                self.port = port
+                self.world = ActorCollisionAtPlannedPoseWorld(events)
+                events.append("client.init")
+
+        class ActorCollisionFallbackCarla(FakeCarlaModule):
+            def Client(self, host, port):
+                return ActorCollisionFallbackClient(self.events, host, port)
+
+        events = []
+        result = run_basic_agent(
+            self._interactive_plan(),
+            carla_module=ActorCollisionFallbackCarla(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "interactive_closed_loop")
+        self.assertIn("world.try_spawn_actor.role=trigger.x=3.0", events)
+        self.assertIn("world.try_spawn_actor.role=trigger.x=50.0", events)
+        self.assertIn("actor.trigger.destroy", events)
 
     def test_follow_ego_moves_spectator_each_tick(self):
         from runners.run_carla_basic_agent import run_basic_agent

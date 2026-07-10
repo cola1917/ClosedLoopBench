@@ -142,9 +142,8 @@ def _target_speed(ego: dict[str, Any], destination: dict[str, Any]) -> float:
 
 
 def _has_interactive_actor(plan: dict[str, Any]) -> bool:
-    interactive_levels = {"scripted", "traffic_manager_reactive"}
     for actor in plan.get("actors", []):
-        if actor.get("closed_loop_level") in interactive_levels:
+        if _is_interactive_actor(actor):
             return True
     return False
 
@@ -158,6 +157,7 @@ def _run_basic_agent_loop(
     client = None
     world = None
     ego_vehicle = None
+    actor_vehicles: dict[str, Any] = {}
     original_settings = None
     collector = TickMetricCollector()
     runtime_config = _runtime_report_config(plan)
@@ -196,6 +196,12 @@ def _run_basic_agent_loop(
             world.apply_settings(settings)
 
         ego_vehicle = _spawn_ego_vehicle(carla_module, world, ego_config)
+        _spawn_interactive_actor_vehicles(
+            carla_module,
+            world,
+            plan.get("actors") or [],
+            actor_vehicles,
+        )
         agent = basic_agent_cls(
             ego_vehicle,
             target_speed=_mps_to_kmh(float(ego_config.get("target_speed_mps", 8.0))),
@@ -219,9 +225,10 @@ def _run_basic_agent_loop(
             ego_pose = _vehicle_pose(ego_vehicle)
             ego_speed_mps = _vehicle_speed_mps(ego_vehicle)
             actor_distances_m, actor_decisions, min_ttc = _reactive_actor_tick(
-                plan.get("actors", []),
+                plan.get("actors") or [],
                 ego_pose=ego_pose,
                 ego_speed_mps=ego_speed_mps,
+                actor_vehicles=actor_vehicles,
             )
             collector.add_tick(
                 t_sec=(tick_index + 1) * dt_sec,
@@ -265,6 +272,12 @@ def _run_basic_agent_loop(
         if world is not None and original_settings is not None and hasattr(world, "apply_settings"):
             try:
                 world.apply_settings(original_settings)
+            except Exception:
+                pass
+        for actor_vehicle in actor_vehicles.values():
+            try:
+                if hasattr(actor_vehicle, "destroy"):
+                    actor_vehicle.destroy()
             except Exception:
                 pass
         if ego_vehicle is not None and hasattr(ego_vehicle, "destroy"):
@@ -343,6 +356,54 @@ def _spawn_ego_vehicle(carla_module: Any, world: Any, ego_config: dict[str, Any]
             return vehicle
 
     raise RuntimeError("failed to spawn ego vehicle at planned pose or map fallback spawn points")
+
+
+def _spawn_interactive_actor_vehicles(
+    carla_module: Any,
+    world: Any,
+    actors: list[dict[str, Any]],
+    actor_vehicles: dict[str, Any],
+) -> None:
+    for actor in actors:
+        if not _is_interactive_actor(actor):
+            continue
+        actor_id = str(actor.get("actor_id", "actor"))
+        actor_vehicles[actor_id] = _spawn_actor_vehicle(carla_module, world, actor, actor_id)
+
+
+def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], actor_id: str) -> Any:
+    blueprint_library = world.get_blueprint_library()
+    blueprint_filter = str(actor.get("blueprint", "vehicle.*"))
+    blueprint_candidates = blueprint_library.filter(blueprint_filter)
+    if not blueprint_candidates and blueprint_filter != "vehicle.*":
+        blueprint_candidates = blueprint_library.filter("vehicle.*")
+    if not blueprint_candidates:
+        raise RuntimeError(f"no CARLA vehicle blueprint matched {blueprint_filter} for actor {actor_id}")
+
+    blueprint = blueprint_candidates[0]
+    if hasattr(blueprint, "set_attribute"):
+        blueprint.set_attribute("role_name", str(actor.get("role_name", actor_id)))
+
+    transform = _carla_transform(carla_module, actor.get("initial_state") or {})
+    vehicle = _try_spawn(world, blueprint, transform)
+    if vehicle is not None:
+        return vehicle
+
+    for fallback_transform in _map_spawn_points(world):
+        vehicle = _try_spawn(world, blueprint, fallback_transform)
+        if vehicle is not None:
+            return vehicle
+
+    raise RuntimeError(f"failed to spawn interactive actor vehicle {actor_id}")
+
+
+def _map_spawn_points(world: Any) -> list[Any]:
+    if not hasattr(world, "get_map"):
+        return []
+    world_map = world.get_map()
+    if not hasattr(world_map, "get_spawn_points"):
+        return []
+    return list(world_map.get_spawn_points())
 
 
 def _try_spawn(world: Any, blueprint: Any, transform: Any) -> Any | None:
@@ -468,16 +529,18 @@ def _reactive_actor_tick(
     *,
     ego_pose: dict[str, float],
     ego_speed_mps: float,
+    actor_vehicles: dict[str, Any] | None = None,
 ) -> tuple[dict[str, float], dict[str, dict[str, Any]], float | None]:
     actor_distances_m: dict[str, float] = {}
     actor_decisions: dict[str, dict[str, Any]] = {}
     finite_ttc_values: list[float] = []
+    actor_vehicles = actor_vehicles or {}
 
     for actor in actors:
         if not _is_interactive_actor(actor):
             continue
         actor_id = str(actor.get("actor_id", "actor"))
-        actor_state = dict(actor.get("initial_state") or {})
+        actor_state = _sample_actor_state(actor, actor_vehicles.get(actor_id))
         actor_speed_mps = float(actor_state.get("speed_mps", 0.0))
         distance_m = _xy_distance(actor_state, ego_pose)
         decision = plan_reactive_actor_control(
@@ -499,6 +562,15 @@ def _reactive_actor_tick(
             finite_ttc_values.append(float(ttc_sec))
 
     return actor_distances_m, actor_decisions, min(finite_ttc_values) if finite_ttc_values else None
+
+
+def _sample_actor_state(actor: dict[str, Any], actor_vehicle: Any | None) -> dict[str, Any]:
+    actor_state = dict(actor.get("initial_state") or {})
+    if actor_vehicle is None:
+        return actor_state
+    actor_state.update(_vehicle_pose(actor_vehicle))
+    actor_state["speed_mps"] = _vehicle_speed_mps(actor_vehicle)
+    return actor_state
 
 
 def _is_interactive_actor(actor: dict[str, Any]) -> bool:
