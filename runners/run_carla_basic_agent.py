@@ -25,6 +25,9 @@ def build_basic_agent_plan(
     output: str | None = None,
     follow_ego: bool = False,
     debug_draw: bool = False,
+    snap_to_map: bool = False,
+    actor_autopilot: bool = False,
+    traffic_manager_port: int = 8000,
 ) -> dict[str, Any]:
     ego = run_config.get("ego") or {}
     carla_config = run_config.get("carla") or {}
@@ -57,6 +60,11 @@ def build_basic_agent_plan(
         "limits": {
             "max_ticks": int(max_ticks),
         },
+        "runtime": {
+            "snap_to_map": bool(snap_to_map),
+            "actor_autopilot": bool(actor_autopilot),
+            "traffic_manager_port": int(traffic_manager_port),
+        },
         "visualization": {
             "follow_ego": bool(follow_ego),
             "debug_draw": bool(debug_draw),
@@ -82,6 +90,9 @@ def write_basic_agent_plan(
     synchronous: bool = True,
     follow_ego: bool = False,
     debug_draw: bool = False,
+    snap_to_map: bool = False,
+    actor_autopilot: bool = False,
+    traffic_manager_port: int = 8000,
 ) -> Path:
     run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
     plan = build_basic_agent_plan(
@@ -92,6 +103,9 @@ def write_basic_agent_plan(
         synchronous=synchronous,
         follow_ego=follow_ego,
         debug_draw=debug_draw,
+        snap_to_map=snap_to_map,
+        actor_autopilot=actor_autopilot,
+        traffic_manager_port=traffic_manager_port,
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -168,6 +182,7 @@ def _run_basic_agent_loop(
         world_config = plan.get("world") or {}
         ego_config = plan.get("ego") or {}
         limits = plan.get("limits") or {}
+        runtime_options = plan.get("runtime") or {}
         visualization_config = plan.get("visualization") or {}
 
         client = carla_module.Client(
@@ -195,12 +210,22 @@ def _run_basic_agent_loop(
             settings.fixed_delta_seconds = float(world_config.get("fixed_delta_seconds", 0.05))
             world.apply_settings(settings)
 
+        if runtime_options.get("snap_to_map"):
+            _snap_plan_to_map(carla_module, world, plan)
+
         ego_vehicle = _spawn_ego_vehicle(carla_module, world, ego_config)
         _spawn_interactive_actor_vehicles(
             carla_module,
             world,
             plan.get("actors") or [],
             actor_vehicles,
+        )
+        _configure_actor_autopilot(
+            client,
+            actor_vehicles,
+            plan.get("actors") or [],
+            enabled=bool(runtime_options.get("actor_autopilot", False)),
+            tm_port=int(runtime_options.get("traffic_manager_port", 8000)),
         )
         agent = basic_agent_cls(
             ego_vehicle,
@@ -395,6 +420,98 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
             return vehicle
 
     raise RuntimeError(f"failed to spawn interactive actor vehicle {actor_id}")
+
+
+def _snap_plan_to_map(carla_module: Any, world: Any, plan: dict[str, Any]) -> None:
+    if not hasattr(world, "get_map"):
+        return
+    world_map = world.get_map()
+    ego = plan.get("ego") or {}
+    if ego.get("spawn"):
+        ego["spawn"] = _snap_pose_to_waypoint(carla_module, world_map, ego["spawn"])
+    if ego.get("destination"):
+        ego["destination"] = _snap_pose_to_waypoint(carla_module, world_map, ego["destination"])
+    for actor in plan.get("actors") or []:
+        if _is_interactive_actor(actor) and actor.get("initial_state"):
+            actor["initial_state"] = _snap_pose_to_waypoint(carla_module, world_map, actor["initial_state"])
+
+
+def _snap_pose_to_waypoint(carla_module: Any, world_map: Any, pose: dict[str, Any]) -> dict[str, float]:
+    if not hasattr(world_map, "get_waypoint"):
+        return _pose(dict(pose))
+    location = _carla_location(carla_module, pose)
+    waypoint = _get_projected_waypoint(carla_module, world_map, location)
+    if waypoint is None or not hasattr(waypoint, "transform"):
+        return _pose(dict(pose))
+    transform = waypoint.transform
+    snapped = _pose(dict(pose))
+    snapped.update(_pose_from_transform(transform))
+    snapped["z"] = snapped.get("z", 0.0) + 0.3
+    return snapped
+
+
+def _get_projected_waypoint(carla_module: Any, world_map: Any, location: Any) -> Any | None:
+    lane_type = getattr(getattr(carla_module, "LaneType", None), "Driving", None)
+    try:
+        if lane_type is not None:
+            return world_map.get_waypoint(location, project_to_road=True, lane_type=lane_type)
+        return world_map.get_waypoint(location, project_to_road=True)
+    except TypeError:
+        try:
+            return world_map.get_waypoint(location, True)
+        except TypeError:
+            return world_map.get_waypoint(location)
+
+
+def _pose_from_transform(transform: Any) -> dict[str, float]:
+    location = getattr(transform, "location", None)
+    rotation = getattr(transform, "rotation", None)
+    return {
+        "x": float(getattr(location, "x", 0.0)),
+        "y": float(getattr(location, "y", 0.0)),
+        "z": float(getattr(location, "z", 0.0)),
+        "yaw": float(getattr(rotation, "yaw", 0.0)),
+    }
+
+
+def _configure_actor_autopilot(
+    client: Any,
+    actor_vehicles: dict[str, Any],
+    actors: list[dict[str, Any]],
+    *,
+    enabled: bool,
+    tm_port: int,
+) -> None:
+    if not enabled:
+        return
+    traffic_manager = client.get_trafficmanager(tm_port) if hasattr(client, "get_trafficmanager") else None
+    if traffic_manager is not None and hasattr(traffic_manager, "set_synchronous_mode"):
+        try:
+            traffic_manager.set_synchronous_mode(True)
+        except Exception:
+            pass
+
+    actor_by_id = {str(actor.get("actor_id", "actor")): actor for actor in actors}
+    for actor_id, vehicle in actor_vehicles.items():
+        if hasattr(vehicle, "set_autopilot"):
+            try:
+                vehicle.set_autopilot(True, tm_port)
+            except TypeError:
+                vehicle.set_autopilot(True)
+        _apply_actor_traffic_manager_settings(traffic_manager, vehicle, actor_by_id.get(actor_id, {}))
+
+
+def _apply_actor_traffic_manager_settings(traffic_manager: Any, vehicle: Any, actor: dict[str, Any]) -> None:
+    if traffic_manager is None:
+        return
+    style_profile = actor.get("style_profile") or {}
+    min_gap = style_profile.get("min_gap_m")
+    if min_gap is not None and hasattr(traffic_manager, "distance_to_leading_vehicle"):
+        traffic_manager.distance_to_leading_vehicle(vehicle, float(min_gap))
+    if hasattr(traffic_manager, "auto_lane_change"):
+        traffic_manager.auto_lane_change(vehicle, bool(actor.get("closed_loop_level") == "traffic_manager_reactive"))
+    if hasattr(traffic_manager, "vehicle_percentage_speed_difference"):
+        traffic_manager.vehicle_percentage_speed_difference(vehicle, 0.0)
 
 
 def _map_spawn_points(world: Any) -> list[Any]:
@@ -651,6 +768,9 @@ def main(argv=None) -> int:
     parser.add_argument("--execute", action="store_true", help="Attempt real CARLA execution instead of dry-run planning.")
     parser.add_argument("--follow-ego", action="store_true", help="Move CARLA spectator behind the ego vehicle each tick.")
     parser.add_argument("--debug-draw", action="store_true", help="Draw ego and actor debug markers in the CARLA world.")
+    parser.add_argument("--snap-to-map", action="store_true", help="Project ego and interactive actor spawns to CARLA map waypoints.")
+    parser.add_argument("--actor-autopilot", action="store_true", help="Enable CARLA TrafficManager autopilot for spawned interactive actors.")
+    parser.add_argument("--traffic-manager-port", default=8000, type=int)
     args = parser.parse_args(argv)
 
     run_config_path = Path(args.run_config)
@@ -664,6 +784,9 @@ def main(argv=None) -> int:
         synchronous=not args.async_world,
         follow_ego=args.follow_ego,
         debug_draw=args.debug_draw,
+        snap_to_map=args.snap_to_map,
+        actor_autopilot=args.actor_autopilot,
+        traffic_manager_port=args.traffic_manager_port,
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)

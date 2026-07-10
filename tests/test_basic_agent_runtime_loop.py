@@ -75,6 +75,9 @@ class FakeVehicle:
         self.events.append("{}.apply_control".format(self.label))
         self.controls.append(control)
 
+    def set_autopilot(self, enabled, tm_port=None):
+        self.events.append("{}.set_autopilot.{}.{}".format(self.label, enabled, tm_port))
+
     def destroy(self):
         self.events.append("{}.destroy".format(self.label))
 
@@ -97,6 +100,35 @@ class FakeMap:
 
     def get_spawn_points(self):
         return list(self._spawn_points)
+
+    def get_waypoint(self, location, project_to_road=True, lane_type=None):
+        return type(
+            "FakeWaypoint",
+            (),
+            {
+                "transform": FakeTransform(
+                    FakeLocation(location.x + 100.0, location.y + 100.0, 0.0),
+                    FakeRotation(yaw=45.0),
+                )
+            },
+        )()
+
+
+class FakeTrafficManager:
+    def __init__(self, events):
+        self.events = events
+
+    def set_synchronous_mode(self, enabled):
+        self.events.append("tm.set_synchronous_mode.{}".format(enabled))
+
+    def distance_to_leading_vehicle(self, vehicle, distance):
+        self.events.append("tm.distance_to_leading_vehicle.{}.{}".format(vehicle.label, distance))
+
+    def auto_lane_change(self, vehicle, enabled):
+        self.events.append("tm.auto_lane_change.{}.{}".format(vehicle.label, enabled))
+
+    def vehicle_percentage_speed_difference(self, vehicle, percentage):
+        self.events.append("tm.vehicle_percentage_speed_difference.{}.{}".format(vehicle.label, percentage))
 
 
 class FakeWorld:
@@ -197,6 +229,10 @@ class FakeClient:
         self.events.append("client.get_world")
         return self.world
 
+    def get_trafficmanager(self, port):
+        self.events.append("client.get_trafficmanager.{}".format(port))
+        return FakeTrafficManager(self.events)
+
 
 class FakeCarlaModule:
     def __init__(self, events):
@@ -204,6 +240,7 @@ class FakeCarlaModule:
         self.Location = FakeLocation
         self.Rotation = FakeRotation
         self.Transform = FakeTransform
+        self.LaneType = type("LaneType", (), {"Driving": "Driving"})
 
     def Client(self, host, port):
         return FakeClient(self.events, host, port)
@@ -269,6 +306,7 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
                     "policy": "scripted_trigger",
                     "closed_loop_level": "scripted",
                     "style": "defensive",
+                    "style_profile": {"min_gap_m": 5.0},
                     "initial_state": {"x": 3.0, "y": 2.0, "z": 0.0, "speed_mps": 1.0},
                 }
             ],
@@ -360,6 +398,45 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertIn("world.try_spawn_actor.role=trigger.x=3.0", events)
         self.assertEqual(result["report"]["metrics"][0]["actor_distances_m"]["trigger"], 5.0)
         self.assertIn("actor.trigger.destroy", events)
+
+    def test_snap_to_map_projects_ego_and_interactive_actor_spawns_before_runtime(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        plan = self._interactive_plan()
+        plan["runtime"]["snap_to_map"] = True
+        events = []
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "interactive_closed_loop")
+        self.assertIn("world.try_spawn_actor.role=ego_vehicle.x=101.0", events)
+        self.assertIn("world.try_spawn_actor.role=trigger.x=103.0", events)
+        self.assertEqual(plan["ego"]["spawn"]["yaw"], 45.0)
+        self.assertEqual(plan["actors"][0]["initial_state"]["yaw"], 45.0)
+
+    def test_actor_autopilot_binds_interactive_actor_to_traffic_manager(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        plan = self._interactive_plan()
+        plan["runtime"]["actor_autopilot"] = True
+        plan["runtime"]["traffic_manager_port"] = 8100
+        events = []
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "interactive_closed_loop")
+        self.assertIn("client.get_trafficmanager.8100", events)
+        self.assertIn("tm.set_synchronous_mode.True", events)
+        self.assertIn("actor.trigger.set_autopilot.True.8100", events)
+        self.assertIn("tm.distance_to_leading_vehicle.actor.trigger.5.0", events)
+        self.assertIn("tm.auto_lane_change.actor.trigger.False", events)
+        self.assertIn("tm.vehicle_percentage_speed_difference.actor.trigger.0.0", events)
 
     def test_interactive_actor_spawn_collision_falls_back_to_map_spawn_point(self):
         from runners.run_carla_basic_agent import run_basic_agent
