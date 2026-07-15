@@ -17,3 +17,5 @@ env/
 log.txt
 .DS_Store
 Thumbs.db
+outputs/
+.pet-runs/

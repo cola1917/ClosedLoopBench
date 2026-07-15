@@ -31,6 +31,9 @@ The first integration target is a normal CARLA map smoke run. A reconstructed or
 custom map should be introduced only after the basic probe and ScenarioRunner
 path are stable.
 
+For the complete BasicAgent, TrafficManager, scripted actor, and ROS2 control
+acceptance gate, see `docs/core_closed_loop_integration.md`.
+
 ## 2. Probe CARLA
 
 Run the probe before any scenario execution:

@@ -1,0 +1,69 @@
+{
+  "schema_version": "closed_loop_experiment_matrix.v0",
+  "matrix_id": "core-baselines-v1",
+  "producer": {
+    "project": "ClosedLoopBench",
+    "component": "matrix-planner",
+    "version": "1.0.0"
+  },
+  "scenes": [
+    {
+      "scene_id": "scene-0061",
+      "scene_version": "v001",
+      "correlation_id": "flow-scene-0061",
+      "root_message_id": "msg-selection-001",
+      "scene_result_message_id": "msg-reconstruction-result-001",
+      "scene_package": {
+        "schema_version": "shared_artifact_ref.v1",
+        "path": "scenes/scene-0061/v001/scene_package.json",
+        "role": "scene_package",
+        "media_type": "application/json",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size_bytes": 2048,
+        "content_schema": "closed_loop_scene_package.v1",
+        "immutable": true
+      }
+    }
+  ],
+  "algorithms": [
+    {
+      "algorithm_id": "basic_agent",
+      "algorithm_version": "carla-0.9.16",
+      "driver": "basic_agent"
+    },
+    {
+      "algorithm_id": "tcp",
+      "algorithm_version": "replace-with-commit",
+      "driver": "ros2"
+    }
+  ],
+  "odds": [
+    {
+      "odd_id": "clear",
+      "weather": "ClearNoon"
+    },
+    {
+      "odd_id": "rain",
+      "weather": "HardRainNoon"
+    }
+  ],
+  "seeds": [41, 42, 43],
+  "simulator": {
+    "name": "carla",
+    "version": "0.9.16",
+    "synchronous_mode": true,
+    "fixed_delta_seconds": 0.05
+  },
+  "actor_control": {
+    "mode": "traffic_manager",
+    "style": "normal"
+  },
+  "metrics": [
+    "collision_count",
+    "min_ttc",
+    "route_progress",
+    "hard_brake_count",
+    "max_jerk"
+  ],
+  "timeout_sec": 120
+}

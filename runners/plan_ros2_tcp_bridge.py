@@ -18,6 +18,7 @@ def main(argv=None) -> int:
     parser.add_argument("--role-name", default="ego_vehicle")
     parser.add_argument("--camera-profile", default="tcp_front", choices=("tcp_front", "multi_view"))
     parser.add_argument("--timeout-sec", type=float, default=0.5)
+    parser.add_argument("--max-skew-sec", type=float, default=0.001)
     parser.add_argument("--qos", type=int, default=10)
     parser.add_argument("--output", default=None)
     args = parser.parse_args(argv)
@@ -27,6 +28,7 @@ def main(argv=None) -> int:
         role_name=args.role_name,
         camera_profile=args.camera_profile,
         timeout_sec=args.timeout_sec,
+        max_skew_sec=args.max_skew_sec,
         qos=args.qos,
     )
 

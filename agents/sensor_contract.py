@@ -47,6 +47,8 @@ def build_camera_profile(name="tcp_front", role_name="ego_vehicle"):
 
     role = _normalize_role_name(role_name)
     required_cameras = list(_CAMERA_PROFILES[name])
+    from agents.ego_observation import build_camera_sensor_specs
+
     return {
         "name": name,
         "source": "carla_current_tick",
@@ -61,6 +63,7 @@ def build_camera_profile(name="tcp_front", role_name="ego_vehicle"):
             "intrinsics": "from_carla_sensor",
             "extrinsics": "from_carla_sensor_transform",
         },
+        "sensor_specs": build_camera_sensor_specs(required_cameras),
         "preprocessing": {
             "resize": None,
             "crop": None,

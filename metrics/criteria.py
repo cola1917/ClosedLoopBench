@@ -133,6 +133,12 @@ def _is_metric_known(
             isinstance(row.get("min_ttc"), (int, float)) or isinstance(row.get("ttc"), (int, float))
             for row in metric_rows
         )
+    if metric == "collision_count" and metric_rows:
+        return any(
+            isinstance(row.get("collision"), bool)
+            or isinstance(row.get("collision_count"), (int, float))
+            for row in metric_rows
+        )
     if status == "not_run" and metric not in {"collision_count"}:
         return False
     return True

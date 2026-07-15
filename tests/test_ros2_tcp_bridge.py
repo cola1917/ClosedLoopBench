@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.test_ego_observation import calibration, ego_state, route
+
 
 class FakePublisher:
     def __init__(self, topic):
@@ -100,13 +102,17 @@ class Ros2TcpBridgeTests(unittest.TestCase):
         plan = build_ros2_tcp_bridge_plan(scenario_id="scene-bridge-001")
         bridge = Ros2TcpBridge(node=node, plan=plan, backend=backend)
 
-        bridge.receive_sensor("rgb_front", {"frame": "image-001"}, t_sec=1.0)
-        bridge.receive_ego_state({"speed_mps": 5.0}, t_sec=1.0)
-        bridge.receive_route({"route_command": "LANE_FOLLOW"}, t_sec=1.0)
+        bridge.receive_sensor("rgb_front", {"frame": "image-001"}, t_sec=1.0, calibration=calibration())
+        bridge.receive_ego_state(ego_state(), t_sec=1.0)
+        bridge.receive_route(route(), t_sec=1.0)
         result = bridge.tick(now_sec=1.0)
 
         self.assertEqual(result["status"], "control")
         self.assertEqual(backend.observations[0]["sensors"]["rgb_front"], {"frame": "image-001"})
+        self.assertEqual(
+            backend.observations[0]["observation_metadata"]["frame_id"],
+            "timestamp:1.000000000",
+        )
         publisher = node.publishers["/carla/ego_vehicle/vehicle_control_cmd"]
         self.assertEqual(len(publisher.messages), 1)
         self.assertEqual(publisher.messages[0]["throttle"], 0.3)
@@ -120,9 +126,9 @@ class Ros2TcpBridgeTests(unittest.TestCase):
         plan = build_ros2_tcp_bridge_plan(scenario_id="scene-bridge-001", timeout_sec=0.2)
         bridge = Ros2TcpBridge(node=node, plan=plan, backend=backend)
 
-        bridge.receive_sensor("rgb_front", {"frame": "image-001"}, t_sec=1.0)
-        bridge.receive_ego_state({"speed_mps": 5.0}, t_sec=1.0)
-        bridge.receive_route({"route_command": "LANE_FOLLOW"}, t_sec=1.0)
+        bridge.receive_sensor("rgb_front", {"frame": "image-001"}, t_sec=1.0, calibration=calibration())
+        bridge.receive_ego_state(ego_state(), t_sec=1.0)
+        bridge.receive_route(route(), t_sec=1.0)
         result = bridge.tick(now_sec=1.31)
 
         self.assertEqual(result["status"], "fallback")
@@ -130,6 +136,33 @@ class Ros2TcpBridgeTests(unittest.TestCase):
         self.assertEqual(backend.observations, [])
         publisher = node.publishers["/carla/ego_vehicle/vehicle_control_cmd"]
         self.assertEqual(publisher.messages[0]["brake"], 1.0)
+
+    def test_mixed_ticks_publish_safe_stop_without_backend_call(self):
+        from agents.ros2_tcp_bridge import Ros2TcpBridge, build_ros2_tcp_bridge_plan
+
+        backend = FakeBackend()
+        node = FakeNode()
+        bridge = Ros2TcpBridge(
+            node=node,
+            plan=build_ros2_tcp_bridge_plan(scenario_id="scene-bridge-001"),
+            backend=backend,
+        )
+        bridge.receive_sensor(
+            "rgb_front",
+            {"frame": "image-001"},
+            t_sec=1.0,
+            frame_id=10,
+            calibration=calibration(),
+        )
+        bridge.receive_ego_state(ego_state(), t_sec=1.0, frame_id=10)
+        bridge.receive_route(route(), t_sec=1.0, frame_id=11)
+
+        result = bridge.tick(now_sec=1.0)
+
+        self.assertEqual(result["status"], "fallback")
+        self.assertEqual(result["reason"], "tick_mismatch")
+        self.assertEqual(result["control"]["brake"], 1.0)
+        self.assertEqual(backend.observations, [])
 
     def test_plan_ros2_tcp_bridge_cli_writes_plan(self):
         from runners.plan_ros2_tcp_bridge import main

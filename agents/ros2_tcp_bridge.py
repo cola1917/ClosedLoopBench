@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from agents.ego_observation import TickObservationAggregator
 from agents.tcp_runtime_adapter import TcpRuntimeAdapter
 
 _SAFE_STOP_CONTROL = {
@@ -20,6 +21,7 @@ def build_ros2_tcp_bridge_plan(
     role_name: str = "ego_vehicle",
     camera_profile: str = "tcp_front",
     timeout_sec: float = 0.5,
+    max_skew_sec: float = 0.001,
     qos: int = 10,
 ) -> dict[str, Any]:
     adapter = TcpRuntimeAdapter(camera_profile=camera_profile, role_name=role_name)
@@ -35,6 +37,7 @@ def build_ros2_tcp_bridge_plan(
         "role_name": str(role_name),
         "camera_profile": str(camera_profile),
         "timeout_sec": float(timeout_sec),
+        "max_skew_sec": float(max_skew_sec),
         "qos": int(qos),
         "topics": {
             "sensors": sensor_topics,
@@ -43,8 +46,10 @@ def build_ros2_tcp_bridge_plan(
             "control_cmd": "/carla/{}/vehicle_control_cmd".format(role_name),
         },
         "message_contract": {
-            "input_messages": "adapter_owned_dict_or_ros2_decoded_payload",
+            "input_messages": "decoded_payload_envelope_with_frame_id_timestamp_and_calibration",
             "output_message": "vehicle_control_dict_for_runtime_binding",
+            "same_tick_required": True,
+            "fail_closed": True,
         },
         "runtime_boundary": {
             "requires_rclpy_for_tests": False,
@@ -53,6 +58,7 @@ def build_ros2_tcp_bridge_plan(
             "owns_ros2_topic_wiring": True,
             "owns_model_inference": False,
             "uses_tcp_runtime_adapter_backend_interface": True,
+            "real_ros2_message_binding_implemented": False,
         },
     }
 
@@ -78,12 +84,12 @@ class Ros2TcpBridge:
             camera_profile=self.plan.get("camera_profile", "tcp_front"),
             role_name=self.plan.get("role_name", "ego_vehicle"),
         )
-        self._sensors: dict[str, Any] = {}
-        self._sensor_times: dict[str, float] = {}
-        self._ego_state: dict[str, Any] | None = None
-        self._ego_state_time: float | None = None
-        self._route: dict[str, Any] | None = None
-        self._route_time: float | None = None
+        self.aggregator = TickObservationAggregator(
+            required_cameras=self.adapter.required_cameras,
+            timeout_sec=self.timeout_sec,
+            max_skew_sec=float(self.plan.get("max_skew_sec", 0.001)),
+            require_calibration=True,
+        )
         self.publisher = self.node.create_publisher(
             dict,
             self.topics["control_cmd"],
@@ -119,60 +125,65 @@ class Ros2TcpBridge:
             )
         )
 
-    def receive_sensor(self, camera: str, message: Any, t_sec: float | None = None) -> None:
-        self._sensors[str(camera)] = _decode_message(message)
-        self._sensor_times[str(camera)] = _timestamp(message, t_sec)
+    def receive_sensor(
+        self,
+        camera: str,
+        message: Any,
+        t_sec: float | None = None,
+        frame_id: int | str | None = None,
+        calibration: dict[str, Any] | None = None,
+    ) -> None:
+        self.aggregator.receive_camera(
+            camera,
+            _decode_message(message),
+            frame_id=_frame_id(message, frame_id, t_sec),
+            t_sec=_timestamp(message, t_sec),
+            calibration=calibration or _metadata(message, "calibration"),
+        )
 
-    def receive_ego_state(self, message: Any, t_sec: float | None = None) -> None:
-        self._ego_state = _decode_message(message)
-        self._ego_state_time = _timestamp(message, t_sec)
+    def receive_ego_state(
+        self, message: Any, t_sec: float | None = None, frame_id: int | str | None = None
+    ) -> None:
+        self.aggregator.receive_ego_state(
+            _decode_message(message),
+            frame_id=_frame_id(message, frame_id, t_sec),
+            t_sec=_timestamp(message, t_sec),
+        )
 
-    def receive_route(self, message: Any, t_sec: float | None = None) -> None:
-        self._route = _decode_message(message)
-        self._route_time = _timestamp(message, t_sec)
+    def receive_route(
+        self, message: Any, t_sec: float | None = None, frame_id: int | str | None = None
+    ) -> None:
+        self.aggregator.receive_route(
+            _decode_message(message),
+            frame_id=_frame_id(message, frame_id, t_sec),
+            t_sec=_timestamp(message, t_sec),
+        )
 
     def tick(self, now_sec: float) -> dict[str, Any]:
-        readiness = self._readiness(now_sec)
+        readiness = self.aggregator.build(now_sec=now_sec)
         if readiness["status"] != "ready":
-            result = _fallback(readiness["reason"], **readiness.get("detail", {}))
+            result = _fallback(readiness["reason"], detail=readiness.get("detail", {}))
             self.publisher.publish(result["control"])
             return result
 
+        observation = readiness["observation"]
         result = self.adapter.tick(
-            sensors=deepcopy(self._sensors),
-            ego_state=deepcopy(self._ego_state or {}),
-            route=deepcopy(self._route or {}),
+            sensors=observation["sensors"],
+            ego_state=observation["ego_state"],
+            route=observation["route"],
+            calibration=observation["calibration"],
+            observation_metadata={
+                "frame_id": observation["frame_id"],
+                "t_sec": observation["t_sec"],
+                "source": observation["source"],
+            },
         )
         self.publisher.publish(result["control"])
         return result
 
-    def _readiness(self, now_sec: float) -> dict[str, Any]:
-        missing = [camera for camera in self.adapter.required_cameras if camera not in self._sensors]
-        if missing:
-            return {"status": "blocked", "reason": "missing_sensor", "detail": {"missing": missing}}
-        if self._ego_state is None:
-            return {"status": "blocked", "reason": "missing_ego_state"}
-        if self._route is None:
-            return {"status": "blocked", "reason": "missing_route"}
-
-        observed_times = [
-            self._sensor_times[camera]
-            for camera in self.adapter.required_cameras
-        ]
-        observed_times.extend([self._ego_state_time or 0.0, self._route_time or 0.0])
-        oldest = min(observed_times)
-        age = float(now_sec) - float(oldest)
-        if age > self.timeout_sec:
-            return {
-                "status": "blocked",
-                "reason": "stale_observation",
-                "detail": {"age_sec": age, "timeout_sec": self.timeout_sec},
-            }
-        return {"status": "ready"}
-
 
 def _decode_message(message: Any) -> Any:
-    if isinstance(message, dict) and "data" in message and set(message.keys()).issubset({"data", "stamp", "t_sec"}):
+    if isinstance(message, dict) and "data" in message:
         return message["data"]
     return message
 
@@ -186,6 +197,20 @@ def _timestamp(message: Any, t_sec: float | None) -> float:
         if "stamp" in message:
             return float(message["stamp"])
     return 0.0
+
+
+def _frame_id(message: Any, frame_id: int | str | None, t_sec: float | None) -> int | str:
+    if frame_id is not None:
+        return frame_id
+    if isinstance(message, dict) and message.get("frame_id") is not None:
+        return message["frame_id"]
+    if t_sec is not None:
+        return f"timestamp:{float(t_sec):.9f}"
+    raise ValueError("message requires frame_id for same-tick aggregation")
+
+
+def _metadata(message: Any, key: str) -> Any:
+    return message.get(key) if isinstance(message, dict) else None
 
 
 def _fallback(reason: str, **extra: Any) -> dict[str, Any]:

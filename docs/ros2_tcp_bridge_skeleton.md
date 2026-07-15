@@ -9,6 +9,7 @@ Implemented locally:
 - ROS2 topic wiring as a plan artifact.
 - Injectable node/publisher/subscriber shell for fake tests.
 - Sensor, ego-state, and route message cache.
+- Strict same-CARLA-tick aggregation, calibration validation, and timestamp skew checks.
 - `TcpRuntimeAdapter.tick(...)` handoff.
 - Safe-stop publish on missing or stale observations.
 
@@ -16,6 +17,7 @@ Not implemented locally:
 
 - Real `rclpy` node lifecycle.
 - Real ROS2 message classes.
+- CARLA sensor spawning, image decoding, actual calibration capture, and state/route publishers.
 - TCP repo import, torch import, checkpoint loading, or image preprocessing.
 - CARLA ROS bridge process management.
 
@@ -30,7 +32,9 @@ Not implemented locally:
   -> /carla/ego_vehicle/vehicle_control_cmd
 ```
 
-The bridge only owns topic wiring and message handoff. TCP inference belongs to the injected backend behind `TcpRuntimeAdapter`.
+The bridge only owns model-free topic planning and message handoff. Its injectable
+node uses `dict` in tests and is not a real `rclpy` binding. TCP inference belongs
+to the injected backend behind `TcpRuntimeAdapter`.
 
 ## Planning Command
 

@@ -66,6 +66,8 @@ class TcpRuntimeAdapter:
         sensors: dict[str, Any],
         ego_state: dict[str, Any],
         route: dict[str, Any],
+        calibration: dict[str, Any] | None = None,
+        observation_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         missing = [camera for camera in self.required_cameras if camera not in sensors]
         if missing:
@@ -74,7 +76,13 @@ class TcpRuntimeAdapter:
         if self.backend is None or not hasattr(self.backend, "predict_control"):
             return _fallback("backend_unavailable")
 
-        observation = self.build_observation(sensors=sensors, ego_state=ego_state, route=route)
+        observation = self.build_observation(
+            sensors=sensors,
+            ego_state=ego_state,
+            route=route,
+            calibration=calibration,
+            observation_metadata=observation_metadata,
+        )
         try:
             control = self.backend.predict_control(observation)
         except Exception as exc:
@@ -98,13 +106,20 @@ class TcpRuntimeAdapter:
         sensors: dict[str, Any],
         ego_state: dict[str, Any],
         route: dict[str, Any],
+        calibration: dict[str, Any] | None = None,
+        observation_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        result = {
             "sensors": {camera: sensors[camera] for camera in self.required_cameras},
             "ego_state": deepcopy(ego_state),
             "route": deepcopy(route),
             "io_contract": deepcopy(self.io_contract),
         }
+        if calibration is not None:
+            result["calibration"] = deepcopy(calibration)
+        if observation_metadata is not None:
+            result["observation_metadata"] = deepcopy(observation_metadata)
+        return result
 
 
 def is_valid_vehicle_control(control: Any) -> bool:

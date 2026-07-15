@@ -40,8 +40,10 @@ def build_closed_loop_report(
     }
     return {
         "schema_version": SCHEMA_VERSION,
+        "run_id": run_config.get("run_id") or (run_config.get("experiment") or {}).get("run_id"),
         "scenario_id": run_config["scenario_id"],
         "status": status,
+        "experiment": deepcopy(run_config.get("experiment") or {}),
         "summary": summary,
         "evaluation": evaluate_report(run_config, summary, metric_rows, status),
         "metrics": deepcopy(metric_rows),
@@ -49,7 +51,13 @@ def build_closed_loop_report(
     }
 
 
-def _collision_count(metric_rows: list[dict[str, Any]]) -> int:
+def _collision_count(metric_rows: list[dict[str, Any]]) -> int | None:
+    if metric_rows and not any(
+        isinstance(row.get("collision"), bool)
+        or isinstance(row.get("collision_count"), (int, float))
+        for row in metric_rows
+    ):
+        return None
     count = 0
     for row in metric_rows:
         if isinstance(row.get("collision_count"), (int, float)):

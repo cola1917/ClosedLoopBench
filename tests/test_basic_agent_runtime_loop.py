@@ -1,4 +1,7 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
 
 
 class FakeSettings:
@@ -340,6 +343,46 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertTrue(events[-2].startswith("world.apply_settings.sync=False"))
         self.assertEqual(events[-1], "vehicle.destroy")
 
+    def test_acceptance_mode_fails_closed_without_real_collision_sensor(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        plan = self._plan()
+        plan["runtime"]["acceptance_evidence"] = True
+        plan["limits"]["max_ticks"] = 1
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule([]),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("collision sensor", result["detail"])
+        self.assertTrue(result["cleanup_succeeded"])
+
+    def test_runtime_writes_frame_metrics_and_cleanup_evidence(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self._plan()
+            plan["artifacts"] = {
+                "closed_loop_report": str(root / "closed_loop_report.json"),
+                "frame_trace": str(root / "frame_trace.jsonl"),
+                "metrics_trace": str(root / "metrics_trace.jsonl"),
+                "cleanup_audit": str(root / "cleanup_audit.json"),
+            }
+            result = run_basic_agent(
+                plan,
+                carla_module=FakeCarlaModule([]),
+                agent_module=FakeBasicAgent,
+            )
+
+            self.assertEqual(len((root / "frame_trace.jsonl").read_text().splitlines()), 2)
+            self.assertEqual(len((root / "metrics_trace.jsonl").read_text().splitlines()), 2)
+            audit = json.loads((root / "cleanup_audit.json").read_text())
+            self.assertTrue(audit["succeeded"])
+            self.assertTrue(result["cleanup_succeeded"])
+
     def test_real_loop_records_reactive_actor_decisions_for_interactive_actors(self):
         from runners.run_carla_basic_agent import run_basic_agent
 
@@ -360,6 +403,11 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(second_tick["actor_distances_m"]["trigger"], 7.0)
         self.assertAlmostEqual(first_tick["min_ttc"], 1.25)
         self.assertTrue(first_tick["actor_decisions"]["trigger"]["should_yield"])
+        self.assertEqual(
+            first_tick["actor_control_evidence"]["trigger"],
+            "scripted_vehicle_control",
+        )
+        self.assertEqual(events.count("actor.trigger.apply_control"), 2)
         self.assertTrue(events[-2].startswith("actor.trigger.destroy"))
         self.assertEqual(events[-1], "vehicle.destroy")
 
@@ -415,12 +463,15 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertIn("world.try_spawn_actor.role=ego_vehicle.x=101.0", events)
         self.assertIn("world.try_spawn_actor.role=trigger.x=103.0", events)
         self.assertEqual(plan["ego"]["spawn"]["yaw"], 45.0)
+        self.assertEqual(plan["ego"]["route"][0]["x"], 101.0)
+        self.assertEqual(plan["ego"]["route"][-1]["x"], 110.0)
         self.assertEqual(plan["actors"][0]["initial_state"]["yaw"], 45.0)
 
     def test_actor_autopilot_binds_interactive_actor_to_traffic_manager(self):
         from runners.run_carla_basic_agent import run_basic_agent
 
         plan = self._interactive_plan()
+        plan["actors"][0]["closed_loop_level"] = "traffic_manager_reactive"
         plan["runtime"]["actor_autopilot"] = True
         plan["runtime"]["traffic_manager_port"] = 8100
         events = []
@@ -435,8 +486,27 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertIn("tm.set_synchronous_mode.True", events)
         self.assertIn("actor.trigger.set_autopilot.True.8100", events)
         self.assertIn("tm.distance_to_leading_vehicle.actor.trigger.5.0", events)
-        self.assertIn("tm.auto_lane_change.actor.trigger.False", events)
+        self.assertIn("tm.auto_lane_change.actor.trigger.True", events)
         self.assertIn("tm.vehicle_percentage_speed_difference.actor.trigger.0.0", events)
+        self.assertEqual(
+            result["report"]["runtime"]["actor_control_evidence"],
+            {"trigger": "traffic_manager"},
+        )
+
+    def test_declared_tm_actor_without_autopilot_is_not_reported_as_interactive(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        plan = self._interactive_plan()
+        plan["actors"][0]["closed_loop_level"] = "traffic_manager_reactive"
+        plan["runtime"]["actor_autopilot"] = False
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule([]),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "ego_closed_loop")
+        self.assertEqual(result["report"]["runtime"]["actor_control_evidence"], {})
 
     def test_interactive_actor_spawn_collision_falls_back_to_map_spawn_point(self):
         from runners.run_carla_basic_agent import run_basic_agent
@@ -520,6 +590,40 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertIn("planner failed", result["detail"])
         self.assertTrue(events[-2].startswith("world.apply_settings.sync=False"))
         self.assertEqual(events[-1], "vehicle.destroy")
+
+    def test_ros2_driver_factory_controls_ego_without_basic_agent_import(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class FakeRosDriver:
+            def __init__(self):
+                self.calls = 0
+
+            def done(self):
+                return False
+
+            def run_step(self):
+                self.calls += 1
+                return FakeControl()
+
+            def diagnostics(self):
+                return {"driver": "ros2_control", "control_count": self.calls, "fallback_count": 0}
+
+            def close(self):
+                pass
+
+        plan = self._plan()
+        plan["ego"]["driver"] = "ros2_control"
+        result = run_basic_agent(
+            plan,
+            carla_module=FakeCarlaModule([]),
+            driver_factory=lambda *_args: FakeRosDriver(),
+        )
+
+        self.assertEqual(result["status"], "ego_closed_loop")
+        self.assertEqual(
+            result["report"]["runtime"]["ego_driver_diagnostics"]["control_count"],
+            2,
+        )
 
     def test_spawn_collision_falls_back_to_map_spawn_point(self):
         from runners.run_carla_basic_agent import run_basic_agent

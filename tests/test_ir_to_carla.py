@@ -3,7 +3,7 @@ import unittest
 
 def minimal_scenario_ir():
     return {
-        "schema_version": "scenario_ir.mvp.v0",
+        "schema_version": "scenario_ir.v1",
         "scenario_id": "scene-test-1077",
         "windows": {
             "event": {"start_sec": 0.0, "end_sec": 5.0},
@@ -50,6 +50,43 @@ class CarlaAdapterContractTests(unittest.TestCase):
         self.assertEqual(config["actors"][0]["style_profile"]["name"], "normal")
         self.assertIn("collision", config["metrics"])
         self.assertEqual(config["reconstruction_package"]["enabled"], False)
+
+    def test_records_algorithm_odd_and_seed_for_comparable_runs(self):
+        from adapters.ir_to_carla import build_carla_run_config
+
+        config = build_carla_run_config(
+            minimal_scenario_ir(),
+            weather="HardRainNoon",
+            odd_id="rain",
+            seed=42,
+            algorithm_id="tcp",
+            algorithm_version="checkpoint-7",
+            run_id="run-scene-test-tcp-rain-42",
+            scene_version="v001",
+            actor_control_mode="traffic_manager",
+            actor_style="aggressive",
+        )
+
+        self.assertEqual(config["carla"]["weather"], "HardRainNoon")
+        self.assertEqual(config["carla"]["odd_id"], "rain")
+        self.assertEqual(config["carla"]["seed"], 42)
+        self.assertEqual(config["ego"]["algorithm_id"], "tcp")
+        self.assertEqual(config["ego"]["algorithm_version"], "checkpoint-7")
+        self.assertEqual(config["experiment"]["run_id"], "run-scene-test-tcp-rain-42")
+        self.assertEqual(config["experiment"]["scene_version"], "v001")
+        self.assertEqual(config["experiment"]["algorithm_id"], "tcp")
+        self.assertEqual(config["actor_control"], {"mode": "traffic_manager", "style": "aggressive"})
+        self.assertTrue(
+            all(actor["closed_loop_level"] == "traffic_manager_reactive" for actor in config["actors"])
+        )
+
+    def test_actor_control_modes_are_explicit_not_inferred_from_role(self):
+        from adapters.ir_to_carla import build_carla_run_config
+
+        replay = build_carla_run_config(minimal_scenario_ir(), actor_control_mode="replay")
+        scripted = build_carla_run_config(minimal_scenario_ir(), actor_control_mode="scripted")
+        self.assertTrue(all(actor["closed_loop_level"] == "replay" for actor in replay["actors"]))
+        self.assertTrue(all(actor["closed_loop_level"] == "scripted" for actor in scripted["actors"]))
 
 
 if __name__ == "__main__":

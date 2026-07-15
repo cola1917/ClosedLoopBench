@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import math
 import xml.etree.ElementTree as ET
 from typing import Any
 
@@ -8,6 +9,7 @@ DEFAULT_CARLA_VEHICLE_MODEL = "vehicle.tesla.model3"
 
 
 def build_openscenario_xml(scenario_ir: dict[str, Any], *, road_file: str = "road.xodr") -> str:
+    yaw_is_degrees = _yaw_is_degrees(scenario_ir)
     root = ET.Element("OpenSCENARIO")
     ET.SubElement(
         root,
@@ -37,16 +39,38 @@ def build_openscenario_xml(scenario_ir: dict[str, Any], *, road_file: str = "roa
     storyboard = ET.SubElement(root, "Storyboard")
     init = ET.SubElement(storyboard, "Init")
     actions = ET.SubElement(init, "Actions")
-    _add_init_action(actions, "ego", scenario_ir.get("ego", {}).get("initial_state"))
+    _add_init_action(
+        actions,
+        "ego",
+        scenario_ir.get("ego", {}).get("initial_state"),
+        yaw_is_degrees=yaw_is_degrees,
+    )
     for actor in scenario_ir.get("actors", []):
-        _add_init_action(actions, _safe_name(str(actor.get("actor_id"))), actor.get("initial_state"))
+        _add_init_action(
+            actions,
+            _safe_name(str(actor.get("actor_id"))),
+            actor.get("initial_state"),
+            yaw_is_degrees=yaw_is_degrees,
+        )
 
-    story = ET.SubElement(storyboard, "Story", {"name": "story"})
-    act = ET.SubElement(story, "Act", {"name": "act"})
-    maneuver_group = ET.SubElement(act, "ManeuverGroup", {"maximumExecutionCount": "1", "name": "placeholder_maneuvers"})
-    actors = ET.SubElement(maneuver_group, "Actors", {"selectTriggeringEntities": "false"})
-    ET.SubElement(actors, "EntityRef", {"entityRef": "ego"})
-    ET.SubElement(act, "StartTrigger")
+    event_end = float(scenario_ir.get("windows", {}).get("event", {}).get("end_sec", 10.0))
+    replay_actors = [
+        (actor, actor.get("reference_trajectory") or [])
+        for actor in scenario_ir.get("actors", [])
+        if _is_replay_actor(actor) and len(actor.get("reference_trajectory") or []) >= 2
+    ]
+    if replay_actors:
+        story = ET.SubElement(storyboard, "Story", {"name": "story"})
+        act = ET.SubElement(story, "Act", {"name": "act"})
+        for actor, trajectory in replay_actors:
+            _add_replay_maneuver_group(
+                act,
+                actor,
+                trajectory,
+                yaw_is_degrees=yaw_is_degrees,
+            )
+        _add_simulation_time_trigger(act, "StartTrigger", "act_start", 0.0, rule="greaterThan")
+        _add_simulation_time_trigger(act, "StopTrigger", "act_end", event_end, rule="greaterThan")
     stop = ET.SubElement(storyboard, "StopTrigger")
     condition_group = ET.SubElement(stop, "ConditionGroup")
     condition = ET.SubElement(
@@ -60,6 +84,117 @@ def build_openscenario_xml(scenario_ir: dict[str, Any], *, road_file: str = "roa
 
     _indent(root)
     return ET.tostring(root, encoding="unicode")
+
+
+def _add_replay_maneuver_group(
+    act: ET.Element,
+    actor: dict[str, Any],
+    trajectory: list[dict[str, Any]],
+    *,
+    yaw_is_degrees: bool,
+) -> None:
+    actor_name = _safe_name(str(actor.get("actor_id")))
+    maneuver_group = ET.SubElement(
+        act,
+        "ManeuverGroup",
+        {"maximumExecutionCount": "1", "name": f"{actor_name}_replay_group"},
+    )
+    actors = ET.SubElement(maneuver_group, "Actors", {"selectTriggeringEntities": "false"})
+    ET.SubElement(actors, "EntityRef", {"entityRef": actor_name})
+    maneuver = ET.SubElement(maneuver_group, "Maneuver", {"name": f"{actor_name}_replay_maneuver"})
+    event = ET.SubElement(
+        maneuver,
+        "Event",
+        {"maximumExecutionCount": "1", "name": f"{actor_name}_replay_event", "priority": "overwrite"},
+    )
+    action = ET.SubElement(event, "Action", {"name": f"{actor_name}_follow_trajectory"})
+    private_action = ET.SubElement(action, "PrivateAction")
+    routing_action = ET.SubElement(private_action, "RoutingAction")
+    follow = ET.SubElement(routing_action, "FollowTrajectoryAction")
+    trajectory_node = ET.SubElement(
+        follow,
+        "Trajectory",
+        {"name": f"{actor_name}_reference_trajectory", "closed": "false"},
+    )
+    ET.SubElement(trajectory_node, "ParameterDeclarations")
+    polyline = ET.SubElement(ET.SubElement(trajectory_node, "Shape"), "Polyline")
+    for point in trajectory:
+        vertex = ET.SubElement(polyline, "Vertex", {"time": _format_number(_trajectory_time(point))})
+        position = ET.SubElement(vertex, "Position")
+        ET.SubElement(
+            position,
+            "WorldPosition",
+            {
+                "x": _format_number(float(point.get("x", 0.0))),
+                "y": _format_number(float(point.get("y", 0.0))),
+                "z": _format_number(float(point.get("z", 0.0))),
+                "h": _format_number(
+                    _heading_radians(point.get("yaw", point.get("h", 0.0)), yaw_is_degrees)
+                ),
+            },
+        )
+    time_reference = ET.SubElement(follow, "TimeReference")
+    ET.SubElement(
+        time_reference,
+        "Timing",
+        {"domainAbsoluteRelative": "absolute", "scale": "1", "offset": "0"},
+    )
+    ET.SubElement(follow, "TrajectoryFollowingMode", {"followingMode": "position"})
+    _add_simulation_time_trigger(
+        event,
+        "StartTrigger",
+        f"{actor_name}_trajectory_start",
+        _trajectory_time(trajectory[0]),
+        rule="greaterThan",
+    )
+
+
+def _add_simulation_time_trigger(
+    parent: ET.Element,
+    tag: str,
+    name: str,
+    value: float,
+    *,
+    rule: str,
+) -> ET.Element:
+    trigger = ET.SubElement(parent, tag)
+    condition_group = ET.SubElement(trigger, "ConditionGroup")
+    condition = ET.SubElement(
+        condition_group,
+        "Condition",
+        {"name": name, "delay": "0", "conditionEdge": "none"},
+    )
+    by_value = ET.SubElement(condition, "ByValueCondition")
+    ET.SubElement(
+        by_value,
+        "SimulationTimeCondition",
+        {"value": _format_number(value), "rule": rule},
+    )
+    return trigger
+
+
+def _is_replay_actor(actor: dict[str, Any]) -> bool:
+    closed_loop_level = actor.get("closed_loop_level")
+    if closed_loop_level is not None:
+        return str(closed_loop_level).lower() == "replay"
+    policy = actor.get("policy", actor.get("policy_mode"))
+    if policy is not None:
+        return str(policy).lower() == "replay"
+    return True
+
+
+def _trajectory_time(point: dict[str, Any]) -> float:
+    return float(point.get("t_sec", point.get("t", 0.0)))
+
+
+def _yaw_is_degrees(scenario_ir: dict[str, Any]) -> bool:
+    yaw_unit = scenario_ir.get("coordinate_frame", {}).get("units", {}).get("yaw", "radian")
+    return str(yaw_unit).lower() in {"degree", "degrees", "deg"}
+
+
+def _heading_radians(value: Any, yaw_is_degrees: bool) -> float:
+    heading = float(value or 0.0)
+    return math.radians(heading) if yaw_is_degrees else heading
 
 
 def _add_vehicle_entity(parent, name: str, dimensions: dict[str, Any] | None = None) -> None:
@@ -97,7 +232,13 @@ def _add_vehicle_entity(parent, name: str, dimensions: dict[str, Any] | None = N
     ET.SubElement(vehicle, "Properties")
 
 
-def _add_init_action(actions, entity_name: str, state: dict[str, Any] | None) -> None:
+def _add_init_action(
+    actions,
+    entity_name: str,
+    state: dict[str, Any] | None,
+    *,
+    yaw_is_degrees: bool,
+) -> None:
     state = state or {}
     private = ET.SubElement(actions, "Private", {"entityRef": entity_name})
     private_action = ET.SubElement(private, "PrivateAction")
@@ -110,7 +251,7 @@ def _add_init_action(actions, entity_name: str, state: dict[str, Any] | None) ->
             "x": str(state.get("x", 0.0)),
             "y": str(state.get("y", 0.0)),
             "z": str(state.get("z", 0.0)),
-            "h": str(state.get("yaw", 0.0)),
+            "h": _format_number(_heading_radians(state.get("yaw", 0.0), yaw_is_degrees)),
         },
     )
     speed_action = ET.SubElement(ET.SubElement(private, "PrivateAction"), "LongitudinalAction")

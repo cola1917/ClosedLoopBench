@@ -1,0 +1,29 @@
+services:
+  ego-algorithm:
+    build:
+      context: ..
+      dockerfile: docker/algorithm/Dockerfile
+    image: closed-loop-bench/ego-algorithm:humble
+    network_mode: "${ALGORITHM_NETWORK_MODE:-host}"
+    environment:
+      ALGORITHM_ID: "${ALGORITHM_ID:-tcp}"
+      ALGORITHM_PLUGIN: "${ALGORITHM_PLUGIN:?Set ALGORITHM_PLUGIN to module:factory}"
+      ALGORITHM_REPO_PATH: /opt/algorithm/repo
+      ALGORITHM_CHECKPOINT_PATH: "/opt/algorithm/checkpoints/${ALGORITHM_CHECKPOINT_FILE:?Set ALGORITHM_CHECKPOINT_FILE}"
+      ALGORITHM_READY_FILE: /sim-data/runtime/ego-algorithm.ready.json
+      SIM_DATA_PATH: /sim-data
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      CONTROL_TOPIC: "${CONTROL_TOPIC:-/carla/ego_vehicle/vehicle_control_cmd}"
+      CARLA_HOST: "${CARLA_HOST:-127.0.0.1}"
+      CARLA_PORT: "${CARLA_PORT:-2000}"
+    volumes:
+      - "${SIM_DATA_HOST_PATH:-E:/sim-data}:/sim-data"
+      - "${ALGORITHM_REPO_HOST_PATH:?Set ALGORITHM_REPO_HOST_PATH}:/opt/algorithm/repo:ro"
+      - "${ALGORITHM_CHECKPOINT_HOST_DIR:?Set ALGORITHM_CHECKPOINT_HOST_DIR}:/opt/algorithm/checkpoints:ro"
+    healthcheck:
+      test: ["CMD", "python3", "-m", "runners.run_algorithm_container", "health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    restart: "no"

@@ -4,6 +4,25 @@ ClosedLoopBench consumes Scenario IR from TriggerEngine and compiles it into exe
 
 Architecture and contract boundary: [`docs/architecture.md`](docs/architecture.md).
 
+Core CARLA/ROS2 environment handoff: [`docs/core_closed_loop_integration.md`](docs/core_closed_loop_integration.md).
+
+Shared-disk publication: [`docs/shared_scene_exchange.md`](docs/shared_scene_exchange.md).
+
+Three-project message and job protocol:
+[`docs/shared_exchange_protocol_v1.md`](docs/shared_exchange_protocol_v1.md).
+
+Native CARLA and algorithm-container orchestration:
+[`docs/native_host_orchestration.md`](docs/native_host_orchestration.md).
+
+Environment-only remaining work:
+[`docs/environment_dependency_backlog.md`](docs/environment_dependency_backlog.md).
+
+Step-by-step environment coding and acceptance plan:
+[`docs/environment_integration_verification_plan.md`](docs/environment_integration_verification_plan.md).
+
+Algorithm/ODD/seed matrix planning:
+[`docs/offline_experiment_planning.md`](docs/offline_experiment_planning.md).
+
 ## Role
 
 ClosedLoopBench is the interactive evaluation layer: it turns Scenario IR into CARLA run config, ScenarioRunner/OpenSCENARIO/OpenDRIVE exchange artifacts, and comparable closed-loop reports.
@@ -36,6 +55,39 @@ See `docs/data_contract.md` and `schemas/closed_loop_run.mvp.schema.json`.
 
 
 ## Exchange validation
+
+Build the complete portable exchange package directly from one nuScenes scene:
+
+```bash
+python runners/build_nuscenes_exchange.py --dataroot E:/code/nuscenes-mini --version v1.0-mini --scene scene-0061 --output-dir outputs/p1_scene_0061
+```
+
+This produces `scene_ir.json`, `road.xodr`, `scenario.xosc`, and
+`scene_package.json`. The local nuScenes-to-OpenDRIVE converter intentionally
+has a limited topology scope; see
+[`docs/nuscenes_opendrive_boundary.md`](docs/nuscenes_opendrive_boundary.md).
+
+Publish the completed bundle as an immutable shared-disk version:
+
+```bash
+python runners/publish_scene_exchange.py --bundle-dir outputs/p1_scene_0061 --exchange-root E:/sim-data --version v001
+```
+
+Prepare the native-host CARLA BasicAgent run without executing it:
+
+```bash
+python runners/run_host_closed_loop.py --exchange-root E:/sim-data --scene-id cc8c0bf57f984915a77078b10eb33198 --version v001 --run-dir E:/sim-data/runs/basic-agent-001
+```
+
+The external algorithm Compose file contains only the algorithm service; CARLA
+0.9.16 remains on the host. See
+[`docs/algorithm_container.md`](docs/algorithm_container.md).
+
+Run every acceptance gate that requires no CARLA, ROS 2, GPU, network, or model:
+
+```bash
+python runners/run_offline_acceptance.py --output outputs/offline_acceptance.json
+```
 
 Build ScenarioRunner-oriented config:
 
