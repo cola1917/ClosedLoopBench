@@ -822,6 +822,16 @@ def _run_basic_agent_loop(
         result["report"] = report
         return result
     finally:
+        if sensor_frame_handler is not None and hasattr(sensor_frame_handler, "close"):
+            try:
+                sensor_frame_handler.close()
+                cleanup_audit.append(
+                    {"action": "sensor_frame_handler.close", "status": "succeeded"}
+                )
+            except Exception:
+                cleanup_audit.append(
+                    {"action": "sensor_frame_handler.close", "status": "failed"}
+                )
         if ego_driver is not None and hasattr(ego_driver, "close"):
             try:
                 ego_driver.close()

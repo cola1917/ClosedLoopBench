@@ -46,6 +46,10 @@ Relevant code:
 - `adapters/nurec_multimodal.py`: builds the common frame/dynamic-object payload.
 - `adapters/nurec_grpc_dispatch.py`: enforces the version-specific protobuf
   encoder boundary and records response hashes/latency.
+- `adapters/nurec_260_client.py`: maps the SDK-neutral transaction to the
+  installed NRE 26.04 `SensorsimService` RGB/LiDAR protobufs, verifies JPEG
+  dimensions and LiDAR XYZ/intensity counts, and keeps the runtime sequence ID
+  separate from the canonical nuScenes scene token.
 - `adapters/nurec_runtime_handler.py`: connects CARLA frame contexts to NuRec.
 - `runners/validate_multimodal_closed_loop.py`: final fail-closed evidence gate.
 
@@ -69,7 +73,9 @@ For every synchronous CARLA snapshot:
 5. Canonicalize and hash one shared dynamic-object list.
 6. Send every RGB and LiDAR RPC through an encoder that must echo the same frame
    id, modality, and dynamic-object hash before dispatch.
-7. Hash each serialized RPC response and record latency.
+7. Validate the returned JPEG dimensions or LiDAR XYZ/intensity cardinality,
+   then hash each serialized RPC response and record latency and typed response
+   metadata.
 8. Fail the run if a required response is missing, cross-frame, over the latency
    threshold, or references a different actor hash.
 
@@ -138,20 +144,57 @@ tracks must still pass the runtime pose probe.
 
 ## Remaining Environment Work
 
-Local code and mock evidence gates are implemented. The following items require
-the NVIDIA/CARLA server and cannot be claimed locally:
+The concrete NRE 26.04 encoder/client and local evidence gates are implemented.
+The installed protobuf exposes `render_rgb` and `render_lidar`; its LiDAR model
+is limited to `PANDAR128` or `AT128`. Therefore the acceptance claim is a
+verified NuRec LiDAR sensor loop, not exact nuScenes HDL-32E emulation.
+
+The handler factory reads these fields from the normal run configuration:
+
+```json
+{
+  "nurec_runtime": {
+    "python_api_path": "/path/to/CARLA/PythonAPI/examples/nvidia/nurec",
+    "target": "127.0.0.1:46435",
+    "runtime_scene_id": "scene-0061",
+    "scene_start_us": 0,
+    "scene_package": "/path/to/scene_package.runtime-validated.json",
+    "actor_bindings": "/path/to/actor_bindings.json",
+    "camera_specs": [],
+    "lidar_specs": []
+  }
+}
+```
+
+`scene_start_us` is required even when its measured value is zero. Each camera
+ID must be returned by `get_available_cameras`; for scene-0061 the observed
+logical IDs include `camera_front`, `camera_front_left`, and
+`camera_front_right`. Every camera and LiDAR spec must contain a measured
+`sensor_to_ego` 4x4 transform. Do not use an identity placeholder in formal
+acceptance.
+
+The three-run command binds the concrete implementation explicitly:
+
+```bash
+python -m runners.run_carla_acceptance_triplicate \
+  --run-config /path/to/run_config.json \
+  --output-root /path/to/acceptance \
+  --opendrive /path/to/scene.xodr \
+  --sensor-handler-factory adapters.nurec_260_client:build_nurec_260_handler \
+  --require-multimodal
+```
+
+The following items still require the NVIDIA/CARLA server and cannot be claimed
+from local tests:
 
 1. Rebuild scene-0061 NCore with dense cuboids and compare front-car ghosting.
-2. Inspect the NuRec 26.04 protobuf/runtime package and implement the thin RGB
-   and LiDAR encoders. Do not advertise HDL-32E emulation if the installed
-   `LidarSpec` only supports another verified profile.
-3. Run the non-zero pose probes for both selected tracks and export the runtime
+2. Run the non-zero pose probes for both selected tracks and export the runtime
    inventory.
-4. Promote Scene Package alignment to `runtime_validated` using measured
+3. Promote Scene Package alignment to `runtime_validated` using measured
    landmarks.
-5. Run the CARLA handler with six RGB cameras and at least one verified NuRec
+4. Run the CARLA handler with six RGB cameras and at least one verified NuRec
    LiDAR request on every frame.
-6. Pass `validate_multimodal_closed_loop.py`, then three consecutive acceptance
+5. Pass `validate_multimodal_closed_loop.py`, then three consecutive acceptance
    runs with `--require-multimodal`.
 
 Until these pass, the accurate status is: CARLA actor/multimodal integration

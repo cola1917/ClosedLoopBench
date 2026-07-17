@@ -15,6 +15,7 @@ from adapters.nurec_multimodal import (
 Encoder = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 RpcCall = Callable[[Any], Any]
 ResponseBytes = Callable[[Any], bytes]
+ResponseInspector = Callable[[Mapping[str, Any], Any, bytes], Mapping[str, Any] | None]
 
 
 def dispatch_nurec_multimodal_frame(
@@ -25,6 +26,7 @@ def dispatch_nurec_multimodal_frame(
     render_rgb: RpcCall,
     render_lidar: RpcCall,
     response_bytes: ResponseBytes | None = None,
+    response_inspector: ResponseInspector | None = None,
     monotonic: Callable[[], float] = time.monotonic,
     max_latency_ms: float | None = None,
 ) -> dict[str, Any]:
@@ -41,6 +43,7 @@ def dispatch_nurec_multimodal_frame(
         encoder = encode_rgb if payload["modality"] == "rgb" else encode_lidar
         rpc = render_rgb if payload["modality"] == "rgb" else render_lidar
         started = monotonic()
+        inspection = None
         try:
             encoded = encoder(payload)
             _validate_encoded_request(payload, encoded)
@@ -48,6 +51,12 @@ def dispatch_nurec_multimodal_frame(
             body = serializer(response)
             if not isinstance(body, bytes):
                 raise NuRecMultimodalError("NuRec response serializer must return bytes")
+            if response_inspector is not None:
+                inspection = response_inspector(payload, response, body)
+                if inspection is not None and not isinstance(inspection, Mapping):
+                    raise NuRecMultimodalError(
+                        "NuRec response inspector must return mapping metadata or None"
+                    )
             status = "ok"
             payload_sha256 = hashlib.sha256(body).hexdigest()
             error = None
@@ -67,6 +76,8 @@ def dispatch_nurec_multimodal_frame(
         }
         if error is not None:
             response_record["error"] = error
+        if inspection is not None:
+            response_record["response_metadata"] = dict(inspection)
         responses.append(response_record)
     evidence = build_nurec_multimodal_evidence(
         frame,
@@ -77,6 +88,11 @@ def dispatch_nurec_multimodal_frame(
         "sdk_boundary": "injected_version_specific_encoder",
         "dynamic_object_verification": "encoder_echo_checked_before_rpc",
         "response_digest": "sha256_of_serialized_rpc_response",
+        "response_validation": (
+            "injected_modality_specific_inspector"
+            if response_inspector is not None
+            else "serialized_bytes_only"
+        ),
     }
     validate_nurec_multimodal_evidence(evidence)
     return evidence

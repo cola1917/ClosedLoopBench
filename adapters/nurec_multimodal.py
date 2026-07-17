@@ -273,6 +273,12 @@ def build_nurec_multimodal_evidence(
                 record["latency_ms"] = float(latency)
                 if max_latency_ms is not None and float(latency) > float(max_latency_ms):
                     record["issues"].append("latency_threshold_exceeded")
+            metadata = response.get("response_metadata")
+            if metadata is not None:
+                if not isinstance(metadata, Mapping):
+                    record["issues"].append("response_metadata_invalid")
+                else:
+                    record["response_metadata"] = deepcopy(dict(metadata))
         if not record["issues"]:
             record["status"] = "passed"
         else:
@@ -327,6 +333,24 @@ def validate_nurec_multimodal_evidence(evidence: Mapping[str, Any]) -> None:
             raise NuRecMultimodalError(f"{modality} requested_count is inconsistent")
         if summary.get("passed_count") != sum(record.get("status") == "passed" for record in selected):
             raise NuRecMultimodalError(f"{modality} passed_count is inconsistent")
+    for record in records:
+        metadata = record.get("response_metadata")
+        if metadata is None:
+            continue
+        if not isinstance(metadata, Mapping):
+            raise NuRecMultimodalError("NuRec response_metadata must be an object")
+        if record.get("modality") == "rgb":
+            if metadata.get("encoding") != "jpeg":
+                raise NuRecMultimodalError("NuRec RGB response metadata must declare jpeg")
+            if int(metadata.get("width") or 0) < 1 or int(metadata.get("height") or 0) < 1:
+                raise NuRecMultimodalError("NuRec RGB response dimensions must be positive")
+        elif record.get("modality") == "lidar":
+            if metadata.get("encoding") != "float_xyz_intensity":
+                raise NuRecMultimodalError(
+                    "NuRec LiDAR response metadata must declare float_xyz_intensity"
+                )
+            if int(metadata.get("point_count") or 0) < 1:
+                raise NuRecMultimodalError("NuRec LiDAR point_count must be positive")
 
 
 def assert_nurec_multimodal_evidence(evidence: Mapping[str, Any]) -> None:

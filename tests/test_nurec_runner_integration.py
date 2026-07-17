@@ -100,6 +100,33 @@ class BoundCarla(FakeCarlaModule):
 
 
 class NuRecRunnerIntegrationTests(unittest.TestCase):
+    def test_sensor_handler_is_closed_and_audited(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class Handler:
+            def __init__(self):
+                self.closed = False
+
+            def __call__(self, context):
+                return _evidence(context)
+
+            def close(self):
+                self.closed = True
+
+        handler = Handler()
+        result = run_basic_agent(
+            _plan(),
+            carla_module=BoundCarla([]),
+            agent_module=FakeBasicAgent,
+            sensor_frame_handler=handler,
+        )
+
+        self.assertTrue(handler.closed)
+        self.assertIn(
+            {"action": "sensor_frame_handler.close", "status": "succeeded"},
+            result["cleanup_audit"],
+        )
+
     def test_absolute_carla_clock_keeps_relative_scenario_time_and_local_pose_interval(self):
         from runners.run_carla_basic_agent import run_basic_agent
 
