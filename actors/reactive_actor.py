@@ -52,7 +52,16 @@ def plan_reactive_actor_control(
     ttc_too_low = ttc_sec <= profile.yield_ttc_threshold_sec
     should_yield = gap_too_small or ttc_too_low
     should_abort = bool(should_yield and profile.abort_on_low_ttc)
-    desired_speed_mps = _yield_speed(current_speed_mps, profile) if should_yield else current_speed_mps
+    reference_cruise_speed = (
+        float(reference_speed_mps)
+        if reference_speed_mps is not None
+        else current_speed_mps
+    )
+    desired_speed_mps = (
+        _yield_speed(reference_cruise_speed, profile)
+        if should_yield
+        else reference_cruise_speed
+    )
 
     return _decision(
         profile=profile,

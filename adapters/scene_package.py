@@ -11,6 +11,7 @@ def build_scene_package(
     openscenario_path: str,
     opendrive_path: str | None,
     map_source: str,
+    actor_bindings_path: str | None = None,
     nurec_usdz: str | None = None,
     nurec_checkpoint: str | None = None,
     reconstruction_package_path: str | None = None,
@@ -32,7 +33,10 @@ def build_scene_package(
         "scene_id": scene_id,
         "source": source,
         "coordinate_frame": deepcopy(scene_ir.get("coordinate_frame") or {}),
-        "motion": {"scene_ir": str(scene_ir_path)},
+        "motion": {
+            "scene_ir": str(scene_ir_path),
+            "actor_bindings": str(actor_bindings_path) if actor_bindings_path else None,
+        },
         "map": {
             "location": (scene_ir.get("map_context") or {}).get("location"),
             "opendrive": str(opendrive_path) if opendrive_path else None,

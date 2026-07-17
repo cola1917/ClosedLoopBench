@@ -6,6 +6,15 @@ Architecture and contract boundary: [`docs/architecture.md`](docs/architecture.m
 
 Core CARLA/ROS2 environment handoff: [`docs/core_closed_loop_integration.md`](docs/core_closed_loop_integration.md).
 
+Existing NuRec artifact planning and strict 1000-step validation:
+[`docs/nurec_reconstruction_planning.md`](docs/nurec_reconstruction_planning.md).
+
+Actor-bound NuRec RGB/LiDAR closed-loop contract and remaining server gates:
+[`docs/nurec_multimodal_actor_closed_loop.md`](docs/nurec_multimodal_actor_closed_loop.md).
+
+Optional post-acceptance Cosmos Transfer package and its non-realtime boundary:
+[`docs/cosmos_offline_derivation.md`](docs/cosmos_offline_derivation.md).
+
 Shared-disk publication: [`docs/shared_scene_exchange.md`](docs/shared_scene_exchange.md).
 
 Three-project message and job protocol:
@@ -113,7 +122,11 @@ Generate the MVP closed-loop report without launching CARLA:
 python runners/run_closed_loop.py --run-config outputs/scene-1077/carla_run_config.json --output outputs/scene-1077/closed_loop_report.json
 ```
 
-This dry-run runner is the handoff point for the future real CARLA runner. Today it validates that a `carla_run_config.json` can produce a `closed_loop_report.json` with the expected summary, metric trace slot, and artifacts. When CARLA execution is added, the runner should keep the same report contract and replace the dry-run `not_run` status with the actual execution status and per-tick metrics.
+The same CLI supports dry-run planning and real CARLA execution. The real runner
+owns synchronous stepping, ego control, physical replay/scripted/TrafficManager
+actors, per-tick metrics, cleanup evidence, and an injected fail-closed NuRec
+RGB/LiDAR frame handler. Real simulator/renderer claims still require the
+environment-specific acceptance evidence described above.
 
 ## Implementation scope
 

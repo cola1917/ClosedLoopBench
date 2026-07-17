@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from adapters.scene_package import build_scene_package
+from adapters.actor_binding import validate_actor_binding_set
 from adapters.reconstruction_package import (
     load_reconstruction_package,
     load_reconstruction_result,
@@ -45,6 +46,7 @@ def build_nuscenes_exchange(
         paths,
         radius_m=radius_m,
         reconstruction_package_path=None,
+        actor_binding_set_path=None,
     )
 
 
@@ -55,6 +57,7 @@ def build_exchange_from_scenario_ir(
     *,
     reconstruction_package_path: Path | None = None,
     reconstruction_result_path: Path | None = None,
+    actor_binding_set_path: Path | None = None,
     exchange_root: Path | None = None,
     radius_m: float = 35.0,
 ) -> dict[str, Path]:
@@ -74,6 +77,7 @@ def build_exchange_from_scenario_ir(
         radius_m=radius_m,
         reconstruction_package_path=reconstruction_package_path,
         reconstruction_result_path=reconstruction_result_path,
+        actor_binding_set_path=actor_binding_set_path,
         exchange_root=exchange_root,
     )
 
@@ -85,6 +89,7 @@ def _build_exchange_from_ir(
     radius_m: float,
     reconstruction_package_path: Path | None,
     reconstruction_result_path: Path | None = None,
+    actor_binding_set_path: Path | None = None,
     exchange_root: Path | None = None,
 ) -> dict[str, Path]:
     write_nuscenes_opendrive(
@@ -100,6 +105,18 @@ def _build_exchange_from_ir(
     )
 
     scene_ir = json.loads(paths["scene_ir"].read_text(encoding="utf-8"))
+    actor_bindings_name = None
+    if actor_binding_set_path is not None:
+        binding_source = Path(actor_binding_set_path).resolve()
+        actor_bindings = json.loads(binding_source.read_text(encoding="utf-8"))
+        validate_actor_binding_set(actor_bindings)
+        if actor_bindings["scene_id"] != str(scene_ir["scenario_id"]):
+            raise ValueError("Actor Binding Set scene_id does not match Scenario IR")
+        binding_target = paths["scene_package"].parent / "actor_bindings.json"
+        if binding_source != binding_target.resolve():
+            shutil.copy2(binding_source, binding_target)
+        paths["actor_bindings"] = binding_target
+        actor_bindings_name = binding_target.name
     reconstruction_paths: dict[str, str] = {}
     if reconstruction_package_path is not None and reconstruction_result_path is not None:
         raise ValueError("provide only one reconstruction package or result")
@@ -130,6 +147,7 @@ def _build_exchange_from_ir(
         openscenario_path=paths["openscenario"].name,
         opendrive_path=paths["opendrive"].name,
         map_source="nuscenes_map_expansion",
+        actor_bindings_path=actor_bindings_name,
         nurec_usdz=reconstruction_paths.get("nurec_usdz"),
         nurec_checkpoint=reconstruction_paths.get("nurec_checkpoint"),
         reconstruction_package_path=reconstruction_paths.get("reconstruction_package"),
@@ -153,6 +171,7 @@ def main(argv=None) -> int:
     reconstruction = parser.add_mutually_exclusive_group()
     reconstruction.add_argument("--reconstruction-package")
     reconstruction.add_argument("--reconstruction-result")
+    parser.add_argument("--actor-bindings", help="Validated actor_binding_set.v1 JSON to include in the bundle.")
     parser.add_argument("--exchange-root")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--radius-m", type=float, default=35.0)
@@ -169,12 +188,13 @@ def main(argv=None) -> int:
             reconstruction_result_path=(
                 Path(args.reconstruction_result) if args.reconstruction_result else None
             ),
+            actor_binding_set_path=(Path(args.actor_bindings) if args.actor_bindings else None),
             exchange_root=Path(args.exchange_root) if args.exchange_root else None,
             radius_m=args.radius_m,
         )
     else:
-        if args.reconstruction_package or args.reconstruction_result:
-            parser.error("reconstruction input requires --scenario-ir")
+        if args.reconstruction_package or args.reconstruction_result or args.actor_bindings:
+            parser.error("reconstruction or actor binding input requires --scenario-ir")
         paths = build_nuscenes_exchange(
             Path(args.dataroot),
             args.version,

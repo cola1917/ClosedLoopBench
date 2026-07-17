@@ -22,9 +22,21 @@ The shared disk carries immutable scene packages, run requests, reports, and
 logs. It is not the per-tick control channel. ROS 2 DDS carries observations and
 `/carla/ego_vehicle/vehicle_control_cmd` during a run.
 
+The verified model-free route loop publishes a JSON `std_msgs/String` on
+`/closed_loop/ego/observation`. Every message contains a unique
+`observation_id`, current CARLA ego pose/speed/velocity/acceleration, and route
+waypoints/target. The plugin copies that ID into
+`CarlaEgoVehicleControl.header.frame_id`; the host rejects stale or mismatched
+commands and applies full braking on timeout.
+
 On the target Linux host, use `network_mode=host` so DDS discovery works without
 maintaining a large UDP port map. `CARLA_HOST=127.0.0.1` is only plugin metadata;
 the preferred design is that the algorithm talks to ROS 2 and never ticks CARLA.
+Set `FASTDDS_BUILTIN_TRANSPORTS=UDPv4` in both the algorithm container and the
+host runner environment. FastDDS otherwise discovers the host endpoint but can
+select shared-memory transport across Docker IPC namespaces, making the topic
+visible while delivering no samples. Use a dedicated `ROS_DOMAIN_ID` per run
+family to avoid stale ROS2 daemon/discovery state.
 For Docker Desktop, host networking and DDS behavior must be validated; a
 configurable `ALGORITHM_NETWORK_MODE` and `CARLA_HOST=host.docker.internal` are
 available, but this is not the production baseline.
@@ -102,6 +114,20 @@ Before calling an algorithm integrated, capture all of the following:
 4. Stale or missing commands still trigger `Ros2ControlDriver` full braking.
 5. A fixed scene completes and produces a report with algorithm commit,
    checkpoint hash, CARLA 0.9.16, ROS 2 Humble, seed, and KPI values.
+
+The repository includes four deterministic reference plugins under
+`examples/reference_algorithm_plugins`:
+
+- two fixed-throttle transport baselines, used to verify Docker mounting,
+  discovery, safe-stop, real CARLA actuation, and report comparison;
+- two pure-pursuit variants, which consume current-tick ego/route observations
+  and return frame-matched steering/throttle controls.
+
+On scene-0061 v7, both pure-pursuit variants completed more than 99% route
+progress without collision. They prove the state/route observation-control
+round trip, but are not learned camera policies. The remaining TCP/TransFuser
+gate is to add synchronized current-tick camera tensors to the same observation
+ID and load a real upstream checkpoint.
 
 BasicAgent remains the first host-side baseline. TCP is the first external
 learned baseline; adding TransFuser later should require only another mounted

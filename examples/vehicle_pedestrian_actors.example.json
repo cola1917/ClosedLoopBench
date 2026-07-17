@@ -1,0 +1,58 @@
+{
+  "actor_control": {
+    "mode": "mixed",
+    "style": "normal",
+    "behavior_plugin": "actors.reactive_actor:plan_reactive_actor_control"
+  },
+  "actors": [
+    {
+      "actor_id": "recorded_vehicle_12",
+      "type": "vehicle",
+      "blueprint": "vehicle.*",
+      "closed_loop_level": "replay",
+      "initial_state": {
+        "t_sec": 0.0,
+        "x": 24.5,
+        "y": -1.8,
+        "z": 0.5,
+        "yaw": -3.2,
+        "speed_mps": 3.8
+      },
+      "reference_trajectory": [
+        {
+          "t_sec": 0.05,
+          "x": 24.69,
+          "y": -1.81,
+          "z": 0.5,
+          "yaw": -3.2,
+          "speed_mps": 3.8
+        }
+      ]
+    },
+    {
+      "actor_id": "crossing_pedestrian_03",
+      "type": "pedestrian",
+      "blueprint": "walker.pedestrian.*",
+      "closed_loop_level": "scripted",
+      "style": "defensive",
+      "initial_state": {
+        "t_sec": 0.0,
+        "x": 31.2,
+        "y": 4.1,
+        "z": 0.3,
+        "yaw": -90.0,
+        "speed_mps": 1.2
+      },
+      "reference_trajectory": [
+        {
+          "t_sec": 0.05,
+          "x": 31.2,
+          "y": 4.04,
+          "z": 0.3,
+          "yaw": -90.0,
+          "speed_mps": 1.2
+        }
+      ]
+    }
+  ]
+}

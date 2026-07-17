@@ -1,0 +1,8 @@
+{
+  "schema_version": "reference_algorithm_checkpoint.v1",
+  "algorithms": {
+    "reference_cruise_035": {"throttle": 0.35},
+    "reference_cruise_055": {"throttle": 0.55}
+  },
+  "purpose": "External ROS2 plugin transport and comparison verification only"
+}

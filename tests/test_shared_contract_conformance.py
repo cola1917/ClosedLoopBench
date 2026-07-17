@@ -7,7 +7,7 @@ class SharedContractConformanceTests(unittest.TestCase):
         from scene_exchange_contracts.conformance import run_conformance_suite
 
         report = run_conformance_suite()
-        self.assertEqual(report["schema_count"], 14)
+        self.assertEqual(report["schema_count"], 19)
         self.assertEqual(report["digests"]["scenario_ir.v1"], schema_digest("scenario_ir.v1"))
 
 

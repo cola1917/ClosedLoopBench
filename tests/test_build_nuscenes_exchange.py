@@ -38,6 +38,53 @@ def _scene_ir():
 
 
 class BuildNuScenesExchangeTests(unittest.TestCase):
+    def test_copies_validated_actor_bindings_into_scene_package(self):
+        from adapters.actor_binding import build_actor_binding_set
+        from runners.build_nuscenes_exchange import build_exchange_from_scenario_ir
+
+        def write_road(dataroot, output, **kwargs):
+            output.write_text("<OpenDRIVE/>\n", encoding="utf-8")
+            return output
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scene = _scene_ir()
+            actor_id = "a" * 32
+            scene["actors"] = [{
+                "actor_id": actor_id,
+                "source_track_id": actor_id,
+                "role": "context",
+                "type": "vehicle",
+                "category": "vehicle.car",
+                "initial_state": {"t_sec": 0.0, "x": 1.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "speed_mps": 1.0},
+                "reference_trajectory": [{"t_sec": 0.0, "x": 1.0, "y": 0.0, "z": 0.0, "yaw": 0.0, "speed_mps": 1.0}],
+                "policy_hints": {"mvp": "replay"},
+            }]
+            ir_path = root / "scenario_ir.json"
+            ir_path.write_text(json.dumps(scene), encoding="utf-8")
+            bindings = build_actor_binding_set(
+                scene,
+                selected_actor_ids=[actor_id],
+                nurec_track_ids=[actor_id],
+            )
+            binding_path = root / "source-bindings.json"
+            binding_path.write_text(json.dumps(bindings), encoding="utf-8")
+
+            with patch(
+                "runners.build_nuscenes_exchange.write_nuscenes_opendrive",
+                side_effect=write_road,
+            ):
+                paths = build_exchange_from_scenario_ir(
+                    root / "nuscenes",
+                    ir_path,
+                    root / "bundle",
+                    actor_binding_set_path=binding_path,
+                )
+
+            package = json.loads(paths["scene_package"].read_text(encoding="utf-8"))
+            self.assertEqual(package["motion"]["actor_bindings"], "actor_bindings.json")
+            self.assertEqual(json.loads(paths["actor_bindings"].read_text())["scene_id"], scene["scenario_id"])
+
     def test_builds_from_external_ir_and_materializes_reconstruction_package(self):
         from runners.build_nuscenes_exchange import build_exchange_from_scenario_ir
 

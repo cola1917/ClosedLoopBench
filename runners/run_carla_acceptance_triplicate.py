@@ -13,6 +13,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from runners.run_carla_basic_agent import build_basic_agent_plan, run_basic_agent
+from runners.validate_multimodal_closed_loop import (
+    MultimodalClosedLoopError,
+    validate_multimodal_closed_loop_result,
+)
 
 
 class CarlaAcceptanceError(RuntimeError):
@@ -26,6 +30,7 @@ def run_acceptance_triplicate(
     host: str = "127.0.0.1",
     port: int = 2000,
     max_ticks: int = 600,
+    require_multimodal: bool = False,
     execute: Callable[[dict[str, Any]], dict[str, Any]] = run_basic_agent,
 ) -> dict[str, Any]:
     output_root = Path(output_root)
@@ -50,6 +55,7 @@ def run_acceptance_triplicate(
             synchronous=True,
             output=str(report_path),
             acceptance_evidence=True,
+            multimodal_sensor_required=require_multimodal,
         )
         (run_dir / "basic_agent_plan.json").write_text(
             json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
@@ -62,7 +68,7 @@ def run_acceptance_triplicate(
         )
         results.append(result)
 
-    summary = validate_acceptance_runs(results)
+    summary = validate_acceptance_runs(results, require_multimodal=require_multimodal)
     aggregate = {
         "schema_version": "carla_acceptance_triplicate.v1",
         "run_count": 3,
@@ -77,7 +83,11 @@ def run_acceptance_triplicate(
     return aggregate
 
 
-def validate_acceptance_runs(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def validate_acceptance_runs(
+    results: list[dict[str, Any]],
+    *,
+    require_multimodal: bool = False,
+) -> list[dict[str, Any]]:
     if len(results) != 3:
         raise CarlaAcceptanceError("exactly three consecutive results are required")
     validated = []
@@ -103,6 +113,14 @@ def validate_acceptance_runs(results: list[dict[str, Any]]) -> list[dict[str, An
             raise CarlaAcceptanceError(
                 f"attempt {index} claims interactive closure without physical Actor evidence"
             )
+        multimodal_evidence = None
+        if require_multimodal:
+            try:
+                multimodal_evidence = validate_multimodal_closed_loop_result(result)
+            except MultimodalClosedLoopError as exc:
+                raise CarlaAcceptanceError(
+                    f"attempt {index} lacks multimodal closed-loop evidence: {exc}"
+                ) from exc
         validated.append(
             {
                 "attempt": index,
@@ -112,6 +130,7 @@ def validate_acceptance_runs(results: list[dict[str, Any]]) -> list[dict[str, An
                 "frame_trace_count": runtime["frame_trace_count"],
                 "actor_physical_response": runtime.get("actor_physical_response") or {},
                 "cleanup_succeeded": True,
+                "multimodal_closed_loop": multimodal_evidence,
             }
         )
     return validated
@@ -126,6 +145,11 @@ def main(argv=None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=2000, type=int)
     parser.add_argument("--max-ticks", default=600, type=int)
+    parser.add_argument(
+        "--require-multimodal",
+        action="store_true",
+        help="Require actor-bound NuRec RGB/LiDAR evidence on every CARLA frame.",
+    )
     args = parser.parse_args(argv)
     config = json.loads(args.run_config.read_text(encoding="utf-8"))
     try:
@@ -135,6 +159,7 @@ def main(argv=None) -> int:
             host=args.host,
             port=args.port,
             max_ticks=args.max_ticks,
+            require_multimodal=args.require_multimodal,
         )
     except (CarlaAcceptanceError, FileExistsError) as exc:
         print(json.dumps({"status": "failed", "detail": str(exc)}, ensure_ascii=False))

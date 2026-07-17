@@ -140,10 +140,26 @@ def _rooted(exchange_root: Path, *parts: str, create: bool = False) -> Path:
         path.mkdir(parents=True, exist_ok=True)
     resolved = path.resolve()
     try:
-        resolved.relative_to(root)
-    except ValueError as exc:
+        common = os.path.commonpath(
+            [_path_identity(root), _path_identity(resolved)]
+        )
+    except (OSError, ValueError) as exc:
         raise SharedMessageError("protocol path escapes the exchange root") from exc
+    if common != _path_identity(root):
+        raise SharedMessageError("protocol path escapes the exchange root")
     return resolved
+
+
+def _path_identity(path: os.PathLike[str] | str) -> str:
+    """Normalize Windows extended-length and ordinary paths for containment."""
+
+    value = os.path.normcase(os.path.abspath(os.fspath(path)))
+    if os.name == "nt":
+        if value.startswith("\\\\?\\UNC\\"):
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\"):
+            value = value[4:]
+    return value
 
 
 def _contained_artifact(exchange_root: Path, relative: str) -> Path:

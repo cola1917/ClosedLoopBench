@@ -73,6 +73,19 @@ class ReactiveActorRuntimeTests(unittest.TestCase):
         self.assertIsNone(decision["ttc_sec"])
         self.assertEqual(decision["reason"], "ego_state_within_style_gap")
 
+    def test_safe_actor_uses_reference_speed_even_when_spawned_at_rest(self):
+        from actors.reactive_actor import plan_reactive_actor_control
+
+        decision = plan_reactive_actor_control(
+            {"speed_mps": 0.0},
+            {"distance_m": 20.0, "relative_speed_mps": 0.0},
+            style="normal",
+            reference_speed_mps=1.2,
+        )
+
+        self.assertFalse(decision["should_yield"])
+        self.assertEqual(decision["desired_speed_mps"], 1.2)
+
 
 if __name__ == "__main__":
     unittest.main()

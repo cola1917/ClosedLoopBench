@@ -1,0 +1,48 @@
+{
+  "schema_version": "scene_actor_selection.v1",
+  "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+  "source": {
+    "dataset": "nuscenes",
+    "scene_name": "scene-0061",
+    "selection_method": "source_pose_geometry_audit",
+    "visual_quality_verified": false,
+    "nurec_dynamic_pose_verified": false
+  },
+  "primary_vehicle": {
+    "actor_id": "c1958768d48640948f6053d04cffd35b",
+    "category": "vehicle.car",
+    "control_mode": "scripted",
+    "source_trajectory_points": 39,
+    "initial_relative": {
+      "longitudinal_m": 38.97,
+      "lateral_m": 2.16
+    },
+    "source_closest_approach_m": 8.84,
+    "purpose": "primary_explainable_vehicle_actor_closed_loop"
+  },
+  "bounded_pedestrian": {
+    "actor_id": "71603dd1a2ba4e9daf095535e38310ac",
+    "category": "human.pedestrian.construction_worker",
+    "control_mode": "scripted",
+    "source_trajectory_points": 37,
+    "source_closest_approach_m": 4.88,
+    "allowed_actions": ["speed", "pause", "yield", "abort"],
+    "motion_constraint": "source_reference_corridor",
+    "purpose": "bounded_pedestrian_root_pose_closed_loop"
+  },
+  "early_interaction_pedestrian_alternative": {
+    "actor_id": "0e79e7bed1d543c9a00acfbf90ff60b3",
+    "category": "human.pedestrian.adult",
+    "source_trajectory_points": 22,
+    "source_closest_approach_m": 2.42,
+    "source_closest_approach_time_sec": 2.0,
+    "note": "more dramatic early interaction but shorter source corridor and higher collision risk"
+  },
+  "promotion_gates": [
+    "track_present_in_loaded_nurec_runtime_actor_mapping",
+    "nonzero_dynamic_pose_probe_passes_rgb_and_lidar_with_same_digest",
+    "runtime_alignment_evidence_passed",
+    "carla_physical_actor_spawn_and_role_binding_passed",
+    "three_consecutive_multimodal_closed_loop_runs_passed"
+  ]
+}

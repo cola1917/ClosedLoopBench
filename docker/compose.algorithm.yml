@@ -13,7 +13,9 @@ services:
       ALGORITHM_READY_FILE: /sim-data/runtime/ego-algorithm.ready.json
       SIM_DATA_PATH: /sim-data
       ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-0}"
+      FASTDDS_BUILTIN_TRANSPORTS: "${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
       CONTROL_TOPIC: "${CONTROL_TOPIC:-/carla/ego_vehicle/vehicle_control_cmd}"
+      OBSERVATION_TOPIC: "${OBSERVATION_TOPIC:-/closed_loop/ego/observation}"
       CARLA_HOST: "${CARLA_HOST:-127.0.0.1}"
       CARLA_PORT: "${CARLA_PORT:-2000}"
     volumes:

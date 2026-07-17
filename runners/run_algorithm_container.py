@@ -35,6 +35,9 @@ def build_runtime_config(environment: dict[str, str] | None = None) -> dict[str,
             "control_topic": env.get(
                 "CONTROL_TOPIC", "/carla/ego_vehicle/vehicle_control_cmd"
             ),
+            "observation_topic": env.get(
+                "OBSERVATION_TOPIC", "/closed_loop/ego/observation"
+            ),
             "carla_host": env.get("CARLA_HOST", "127.0.0.1"),
             "carla_port": int(env.get("CARLA_PORT", "2000")),
         }

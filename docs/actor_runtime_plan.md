@@ -1,9 +1,9 @@
 # Actor Runtime Plan
 
-This document defines the MVP actor runtime plan boundary for ClosedLoopBench.
-It is intentionally small: the actor layer produces serializable plans that a
-later CARLA runtime can consume. It does not call CARLA APIs, spawn actors, tick
-the world, or implement a custom rule engine.
+This document defines the actor planning boundary. The planning module remains
+serializable and CARLA-free; `runners/run_carla_basic_agent.py` now consumes
+those plans and provides the real vehicle/pedestrian runtime binding documented
+in `docs/carla_vehicle_pedestrian_actors.md`.
 
 ## Inputs
 
@@ -117,9 +117,9 @@ The `runtime_boundary` field must continue to state:
 This keeps the actor planning layer explainable and prevents it from growing
 into a simulator runtime.
 
-## Out of Scope
+## Planning-module boundary
 
-This batch does not implement:
+The planning module itself does not implement:
 
 - real CARLA actor spawning
 - `world.tick()` loops
@@ -127,4 +127,4 @@ This batch does not implement:
 - complex behavior trees or custom actor rule engines
 - ROS2 actor control
 
-Those belong to later CARLA runtime integration work.
+Those operations now belong to the CARLA runner rather than this planning module.

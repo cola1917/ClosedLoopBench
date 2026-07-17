@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import math
 import sys
@@ -31,8 +32,14 @@ def build_basic_agent_plan(
     traffic_manager_port: int = 8000,
     ego_driver: str = "basic_agent",
     control_topic: str | None = None,
+    observation_topic: str | None = None,
     control_timeout_sec: float = 0.5,
     acceptance_evidence: bool = False,
+    opendrive_path: str | None = None,
+    timeout_sec: float = 60.0,
+    runtime_route_distance_m: float | None = None,
+    physics_smoke: bool = False,
+    multimodal_sensor_required: bool = False,
 ) -> dict[str, Any]:
     ego = run_config.get("ego") or {}
     carla_config = run_config.get("carla") or {}
@@ -49,9 +56,16 @@ def build_basic_agent_plan(
         "connection": {
             "host": str(host),
             "port": int(port),
+            "timeout_sec": float(timeout_sec),
         },
         "world": {
             "map": carla_config.get("map"),
+            "opendrive_path": str(opendrive_path) if opendrive_path else None,
+            "runtime_route_distance_m": (
+                float(runtime_route_distance_m)
+                if runtime_route_distance_m is not None
+                else None
+            ),
             "fixed_delta_seconds": carla_config.get("fixed_delta_seconds", 0.05),
             "synchronous": bool(synchronous),
             "weather": carla_config.get("weather"),
@@ -79,6 +93,7 @@ def build_basic_agent_plan(
             ),
         },
         "actor_control": dict(run_config.get("actor_control") or {}),
+        "actor_binding": dict(run_config.get("actor_binding") or {}),
         "ego": {
             "agent": "basic_agent",
             "driver": str(ego_driver),
@@ -91,9 +106,34 @@ def build_basic_agent_plan(
                 ego.get("role_name", "ego_vehicle")
             ),
             "control_timeout_sec": float(control_timeout_sec),
+            "observation_topic": observation_topic or "/closed_loop/ego/observation",
         },
         "actors": run_config.get("actors", []),
-        "metrics": run_config.get("metrics", []),
+        "reconstruction_package": dict(run_config.get("reconstruction_package") or {}),
+        "metrics": (
+            [
+                metric
+                for metric in run_config.get("metrics", [])
+                if (
+                    str(metric)
+                    if isinstance(metric, str)
+                    else str(metric.get("name") or metric.get("metric"))
+                )
+                in {"collision", "collision_count", "route_progress"}
+            ]
+            if physics_smoke
+            else run_config.get("metrics", [])
+        ),
+        "evaluation": (
+            {
+                "criteria": [
+                    {"name": "collision_count", "metric": "collision_count", "op": "==", "value": 0},
+                    {"name": "route_progress", "metric": "route_progress", "op": ">=", "value": 0.95},
+                ]
+            }
+            if physics_smoke
+            else dict(run_config.get("evaluation") or {})
+        ),
         "limits": {
             "max_ticks": int(max_ticks),
         },
@@ -102,6 +142,8 @@ def build_basic_agent_plan(
             "actor_autopilot": bool(actor_autopilot),
             "traffic_manager_port": int(traffic_manager_port),
             "acceptance_evidence": bool(acceptance_evidence),
+            "physics_smoke": bool(physics_smoke),
+            "multimodal_sensor_required": bool(multimodal_sensor_required),
         },
         "visualization": {
             "follow_ego": bool(follow_ego),
@@ -117,6 +159,11 @@ def build_basic_agent_plan(
             "frame_trace": str(Path(output).with_name("frame_trace.jsonl")) if output else None,
             "metrics_trace": str(Path(output).with_name("metrics_trace.jsonl")) if output else None,
             "cleanup_audit": str(Path(output).with_name("cleanup_audit.json")) if output else None,
+            "nurec_multimodal_trace": (
+                str(Path(output).with_name("nurec_multimodal_trace.jsonl"))
+                if output
+                else None
+            ),
         },
     }
 
@@ -136,8 +183,14 @@ def write_basic_agent_plan(
     traffic_manager_port: int = 8000,
     ego_driver: str = "basic_agent",
     control_topic: str | None = None,
+    observation_topic: str | None = None,
     control_timeout_sec: float = 0.5,
     acceptance_evidence: bool = False,
+    opendrive_path: str | None = None,
+    timeout_sec: float = 60.0,
+    runtime_route_distance_m: float | None = None,
+    physics_smoke: bool = False,
+    multimodal_sensor_required: bool = False,
 ) -> Path:
     run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
     plan = build_basic_agent_plan(
@@ -153,8 +206,14 @@ def write_basic_agent_plan(
         traffic_manager_port=traffic_manager_port,
         ego_driver=ego_driver,
         control_topic=control_topic,
+        observation_topic=observation_topic,
         control_timeout_sec=control_timeout_sec,
         acceptance_evidence=acceptance_evidence,
+        opendrive_path=opendrive_path,
+        timeout_sec=timeout_sec,
+        runtime_route_distance_m=runtime_route_distance_m,
+        physics_smoke=physics_smoke,
+        multimodal_sensor_required=multimodal_sensor_required,
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -167,6 +226,8 @@ def run_basic_agent(
     carla_module=None,
     agent_module=None,
     driver_factory=None,
+    actor_behavior_planner=None,
+    sensor_frame_handler=None,
 ) -> dict[str, Any]:
     if carla_module is None:
         try:
@@ -186,6 +247,8 @@ def run_basic_agent(
         carla_module=carla_module,
         basic_agent_cls=agent_module,
         driver_factory=driver_factory,
+        actor_behavior_planner=actor_behavior_planner,
+        sensor_frame_handler=sensor_frame_handler,
     )
 
 
@@ -228,6 +291,8 @@ def _run_basic_agent_loop(
     carla_module: Any,
     basic_agent_cls: Any = None,
     driver_factory: Any = None,
+    actor_behavior_planner: Any = None,
+    sensor_frame_handler: Any = None,
 ) -> dict[str, Any]:
     client = None
     world = None
@@ -245,10 +310,18 @@ def _run_basic_agent_loop(
     actor_physical_response: dict[str, dict[str, float]] = {}
     actor_initial_poses: dict[str, dict[str, Any]] = {}
     frame_trace: list[dict[str, Any]] = []
+    multimodal_trace: list[dict[str, Any]] = []
     cleanup_audit: list[dict[str, Any]] = []
     result: dict[str, Any] | None = None
     termination_reason = "max_ticks"
     acceptance_evidence = False
+    multimodal_sensor_required = False
+    actor_runtime_binding_evidence: dict[str, Any] = {
+        "schema_version": "actor_runtime_binding_evidence.v1",
+        "status": "not_configured",
+        "records": [],
+        "issues": [],
+    }
 
     try:
         connection = plan.get("connection") or {}
@@ -256,7 +329,18 @@ def _run_basic_agent_loop(
         ego_config = plan.get("ego") or {}
         limits = plan.get("limits") or {}
         runtime_options = plan.get("runtime") or {}
+        if actor_behavior_planner is None:
+            actor_behavior_planner = _load_actor_behavior_planner(
+                (plan.get("actor_control") or {}).get("behavior_plugin")
+            )
         acceptance_evidence = bool(runtime_options.get("acceptance_evidence", False))
+        multimodal_sensor_required = bool(
+            runtime_options.get("multimodal_sensor_required", False)
+        )
+        if multimodal_sensor_required and sensor_frame_handler is None:
+            raise RuntimeError(
+                "multimodal sensor evidence is required but no sensor_frame_handler was provided"
+            )
         visualization_config = plan.get("visualization") or {}
 
         client = carla_module.Client(
@@ -266,8 +350,30 @@ def _run_basic_agent_loop(
         if hasattr(client, "set_timeout"):
             client.set_timeout(float(connection.get("timeout_sec", 10.0)))
 
+        opendrive_path = world_config.get("opendrive_path")
         map_name = world_config.get("map")
-        if map_name and hasattr(client, "load_world"):
+        if opendrive_path:
+            if not hasattr(client, "generate_opendrive_world"):
+                raise RuntimeError("CARLA client does not support generate_opendrive_world")
+            xodr_path = Path(str(opendrive_path)).expanduser().resolve()
+            if not xodr_path.is_file():
+                raise RuntimeError(f"OpenDRIVE file does not exist: {xodr_path}")
+            xodr = xodr_path.read_text(encoding="utf-8")
+            if not xodr.strip():
+                raise RuntimeError(f"OpenDRIVE file is empty: {xodr_path}")
+            generation_parameters_type = getattr(
+                carla_module, "OpendriveGenerationParameters", None
+            )
+            if generation_parameters_type is None:
+                world = client.generate_opendrive_world(xodr)
+            else:
+                # Use CARLA's own version-specific defaults. Oversized road
+                # chunk lengths have caused packaged 0.9.16 servers to crash
+                # after navigation-mesh generation on otherwise valid XODR.
+                world = client.generate_opendrive_world(
+                    xodr, generation_parameters_type()
+                )
+        elif map_name and hasattr(client, "load_world"):
             world = client.load_world(str(map_name))
         elif hasattr(client, "get_world"):
             world = client.get_world()
@@ -276,6 +382,14 @@ def _run_basic_agent_loop(
 
         if hasattr(world, "get_map"):
             world.get_map()
+
+        runtime_route_distance_m = world_config.get("runtime_route_distance_m")
+        if runtime_route_distance_m is not None:
+            _bind_runtime_topology_route(
+                world,
+                plan,
+                distance_m=float(runtime_route_distance_m),
+            )
 
         original_weather = world.get_weather() if hasattr(world, "get_weather") else None
         _apply_world_weather(carla_module, world, world_config.get("weather"))
@@ -319,6 +433,18 @@ def _run_basic_agent_loop(
             )
             for actor_id, vehicle in actor_vehicles.items()
         }
+        actor_runtime_binding_evidence = _actor_runtime_binding_evidence(
+            plan,
+            actor_vehicles,
+        )
+        if (
+            multimodal_sensor_required
+            and actor_runtime_binding_evidence["status"] != "passed"
+        ):
+            raise RuntimeError(
+                "actor runtime binding failed: "
+                + ", ".join(actor_runtime_binding_evidence["issues"])
+            )
         traffic_manager_actor_ids, traffic_manager = _configure_actor_autopilot(
             client,
             actor_vehicles,
@@ -339,6 +465,7 @@ def _run_basic_agent_loop(
         )
         if visualization_config.get("debug_draw"):
             _draw_debug_markers(carla_module, world, ego_config, plan.get("actors", []))
+            _draw_route_lane_lines(carla_module, world, ego_config.get("route") or [])
 
         max_ticks = int(limits.get("max_ticks", 600))
         dt_sec = float(world_config.get("fixed_delta_seconds", 0.05))
@@ -346,9 +473,16 @@ def _run_basic_agent_loop(
         previous_acceleration_mps2: float | None = None
         route = list(ego_config.get("route") or [ego_config.get("spawn") or {}, ego_config.get("destination") or {}])
         previous_world_frame: int | None = None
+        previous_sensor_frame: int | None = None
+        previous_sensor_time_sec: float | None = None
+        previous_ego_render_pose = _vehicle_pose(ego_vehicle)
+        previous_actor_render_poses = _initial_bound_actor_poses(
+            plan.get("actors") or [],
+            actor_vehicles,
+        )
         for tick_index in range(max_ticks):
             if hasattr(ego_driver, "done") and ego_driver.done():
-                termination_reason = "agent_done"
+                termination_reason = "route_complete"
                 break
             control = ego_driver.run_step()
             ego_vehicle.apply_control(control)
@@ -356,13 +490,18 @@ def _run_basic_agent_loop(
             if hasattr(world, "tick"):
                 tick_frame = world.tick()
             snapshot_frame = None
-            simulation_time_sec = (tick_index + 1) * dt_sec
+            run_time_sec = (tick_index + 1) * dt_sec
+            simulation_time_sec = run_time_sec
+            snapshot_delta_sec = dt_sec
             if hasattr(world, "get_snapshot"):
                 snapshot = world.get_snapshot()
                 snapshot_frame = getattr(snapshot, "frame", None)
                 timestamp = getattr(snapshot, "timestamp", None)
                 simulation_time_sec = float(
                     getattr(timestamp, "elapsed_seconds", simulation_time_sec)
+                )
+                snapshot_delta_sec = float(
+                    getattr(timestamp, "delta_seconds", snapshot_delta_sec)
                 )
             world_frame = snapshot_frame if isinstance(snapshot_frame, int) else tick_frame
             if acceptance_evidence and isinstance(world_frame, int):
@@ -373,6 +512,14 @@ def _run_basic_agent_loop(
                 previous_world_frame = world_frame
             if visualization_config.get("follow_ego"):
                 _follow_ego_spectator(carla_module, world, ego_vehicle, visualization_config.get("spectator") or {})
+            if visualization_config.get("debug_draw"):
+                _draw_dynamic_vehicle_boxes(
+                    carla_module,
+                    world,
+                    ego_vehicle,
+                    actor_vehicles,
+                    life_time=max(0.1, dt_sec * 3.0),
+                )
             ticks_completed += 1
             ego_pose = _vehicle_pose(ego_vehicle)
             ego_speed_mps = _vehicle_speed_mps(ego_vehicle)
@@ -381,6 +528,7 @@ def _run_basic_agent_loop(
                 ego_pose=ego_pose,
                 ego_speed_mps=ego_speed_mps,
                 actor_vehicles=actor_vehicles,
+                behavior_planner=actor_behavior_planner,
             )
             scripted_evidence = _apply_scripted_actor_controls(
                 carla_module,
@@ -388,12 +536,43 @@ def _run_basic_agent_loop(
                 actor_vehicles,
                 actor_decisions,
             )
+            replay_evidence = _apply_replay_actor_controls(
+                carla_module,
+                plan.get("actors") or [],
+                actor_vehicles,
+                run_time_sec=run_time_sec,
+            )
             actor_execution_evidence.update(scripted_evidence)
+            actor_execution_evidence.update(replay_evidence)
+            actor_by_id = {
+                str(actor.get("actor_id", "actor")): actor
+                for actor in plan.get("actors") or []
+            }
             actor_states = {}
             for actor_id, vehicle in actor_vehicles.items():
                 pose = _vehicle_pose(vehicle)
                 speed = _vehicle_speed_mps(vehicle)
-                actor_states[actor_id] = {"pose": pose, "speed_mps": speed}
+                actor = actor_by_id.get(actor_id, {})
+                reference_pose = _reference_pose_at_time(
+                    actor, run_time_sec
+                )
+                actor_states[actor_id] = {
+                    "actor_type": _actor_kind(actor),
+                    "carla_runtime_actor_id": getattr(vehicle, "id", None),
+                    "carla_role_name": (
+                        getattr(vehicle, "attributes", {}).get("role_name")
+                        if isinstance(getattr(vehicle, "attributes", {}), dict)
+                        else None
+                    ),
+                    "pose": pose,
+                    "speed_mps": speed,
+                    "reference_pose": reference_pose,
+                    "reference_error_m": (
+                        _xy_distance(pose, reference_pose)
+                        if reference_pose is not None
+                        else None
+                    ),
+                }
                 initial = actor_initial_poses[actor_id]
                 displacement = math.hypot(
                     float(pose["x"]) - float(initial["x"]),
@@ -404,6 +583,58 @@ def _run_basic_agent_loop(
                         "displacement_m": displacement,
                         "speed_mps": speed,
                     }
+            multimodal_summary = None
+            if sensor_frame_handler is not None:
+                if not isinstance(world_frame, int):
+                    raise RuntimeError(
+                        "multimodal sensor handler requires an integer CARLA frame identity"
+                    )
+                if previous_sensor_frame is not None and world_frame <= previous_sensor_frame:
+                    raise RuntimeError(
+                        "multimodal CARLA frame is not strictly increasing: "
+                        f"previous={previous_sensor_frame}, current={world_frame}"
+                    )
+                sensor_context = _build_sensor_frame_context(
+                    plan,
+                    frame_id=world_frame,
+                    tick_index=tick_index,
+                    simulation_time_sec=simulation_time_sec,
+                    scenario_time_sec=run_time_sec,
+                    interval_start_sec=(
+                        previous_sensor_time_sec
+                        if previous_sensor_time_sec is not None
+                        else max(0.0, simulation_time_sec - max(0.0, snapshot_delta_sec))
+                    ),
+                    ego_pose=ego_pose,
+                    previous_ego_pose=previous_ego_render_pose,
+                    actor_states=actor_states,
+                    previous_actor_poses=previous_actor_render_poses,
+                )
+                evidence = sensor_frame_handler(sensor_context)
+                _validate_sensor_frame_evidence(evidence, world_frame)
+                evidence = dict(evidence)
+                multimodal_trace.append(evidence)
+                multimodal_summary = {
+                    "schema_version": evidence["schema_version"],
+                    "status": evidence["status"],
+                    "frame_id": evidence["frame_id"],
+                    "dynamic_object_sha256": evidence.get("dynamic_object_sha256"),
+                    "modalities": dict(evidence.get("modalities") or {}),
+                    "issues": list(evidence.get("issues") or []),
+                }
+                if multimodal_sensor_required and evidence["status"] != "passed":
+                    raise RuntimeError(
+                        "required NuRec multimodal frame failed: "
+                        + ", ".join(evidence.get("issues") or ["unknown_failure"])
+                    )
+                previous_sensor_frame = world_frame
+                previous_sensor_time_sec = simulation_time_sec
+                previous_ego_render_pose = dict(ego_pose)
+                previous_actor_render_poses = _current_bound_actor_poses(
+                    plan.get("actors") or [],
+                    actor_states,
+                    run_time_sec,
+                )
             acceleration_mps2 = (
                 (ego_speed_mps - previous_speed_mps) / dt_sec
                 if previous_speed_mps is not None and dt_sec > 0.0
@@ -416,6 +647,11 @@ def _run_basic_agent_loop(
                 and dt_sec > 0.0
                 else None
             )
+            measured_route_progress = (
+                float(ego_driver.route_progress())
+                if hasattr(ego_driver, "route_progress")
+                else _route_progress_from_pose(route, ego_pose)
+            )
             collector.add_tick(
                 t_sec=(tick_index + 1) * dt_sec,
                 ego_pose=ego_pose,
@@ -424,7 +660,7 @@ def _run_basic_agent_loop(
                 actor_distances_m=actor_distances_m,
                 ttc=min_ttc,
                 collision=collision_tracker.consume_tick() if collision_tracker is not None else None,
-                route_progress=_route_progress_from_pose(route, ego_pose),
+                route_progress=measured_route_progress,
                 hard_brake=bool(acceleration_mps2 is not None and acceleration_mps2 <= -3.0),
                 longitudinal_acceleration_mps2=acceleration_mps2,
                 jerk=jerk,
@@ -441,6 +677,7 @@ def _run_basic_agent_loop(
                     "ego_speed_mps": ego_speed_mps,
                     "ego_control": _control_dict(control),
                     "actor_states": actor_states,
+                    "multimodal_sensor": multimodal_summary,
                 }
             )
             previous_speed_mps = ego_speed_mps
@@ -448,7 +685,11 @@ def _run_basic_agent_loop(
                 previous_acceleration_mps2 = acceleration_mps2
 
         rows = collector.to_report_rows()
-        route_progress = _route_progress_from_pose(route, _vehicle_pose(ego_vehicle))
+        route_progress = (
+            float(ego_driver.route_progress())
+            if hasattr(ego_driver, "route_progress")
+            else _route_progress_from_pose(route, _vehicle_pose(ego_vehicle))
+        )
         if acceptance_evidence:
             if not world_config.get("synchronous", True):
                 raise RuntimeError("acceptance evidence requires synchronous CARLA stepping")
@@ -465,26 +706,52 @@ def _run_basic_agent_loop(
                     f"route_incomplete: progress={route_progress:.6f}, "
                     f"termination={termination_reason}, max_ticks={max_ticks}"
                 )
-            expected_interactive = set(actor_execution_evidence)
+            if runtime_route_distance_m is not None and termination_reason != "route_complete":
+                raise RuntimeError(
+                    "runtime topology route did not terminate with route_complete: "
+                    + termination_reason
+                )
+            if sum(1 for row in rows if row.get("collision") is True) != 0:
+                raise RuntimeError("acceptance evidence requires a collision-free run")
+            expected_interactive = {
+                str(actor.get("actor_id", "actor"))
+                for actor in plan.get("actors") or []
+                if _is_interactive_actor(actor)
+            } & set(actor_execution_evidence)
             physically_responsive = expected_interactive & set(actor_physical_response)
             if expected_interactive and physically_responsive != expected_interactive:
                 missing = sorted(expected_interactive - physically_responsive)
                 raise RuntimeError(
                     "interactive actors produced no physical response: " + ", ".join(missing)
                 )
+        if multimodal_sensor_required and (
+            not multimodal_trace
+            or any(item.get("status") != "passed" for item in multimodal_trace)
+        ):
+            raise RuntimeError("required NuRec multimodal evidence is incomplete")
         driver_diagnostics = (
             ego_driver.diagnostics()
             if hasattr(ego_driver, "diagnostics")
             else {"driver": str(ego_config.get("driver", "basic_agent"))}
         )
         if (
-            ego_config.get("driver") == "ros2_control"
+            ego_config.get("driver") in {"ros2_control", "ros2_observation_control"}
             and int(driver_diagnostics.get("control_count", 0)) == 0
         ):
             raise RuntimeError("ROS2 ego driver received no valid control commands")
+        interactive_actor_ids = {
+            str(actor.get("actor_id", "actor"))
+            for actor in plan.get("actors") or []
+            if _is_interactive_actor(actor)
+        }
         physical_actor_evidence = (
             actor_physical_response if acceptance_evidence else actor_execution_evidence
         )
+        physical_actor_evidence = {
+            actor_id: evidence
+            for actor_id, evidence in physical_actor_evidence.items()
+            if actor_id in interactive_actor_ids
+        }
         status = "interactive_closed_loop" if physical_actor_evidence else "ego_closed_loop"
         report = build_closed_loop_report(runtime_config, tick_metrics=rows, status=status)
         report["summary"]["control_timeout_count"] = int(
@@ -492,12 +759,23 @@ def _run_basic_agent_loop(
         )
         report["runtime"] = {
             "ego_driver": str(ego_config.get("driver", "basic_agent")),
+            "route_binding": dict(ego_config.get("route_binding") or {}),
             "collision_sensor_available": collision_sensor is not None,
             "actor_control_evidence": dict(actor_execution_evidence),
             "actor_physical_response": dict(actor_physical_response),
+            "actor_runtime_binding": actor_runtime_binding_evidence,
+            "multimodal_sensor": _multimodal_runtime_summary(
+                multimodal_trace,
+                required=multimodal_sensor_required,
+                handler_present=sensor_frame_handler is not None,
+            ),
             "frame_trace_count": len(frame_trace),
             "termination_reason": termination_reason,
             "ego_driver_diagnostics": driver_diagnostics,
+            "actor_behavior_plugin": (
+                (plan.get("actor_control") or {}).get("behavior_plugin")
+                or "actors.reactive_actor:plan_reactive_actor_control"
+            ),
         }
         _write_report_if_requested(plan, report)
         result = {
@@ -527,8 +805,15 @@ def _run_basic_agent_loop(
         )
         report["runtime"] = {
             "ego_driver": str((plan.get("ego") or {}).get("driver", "basic_agent")),
+            "route_binding": dict((plan.get("ego") or {}).get("route_binding") or {}),
             "collision_sensor_available": collision_sensor is not None,
             "actor_control_evidence": dict(actor_execution_evidence),
+            "actor_runtime_binding": actor_runtime_binding_evidence,
+            "multimodal_sensor": _multimodal_runtime_summary(
+                multimodal_trace,
+                required=multimodal_sensor_required,
+                handler_present=sensor_frame_handler is not None,
+            ),
             "ego_driver_diagnostics": failure_diagnostics,
         }
         _write_report_if_requested(plan, report)
@@ -619,6 +904,7 @@ def _run_basic_agent_loop(
         cleanup_ok = all(item["status"] == "succeeded" for item in cleanup_audit)
         if result is not None:
             result["frame_trace"] = frame_trace
+            result["nurec_multimodal_trace"] = multimodal_trace
             result["cleanup_audit"] = cleanup_audit
             result["cleanup_succeeded"] = cleanup_ok
             report = result.get("report")
@@ -631,7 +917,13 @@ def _run_basic_agent_loop(
                 result["status"] = "failed"
                 result["reason"] = "cleanup_failed"
                 result["detail"] = "one or more CARLA cleanup actions failed"
-        _write_runtime_evidence(plan, frame_trace, collector.to_report_rows(), cleanup_audit)
+        _write_runtime_evidence(
+            plan,
+            frame_trace,
+            collector.to_report_rows(),
+            cleanup_audit,
+            multimodal_trace,
+        )
 
 
 def _import_basic_agent_cls() -> Any:
@@ -674,6 +966,88 @@ class _BasicAgentDriver:
             self.agent.destroy()
 
 
+class _TopologyFollowerDriver:
+    """Small deterministic controller for CARLA topology acceptance routes."""
+
+    def __init__(self, carla_module: Any, vehicle: Any, route: list[dict[str, Any]], target_speed_mps: float) -> None:
+        if len(route) < 2:
+            raise ValueError("topology follower requires at least two route points")
+        self._carla = carla_module
+        self._vehicle = vehicle
+        self._route = route
+        self._target_speed_mps = max(1.0, float(target_speed_mps))
+        self._index = 1
+        self._control_count = 0
+        self._progress = 0.0
+        self._cumulative = [0.0]
+        for start, end in zip(route, route[1:]):
+            self._cumulative.append(self._cumulative[-1] + _xy_distance(start, end))
+
+    def done(self) -> bool:
+        pose = _vehicle_pose(self._vehicle)
+        return self._index >= len(self._route) - 1 and _xy_distance(
+            pose, self._route[-1]
+        ) <= 0.75
+
+    def run_step(self) -> Any:
+        pose = _vehicle_pose(self._vehicle)
+        while self._index < len(self._route) - 1 and _xy_distance(
+            pose, self._route[self._index]
+        ) <= 1.5:
+            self._index += 1
+        target = self._route[self._index]
+        segment_start = self._route[self._index - 1]
+        segment_length = max(1e-6, _xy_distance(segment_start, target))
+        remaining_to_target = _xy_distance(pose, target)
+        segment_progress = min(1.0, max(0.0, 1.0 - remaining_to_target / segment_length))
+        total_length = max(1e-6, self._cumulative[-1])
+        self._progress = max(
+            self._progress,
+            (self._cumulative[self._index - 1] + segment_progress * segment_length)
+            / total_length,
+        )
+        desired_yaw = math.degrees(
+            math.atan2(
+                float(target["y"]) - float(pose["y"]),
+                float(target["x"]) - float(pose["x"]),
+            )
+        )
+        yaw_error = (desired_yaw - float(pose["yaw"]) + 180.0) % 360.0 - 180.0
+        steer = min(1.0, max(-1.0, yaw_error / 45.0))
+        speed = _vehicle_speed_mps(self._vehicle)
+        speed_error = self._target_speed_mps - speed
+        throttle = min(0.65, max(0.0, 0.25 * speed_error))
+        brake = min(0.7, max(0.0, -0.35 * speed_error))
+        if self._index == len(self._route) - 1:
+            remaining = _xy_distance(pose, target)
+            if remaining < 3.0:
+                throttle = min(throttle, max(0.12, remaining / 6.0))
+        self._control_count += 1
+        return _vehicle_control(
+            self._carla,
+            throttle=throttle,
+            brake=brake,
+            steer=steer,
+        )
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "driver": "topology_follower",
+            "control_count": self._control_count,
+            "target_index": self._index,
+            "route_point_count": len(self._route),
+            "route_progress": self.route_progress(),
+        }
+
+    def route_progress(self) -> float:
+        if self.done():
+            return 1.0
+        return min(1.0, max(0.0, self._progress))
+
+    def close(self) -> None:
+        return None
+
+
 def _build_ego_driver(
     plan: dict[str, Any],
     *,
@@ -697,12 +1071,34 @@ def _build_ego_driver(
         _set_agent_destination(agent, carla_module, ego_config.get("destination") or {})
         return _BasicAgentDriver(agent)
 
+    if driver_kind == "topology_follower":
+        return _TopologyFollowerDriver(
+            carla_module,
+            ego_vehicle,
+            list(ego_config.get("route") or []),
+            float(ego_config.get("target_speed_mps", 5.0)),
+        )
+
     if driver_kind == "ros2_control":
         from agents.ros2_control_driver import create_ros2_control_driver
 
         return create_ros2_control_driver(
             carla_module=carla_module,
             control_topic=str(ego_config.get("control_topic")),
+            timeout_sec=float(ego_config.get("control_timeout_sec", 0.5)),
+        )
+
+    if driver_kind == "ros2_observation_control":
+        from agents.ros2_observation_control_driver import (
+            create_ros2_observation_control_driver,
+        )
+
+        return create_ros2_observation_control_driver(
+            carla_module=carla_module,
+            vehicle=ego_vehicle,
+            route=list(ego_config.get("route") or []),
+            control_topic=str(ego_config.get("control_topic")),
+            observation_topic=str(ego_config.get("observation_topic")),
             timeout_sec=float(ego_config.get("control_timeout_sec", 0.5)),
         )
 
@@ -749,6 +1145,8 @@ def _runtime_report_config(plan: dict[str, Any]) -> dict[str, Any]:
         "actors": list(plan.get("actors") or []),
         "metrics": list(plan.get("metrics") or []),
         "experiment": dict(plan.get("experiment") or {}),
+        "evaluation": dict(plan.get("evaluation") or {}),
+        "reconstruction_package": dict(plan.get("reconstruction_package") or {}),
     }
 
 
@@ -821,7 +1219,7 @@ def _spawn_interactive_actor_vehicles(
     actor_vehicles: dict[str, Any],
 ) -> None:
     for actor in actors:
-        if not _is_interactive_actor(actor):
+        if not _should_spawn_actor(actor):
             continue
         actor_id = str(actor.get("actor_id", "actor"))
         actor_vehicles[actor_id] = _spawn_actor_vehicle(carla_module, world, actor, actor_id)
@@ -829,28 +1227,42 @@ def _spawn_interactive_actor_vehicles(
 
 def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], actor_id: str) -> Any:
     blueprint_library = world.get_blueprint_library()
-    blueprint_filter = str(actor.get("blueprint", "vehicle.*"))
+    actor_kind = _actor_kind(actor)
+    if (
+        actor_kind == "pedestrian"
+        and actor.get("closed_loop_level") == "traffic_manager_reactive"
+    ):
+        raise ValueError(
+            f"pedestrian actor {actor_id} requires scripted WalkerControl; "
+            "CARLA TrafficManager only controls vehicles"
+        )
+    default_filter = "walker.pedestrian.*" if actor_kind == "pedestrian" else "vehicle.*"
+    blueprint_filter = str(actor.get("blueprint", default_filter))
     blueprint_candidates = blueprint_library.filter(blueprint_filter)
-    if not blueprint_candidates and blueprint_filter != "vehicle.*":
-        blueprint_candidates = blueprint_library.filter("vehicle.*")
+    if not blueprint_candidates and blueprint_filter != default_filter:
+        blueprint_candidates = blueprint_library.filter(default_filter)
     if not blueprint_candidates:
         raise RuntimeError(f"no CARLA vehicle blueprint matched {blueprint_filter} for actor {actor_id}")
 
     blueprint = blueprint_candidates[0]
-    if hasattr(blueprint, "set_attribute"):
-        blueprint.set_attribute("role_name", str(actor.get("role_name", actor_id)))
+    _set_blueprint_attribute(
+        blueprint, "role_name", str(actor.get("role_name", actor_id))
+    )
+    if actor_kind == "pedestrian":
+        _set_blueprint_attribute(blueprint, "is_invincible", "false")
 
     transform = _carla_transform(carla_module, actor.get("initial_state") or {})
     vehicle = _try_spawn(world, blueprint, transform)
     if vehicle is not None:
         return vehicle
 
-    for fallback_transform in _map_spawn_points(world):
-        vehicle = _try_spawn(world, blueprint, fallback_transform)
-        if vehicle is not None:
-            return vehicle
+    if actor_kind == "vehicle":
+        for fallback_transform in _map_spawn_points(world):
+            vehicle = _try_spawn(world, blueprint, fallback_transform)
+            if vehicle is not None:
+                return vehicle
 
-    raise RuntimeError(f"failed to spawn interactive actor vehicle {actor_id}")
+    raise RuntimeError(f"failed to spawn interactive {actor_kind} actor {actor_id}")
 
 
 def _snap_plan_to_map(carla_module: Any, world: Any, plan: dict[str, Any]) -> None:
@@ -868,8 +1280,113 @@ def _snap_plan_to_map(carla_module: Any, world: Any, plan: dict[str, Any]) -> No
             for point in ego["route"]
         ]
     for actor in plan.get("actors") or []:
-        if _is_interactive_actor(actor) and actor.get("initial_state"):
+        if (
+            _should_spawn_actor(actor)
+            and _actor_kind(actor) == "vehicle"
+            and actor.get("initial_state")
+        ):
             actor["initial_state"] = _snap_pose_to_waypoint(carla_module, world_map, actor["initial_state"])
+
+
+def _bind_runtime_topology_route(
+    world: Any,
+    plan: dict[str, Any],
+    *,
+    distance_m: float,
+    step_m: float = 2.0,
+) -> None:
+    """Bind a short route that is guaranteed to stay in one CARLA map component.
+
+    This is an explicit physics-runtime acceptance route. It must not be used as
+    evidence that a source trajectory has been spatially aligned to the map.
+    """
+    if distance_m <= 0.0:
+        raise ValueError("runtime topology route distance must be positive")
+    world_map = world.get_map()
+    spawn_points = list(world_map.get_spawn_points())
+    if not spawn_points:
+        raise RuntimeError("OpenDRIVE world exposes no vehicle spawn points")
+
+    best_transforms: list[Any] = []
+    best_distance = 0.0
+    for start_transform in spawn_points:
+        waypoint = _get_projected_waypoint_from_location(
+            world_map, start_transform.location
+        )
+        if waypoint is None:
+            continue
+        transforms = [waypoint.transform]
+        travelled_m = 0.0
+        while travelled_m + 1e-6 < distance_m:
+            requested_step = min(step_m, distance_m - travelled_m)
+            candidates = list(waypoint.next(requested_step))
+            if not candidates:
+                break
+            current_yaw = float(getattr(waypoint.transform.rotation, "yaw", 0.0))
+            candidates.sort(
+                key=lambda item: abs(
+                    (float(getattr(item.transform.rotation, "yaw", 0.0)) - current_yaw + 180.0)
+                    % 360.0
+                    - 180.0
+                )
+            )
+            selected = None
+            for candidate in candidates:
+                location = candidate.transform.location
+                if all(
+                    math.hypot(
+                        float(location.x) - float(old.location.x),
+                        float(location.y) - float(old.location.y),
+                    ) >= 0.75
+                    for old in transforms[:-1]
+                ):
+                    selected = candidate
+                    break
+            if selected is None:
+                break
+            segment = math.hypot(
+                float(selected.transform.location.x) - float(waypoint.transform.location.x),
+                float(selected.transform.location.y) - float(waypoint.transform.location.y),
+            )
+            if segment <= 0.1:
+                break
+            waypoint = selected
+            transforms.append(waypoint.transform)
+            travelled_m += segment
+        if travelled_m > best_distance:
+            best_transforms = transforms
+            best_distance = travelled_m
+        if travelled_m >= distance_m * 0.98:
+            break
+    transforms = best_transforms
+    travelled_m = best_distance
+    if travelled_m < min(distance_m * 0.8, distance_m - 0.5):
+        raise RuntimeError(
+            f"runtime topology route is too short: requested={distance_m}, actual={travelled_m}"
+        )
+
+    route = []
+    for transform in transforms:
+        pose = _pose_from_transform(transform)
+        pose["z"] += 0.5
+        route.append(pose)
+    ego = plan.get("ego") or {}
+    ego["spawn"] = dict(route[0])
+    ego["destination"] = dict(route[-1])
+    ego["route"] = route
+    ego["route_binding"] = {
+        "source": "carla_runtime_topology",
+        "requested_distance_m": float(distance_m),
+        "actual_distance_m": float(travelled_m),
+        "source_trajectory_alignment": "not_claimed",
+    }
+
+
+def _get_projected_waypoint_from_location(world_map: Any, location: Any) -> Any | None:
+    try:
+        return world_map.get_waypoint(location, project_to_road=True)
+    except TypeError:
+        return world_map.get_waypoint(location)
 
 
 def _snap_pose_to_waypoint(carla_module: Any, world_map: Any, pose: dict[str, Any]) -> dict[str, float]:
@@ -934,6 +1451,8 @@ def _configure_actor_autopilot(
     bound_actor_ids: set[str] = set()
     for actor_id, vehicle in actor_vehicles.items():
         actor = actor_by_id.get(actor_id, {})
+        if _actor_kind(actor) != "vehicle":
+            continue
         if actor.get("closed_loop_level") != "traffic_manager_reactive":
             continue
         if hasattr(vehicle, "set_autopilot"):
@@ -977,6 +1496,17 @@ def _try_spawn(world: Any, blueprint: Any, transform: Any) -> Any | None:
         return None
 
 
+def _set_blueprint_attribute(blueprint: Any, name: str, value: str) -> None:
+    if not hasattr(blueprint, "set_attribute"):
+        return
+    if hasattr(blueprint, "has_attribute") and not blueprint.has_attribute(name):
+        return
+    try:
+        blueprint.set_attribute(name, str(value))
+    except (KeyError, ValueError, RuntimeError):
+        return
+
+
 def _carla_location(carla_module: Any, pose: dict[str, Any]) -> Any:
     return carla_module.Location(
         x=float(pose.get("x", 0.0)),
@@ -1001,7 +1531,14 @@ def _set_agent_destination(agent: Any, carla_module: Any, destination: dict[str,
 
 def _vehicle_pose(vehicle: Any) -> dict[str, float]:
     if not hasattr(vehicle, "get_transform"):
-        return {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0}
+        return {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": 0.0,
+        }
     transform = vehicle.get_transform()
     location = getattr(transform, "location", None)
     rotation = getattr(transform, "rotation", None)
@@ -1009,6 +1546,8 @@ def _vehicle_pose(vehicle: Any) -> dict[str, float]:
         "x": float(getattr(location, "x", 0.0)),
         "y": float(getattr(location, "y", 0.0)),
         "z": float(getattr(location, "z", 0.0)),
+        "roll": float(getattr(rotation, "roll", 0.0)),
+        "pitch": float(getattr(rotation, "pitch", 0.0)),
         "yaw": float(getattr(rotation, "yaw", 0.0)),
     }
 
@@ -1070,6 +1609,119 @@ def _draw_debug_markers(carla_module: Any, world: Any, ego_config: dict[str, Any
         )
 
 
+def _draw_route_lane_lines(
+    carla_module: Any,
+    world: Any,
+    route: list[dict[str, Any]],
+    *,
+    lane_width_m: float = 3.5,
+    stride: int = 8,
+) -> None:
+    debug = getattr(world, "debug", None)
+    if debug is None or not hasattr(debug, "draw_line") or len(route) < 2:
+        return
+    color_type = getattr(carla_module, "Color", None)
+    boundary_color = color_type(235, 235, 235) if color_type is not None else None
+    center_color = color_type(255, 190, 0) if color_type is not None else None
+    half_width = float(lane_width_m) / 2.0
+    step = max(1, int(stride))
+    for start_index in range(0, len(route) - 1, step):
+        end_index = min(start_index + step, len(route) - 1)
+        start = route[start_index]
+        end = route[end_index]
+        for side in (-1.0, 1.0):
+            begin = _route_offset_location(carla_module, start, side * half_width)
+            finish = _route_offset_location(carla_module, end, side * half_width)
+            _draw_debug_line(debug, begin, finish, boundary_color, 0.035, 60.0)
+        if (start_index // step) % 2 == 0:
+            begin = _route_offset_location(carla_module, start, 0.0)
+            finish = _route_offset_location(carla_module, end, 0.0)
+            _draw_debug_line(debug, begin, finish, center_color, 0.025, 60.0)
+
+
+def _route_offset_location(carla_module: Any, pose: dict[str, Any], offset_m: float) -> Any:
+    yaw_rad = math.radians(float(pose.get("yaw", 0.0)))
+    return carla_module.Location(
+        x=float(pose.get("x", 0.0)) - math.sin(yaw_rad) * float(offset_m),
+        y=float(pose.get("y", 0.0)) + math.cos(yaw_rad) * float(offset_m),
+        z=float(pose.get("z", 0.0)) + 0.08,
+    )
+
+
+def _draw_debug_line(
+    debug: Any,
+    begin: Any,
+    end: Any,
+    color: Any,
+    thickness: float,
+    lifetime: float,
+) -> None:
+    kwargs = {"thickness": float(thickness), "life_time": float(lifetime)}
+    if color is not None:
+        kwargs["color"] = color
+    try:
+        debug.draw_line(begin, end, **kwargs)
+    except TypeError:
+        debug.draw_line(begin, end)
+
+
+def _draw_dynamic_vehicle_boxes(
+    carla_module: Any,
+    world: Any,
+    ego_vehicle: Any,
+    actor_vehicles: dict[str, Any],
+    *,
+    life_time: float,
+) -> None:
+    debug = getattr(world, "debug", None)
+    if debug is None or not hasattr(debug, "draw_box"):
+        return
+    color_type = getattr(carla_module, "Color", None)
+    ego_color = color_type(0, 220, 255) if color_type is not None else None
+    actor_color = color_type(255, 90, 70) if color_type is not None else None
+    _draw_actor_box(carla_module, debug, ego_vehicle, ego_color, life_time)
+    for vehicle in actor_vehicles.values():
+        _draw_actor_box(carla_module, debug, vehicle, actor_color, life_time)
+
+
+def _draw_actor_box(
+    carla_module: Any,
+    debug: Any,
+    actor: Any,
+    color: Any,
+    life_time: float,
+) -> None:
+    if actor is None or not hasattr(actor, "get_transform") or not hasattr(actor, "bounding_box"):
+        return
+    transform = actor.get_transform()
+    source_box = actor.bounding_box
+    source_location = getattr(source_box, "location", None)
+    local_location = carla_module.Location(
+        x=float(getattr(source_location, "x", 0.0)),
+        y=float(getattr(source_location, "y", 0.0)),
+        z=float(getattr(source_location, "z", 0.0)),
+    )
+    transformed_location = transform.transform(local_location)
+    world_location = transformed_location if transformed_location is not None else local_location
+    box_type = getattr(carla_module, "BoundingBox", None)
+    box = box_type(world_location, source_box.extent) if box_type is not None else source_box
+    rotation = getattr(transform, "rotation", None)
+    box_rotation = getattr(source_box, "rotation", None)
+    if box_rotation is not None and rotation is not None:
+        rotation = carla_module.Rotation(
+            pitch=float(getattr(rotation, "pitch", 0.0)) + float(getattr(box_rotation, "pitch", 0.0)),
+            yaw=float(getattr(rotation, "yaw", 0.0)) + float(getattr(box_rotation, "yaw", 0.0)),
+            roll=float(getattr(rotation, "roll", 0.0)) + float(getattr(box_rotation, "roll", 0.0)),
+        )
+    kwargs = {"thickness": 0.045, "life_time": float(life_time)}
+    if color is not None:
+        kwargs["color"] = color
+    try:
+        debug.draw_box(box, rotation, **kwargs)
+    except TypeError:
+        debug.draw_box(box, rotation)
+
+
 def _draw_debug_point(
     carla_module: Any,
     debug: Any,
@@ -1092,6 +1744,7 @@ def _reactive_actor_tick(
     ego_pose: dict[str, float],
     ego_speed_mps: float,
     actor_vehicles: dict[str, Any] | None = None,
+    behavior_planner: Any = plan_reactive_actor_control,
 ) -> tuple[dict[str, float], dict[str, dict[str, Any]], float | None]:
     actor_distances_m: dict[str, float] = {}
     actor_decisions: dict[str, dict[str, Any]] = {}
@@ -1099,24 +1752,48 @@ def _reactive_actor_tick(
     actor_vehicles = actor_vehicles or {}
 
     for actor in actors:
-        if not _is_interactive_actor(actor):
-            continue
         actor_id = str(actor.get("actor_id", "actor"))
-        actor_state = _sample_actor_state(actor, actor_vehicles.get(actor_id))
+        actor_vehicle = actor_vehicles.get(actor_id)
+        if actor_vehicle is None:
+            continue
+        actor_state = _sample_actor_state(actor, actor_vehicle)
         actor_speed_mps = float(actor_state.get("speed_mps", 0.0))
         distance_m = _xy_distance(actor_state, ego_pose)
-        decision = plan_reactive_actor_control(
+        actor_distances_m[actor_id] = distance_m
+        relative_speed_mps = max(0.0, ego_speed_mps - actor_speed_mps)
+        if relative_speed_mps > 0.0:
+            finite_ttc_values.append(distance_m / relative_speed_mps)
+        if not _is_interactive_actor(actor):
+            continue
+        decision = behavior_planner(
             actor_state,
             {
                 "x": ego_pose.get("x", 0.0),
                 "y": ego_pose.get("y", 0.0),
                 "speed_mps": ego_speed_mps,
                 "distance_m": distance_m,
-                "relative_speed_mps": max(0.0, ego_speed_mps - actor_speed_mps),
+                "relative_speed_mps": relative_speed_mps,
             },
             style=_actor_style(actor),
             reference_speed_mps=_actor_reference_speed(actor),
         )
+        decision = dict(decision)
+        if _actor_kind(actor) == "pedestrian":
+            # Pedestrian closed loop is intentionally root-pose only: ego may
+            # change speed/pause/yield/abort, never the recorded walking corridor.
+            decision["target_point"] = _next_reference_target(actor, actor_state)
+            decision["motion_constraint"] = "source_reference_corridor"
+            decision["allowed_actions"] = ["speed", "pause", "yield", "abort"]
+        else:
+            decision["motion_constraint"] = "carla_lane_or_reference_route"
+            decision["allowed_actions"] = [
+                "speed",
+                "throttle",
+                "brake",
+                "steer",
+                "yield",
+                "abort",
+            ]
         actor_distances_m[actor_id] = float(decision["distance_m"])
         actor_decisions[actor_id] = decision
         ttc_sec = decision.get("ttc_sec")
@@ -1140,6 +1817,16 @@ def _is_interactive_actor(actor: dict[str, Any]) -> bool:
         return True
     closed_loop = actor.get("closed_loop") or {}
     return bool(closed_loop.get("ego_responsive", False))
+
+
+def _should_spawn_actor(actor: dict[str, Any]) -> bool:
+    if _is_interactive_actor(actor):
+        return True
+    return bool(
+        actor.get("closed_loop_level") == "replay"
+        and actor.get("initial_state")
+        and actor.get("reference_trajectory")
+    )
 
 
 def _xy_distance(actor_state: dict[str, Any], ego_pose: dict[str, float]) -> float:
@@ -1175,21 +1862,442 @@ def _apply_scripted_actor_controls(
         vehicle = actor_vehicles.get(actor_id)
         if vehicle is None or not hasattr(vehicle, "apply_control"):
             continue
+        if _actor_kind(actor) == "pedestrian":
+            vehicle.apply_control(
+                _walker_control(carla_module, actor, vehicle, decision)
+            )
+            evidence[actor_id] = "scripted_walker_control"
+            continue
         current_speed = _vehicle_speed_mps(vehicle)
         desired_speed = float(decision.get("desired_speed_mps", current_speed))
         should_brake = bool(decision.get("brake", False))
         throttle = 0.0 if should_brake else min(1.0, max(0.0, (desired_speed - current_speed) / 5.0))
         brake = min(1.0, max(0.0, (current_speed - desired_speed) / 5.0)) if should_brake else 0.0
+        steer = 0.0
+        target_point = decision.get("target_point")
+        if isinstance(target_point, dict):
+            pose = _vehicle_pose(vehicle)
+            desired_yaw = math.degrees(
+                math.atan2(
+                    float(target_point.get("y", pose["y"])) - pose["y"],
+                    float(target_point.get("x", pose["x"])) - pose["x"],
+                )
+            )
+            yaw_error = (desired_yaw - pose["yaw"] + 180.0) % 360.0 - 180.0
+            steer = min(1.0, max(-1.0, yaw_error / 45.0))
         vehicle.apply_control(
             _vehicle_control(
                 carla_module,
                 throttle=throttle,
                 brake=max(brake, 0.35 if should_brake else 0.0),
-                steer=0.0,
+                steer=steer,
             )
         )
         evidence[actor_id] = "scripted_vehicle_control"
     return evidence
+
+
+def _apply_replay_actor_controls(
+    carla_module: Any,
+    actors: list[dict[str, Any]],
+    actor_vehicles: dict[str, Any],
+    *,
+    run_time_sec: float,
+) -> dict[str, str]:
+    evidence: dict[str, str] = {}
+    for actor in actors:
+        if actor.get("closed_loop_level") != "replay":
+            continue
+        actor_id = str(actor.get("actor_id", "actor"))
+        entity = actor_vehicles.get(actor_id)
+        if entity is None or not hasattr(entity, "apply_control"):
+            continue
+        target = _reference_pose_at_time(actor, run_time_sec)
+        if target is None:
+            continue
+        target_speed = _reference_speed_at_time(actor, run_time_sec)
+        if _actor_kind(actor) == "pedestrian":
+            entity.apply_control(
+                _walker_control(
+                    carla_module,
+                    {**actor, "reference_trajectory": [target]},
+                    entity,
+                    {"desired_speed_mps": target_speed, "should_abort": False},
+                )
+            )
+            evidence[actor_id] = "trajectory_replay_walker_control"
+            continue
+        pose = _vehicle_pose(entity)
+        desired_yaw = math.degrees(
+            math.atan2(target["y"] - pose["y"], target["x"] - pose["x"])
+        )
+        yaw_error = (desired_yaw - pose["yaw"] + 180.0) % 360.0 - 180.0
+        current_speed = _vehicle_speed_mps(entity)
+        speed_error = target_speed - current_speed
+        entity.apply_control(
+            _vehicle_control(
+                carla_module,
+                throttle=min(0.7, max(0.0, 0.25 * speed_error)),
+                brake=min(0.8, max(0.0, -0.35 * speed_error)),
+                steer=min(1.0, max(-1.0, yaw_error / 45.0)),
+            )
+        )
+        evidence[actor_id] = "trajectory_replay_vehicle_control"
+    return evidence
+
+
+def _actor_kind(actor: dict[str, Any]) -> str:
+    value = str(actor.get("actor_type", actor.get("type", "vehicle"))).lower()
+    if value in {"pedestrian", "walker", "person"}:
+        return "pedestrian"
+    return "vehicle"
+
+
+def _walker_control(
+    carla_module: Any,
+    actor: dict[str, Any],
+    walker: Any,
+    decision: dict[str, Any],
+) -> Any:
+    pose = _vehicle_pose(walker)
+    # Never accept a free-space pedestrian target from a behavior plugin. The
+    # only editable dimensions are longitudinal progress and stop/yield state.
+    target = _next_reference_target(actor, pose)
+    dx = float(target.get("x", pose["x"])) - pose["x"]
+    dy = float(target.get("y", pose["y"])) - pose["y"]
+    norm = math.hypot(dx, dy)
+    if norm <= 1e-6:
+        yaw = math.radians(float(pose.get("yaw", 0.0)))
+        dx, dy, norm = math.cos(yaw), math.sin(yaw), 1.0
+    direction_type = getattr(carla_module, "Vector3D", None)
+    direction = (
+        direction_type(x=dx / norm, y=dy / norm, z=0.0)
+        if direction_type is not None
+        else SimpleNamespace(x=dx / norm, y=dy / norm, z=0.0)
+    )
+    speed = float(decision.get("desired_speed_mps", 0.0))
+    if bool(decision.get("should_abort", False)):
+        speed = 0.0
+    control_type = getattr(carla_module, "WalkerControl", None)
+    values = {"direction": direction, "speed": max(0.0, speed), "jump": False}
+    if control_type is None:
+        return SimpleNamespace(**values)
+    try:
+        return control_type(**values)
+    except TypeError:
+        control = control_type()
+        for key, value in values.items():
+            setattr(control, key, value)
+        return control
+
+
+def _next_reference_target(
+    actor: dict[str, Any], pose: dict[str, float]
+) -> dict[str, Any]:
+    trajectory = [
+        point
+        for point in actor.get("reference_trajectory") or []
+        if isinstance(point, dict) and "x" in point and "y" in point
+    ]
+    if not trajectory:
+        return pose
+    nearest = min(
+        range(len(trajectory)),
+        key=lambda index: _xy_distance(trajectory[index], pose),
+    )
+    return trajectory[min(len(trajectory) - 1, nearest + 1)]
+
+
+def _reference_pose_at_time(
+    actor: dict[str, Any], simulation_time_sec: float
+) -> dict[str, float] | None:
+    trajectory = [
+        point for point in actor.get("reference_trajectory") or []
+        if isinstance(point, dict)
+    ]
+    timed = [point for point in trajectory if point.get("t_sec") is not None]
+    if not timed:
+        return None
+    point = min(
+        timed,
+        key=lambda sample: abs(float(sample["t_sec"]) - float(simulation_time_sec)),
+    )
+    return _pose(point)
+
+
+def _reference_speed_at_time(actor: dict[str, Any], run_time_sec: float) -> float:
+    trajectory = [
+        point for point in actor.get("reference_trajectory") or []
+        if isinstance(point, dict) and point.get("t_sec") is not None
+    ]
+    if not trajectory:
+        return max(0.0, float((actor.get("initial_state") or {}).get("speed_mps", 0.0)))
+    point = min(
+        trajectory,
+        key=lambda sample: abs(float(sample["t_sec"]) - float(run_time_sec)),
+    )
+    return max(0.0, float(point.get("speed_mps", 0.0)))
+
+
+def _actor_runtime_binding_evidence(
+    plan: dict[str, Any],
+    actor_vehicles: dict[str, Any],
+) -> dict[str, Any]:
+    declaration = plan.get("actor_binding") or {}
+    selected = [str(value) for value in declaration.get("selected_actor_ids") or []]
+    actor_by_id = {
+        str(actor.get("actor_id", "actor")): actor
+        for actor in plan.get("actors") or []
+    }
+    if not selected:
+        selected = [
+            actor_id
+            for actor_id, actor in actor_by_id.items()
+            if isinstance(actor.get("binding"), dict)
+        ]
+    if not selected:
+        return {
+            "schema_version": "actor_runtime_binding_evidence.v1",
+            "status": "not_configured",
+            "records": [],
+            "issues": [],
+        }
+    issues: list[str] = []
+    if (declaration.get("readiness") or {}).get("status") not in {None, "ready"}:
+        issues.append("declared_actor_binding_not_ready")
+    records = []
+    for actor_id in selected:
+        actor = actor_by_id.get(actor_id)
+        record_issues = []
+        binding = actor.get("binding") if isinstance(actor, dict) else None
+        entity = actor_vehicles.get(actor_id)
+        if actor is None:
+            record_issues.append("run_actor_missing")
+            binding = {}
+        elif not isinstance(binding, dict):
+            record_issues.append("runtime_binding_missing")
+            binding = {}
+        if entity is None:
+            record_issues.append("carla_physical_actor_missing")
+        runtime_actor_id = getattr(entity, "id", None) if entity is not None else None
+        if not isinstance(runtime_actor_id, int) or isinstance(runtime_actor_id, bool):
+            record_issues.append("carla_runtime_actor_id_missing")
+            runtime_actor_id = None
+        expected_role = str((actor or {}).get("role_name") or actor_id)
+        attributes = getattr(entity, "attributes", {}) if entity is not None else {}
+        actual_role = (
+            str(attributes.get("role_name") or "")
+            if isinstance(attributes, dict)
+            else ""
+        )
+        if actual_role != expected_role:
+            record_issues.append("carla_role_name_mismatch")
+        if binding.get("declared_status") != "ready":
+            record_issues.append("binding_declared_status_not_ready")
+        if not binding.get("nurec_track_id"):
+            record_issues.append("nurec_track_id_missing")
+        if not (actor or {}).get("source_track_id"):
+            record_issues.append("source_track_id_missing")
+        if (
+            binding.get("nurec_track_id")
+            and (actor or {}).get("source_track_id")
+            and binding.get("nurec_track_id") != (actor or {}).get("source_track_id")
+        ):
+            record_issues.append("source_nurec_track_mismatch")
+        if set(binding.get("required_modalities") or []) != {"rgb", "lidar"}:
+            record_issues.append("required_modalities_must_be_rgb_lidar")
+        if binding.get("same_dynamic_object_for_all_modalities") is not True:
+            record_issues.append("cross_modality_dynamic_object_sync_not_required")
+        if binding.get("sensor_pose_source") not in {
+            "carla_runtime_actor_pose",
+            "scenario_ir_reference_trajectory",
+        }:
+            record_issues.append("sensor_pose_source_invalid")
+        record = {
+            "actor_id": actor_id,
+            "actor_type": _actor_kind(actor or {}),
+            "source_track_id": (actor or {}).get("source_track_id"),
+            "carla": {
+                "expected_role_name": expected_role,
+                "actual_role_name": actual_role,
+                "runtime_actor_id": runtime_actor_id,
+            },
+            "nurec_track_id": binding.get("nurec_track_id"),
+            "sensor_pose_source": binding.get("sensor_pose_source"),
+            "required_modalities": list(binding.get("required_modalities") or []),
+            "status": "passed" if not record_issues else "failed",
+            "issues": record_issues,
+        }
+        issues.extend(f"{actor_id}:{issue}" for issue in record_issues)
+        records.append(record)
+    runtime_ids = [
+        record["carla"]["runtime_actor_id"]
+        for record in records
+        if record["carla"]["runtime_actor_id"] is not None
+    ]
+    if len(runtime_ids) != len(set(runtime_ids)):
+        issues.append("duplicate_carla_runtime_actor_id")
+    return {
+        "schema_version": "actor_runtime_binding_evidence.v1",
+        "status": "passed" if not issues else "failed",
+        "records": records,
+        "issues": sorted(set(issues)),
+    }
+
+
+def _initial_bound_actor_poses(
+    actors: list[dict[str, Any]],
+    actor_vehicles: dict[str, Any],
+) -> dict[str, dict[str, float]]:
+    result = {}
+    for actor in actors:
+        if not isinstance(actor.get("binding"), dict):
+            continue
+        actor_id = str(actor.get("actor_id", "actor"))
+        pose_source = actor["binding"].get("sensor_pose_source")
+        if pose_source == "scenario_ir_reference_trajectory":
+            pose = _reference_pose_at_time(actor, 0.0)
+        else:
+            entity = actor_vehicles.get(actor_id)
+            pose = _vehicle_pose(entity) if entity is not None else None
+        if pose is not None:
+            result[actor_id] = dict(pose)
+    return result
+
+
+def _current_bound_actor_poses(
+    actors: list[dict[str, Any]],
+    actor_states: dict[str, dict[str, Any]],
+    simulation_time_sec: float,
+) -> dict[str, dict[str, float]]:
+    result = {}
+    for actor in actors:
+        binding = actor.get("binding")
+        if not isinstance(binding, dict):
+            continue
+        actor_id = str(actor.get("actor_id", "actor"))
+        if binding.get("sensor_pose_source") == "scenario_ir_reference_trajectory":
+            pose = _reference_pose_at_time(actor, simulation_time_sec)
+        else:
+            state = actor_states.get(actor_id) or {}
+            pose = state.get("pose")
+        if isinstance(pose, dict):
+            result[actor_id] = dict(pose)
+    return result
+
+
+def _build_sensor_frame_context(
+    plan: dict[str, Any],
+    *,
+    frame_id: int,
+    tick_index: int,
+    simulation_time_sec: float,
+    scenario_time_sec: float,
+    interval_start_sec: float,
+    ego_pose: dict[str, float],
+    previous_ego_pose: dict[str, float],
+    actor_states: dict[str, dict[str, Any]],
+    previous_actor_poses: dict[str, dict[str, float]],
+) -> dict[str, Any]:
+    current_actor_poses = _current_bound_actor_poses(
+        plan.get("actors") or [],
+        actor_states,
+        scenario_time_sec,
+    )
+    samples = {}
+    actor_by_id = {
+        str(actor.get("actor_id", "actor")): actor
+        for actor in plan.get("actors") or []
+    }
+    selected = [str(value) for value in (plan.get("actor_binding") or {}).get("selected_actor_ids") or []]
+    if not selected:
+        selected = sorted(current_actor_poses)
+    for actor_id in selected:
+        actor = actor_by_id.get(actor_id) or {}
+        binding = actor.get("binding") or {}
+        current = current_actor_poses.get(actor_id)
+        previous = previous_actor_poses.get(actor_id)
+        if current is None or previous is None:
+            raise RuntimeError(f"bound actor has no render pose pair: {actor_id}")
+        samples[actor_id] = {
+            "source": binding.get("sensor_pose_source"),
+            "pose_pair": {"start": dict(previous), "end": dict(current)},
+            "carla_runtime_actor_id": (actor_states.get(actor_id) or {}).get(
+                "carla_runtime_actor_id"
+            ),
+            "nurec_track_id": binding.get("nurec_track_id"),
+        }
+    return {
+        "schema_version": "carla_nurec_frame_context.v1",
+        "scene_id": plan.get("scenario_id"),
+        "frame_id": frame_id,
+        "tick_index": tick_index,
+        "simulation_time_sec": float(simulation_time_sec),
+        "scenario_time_sec": float(scenario_time_sec),
+        "interval_start_sec": float(interval_start_sec),
+        "ego_pose_pair": {
+            "start": dict(previous_ego_pose),
+            "end": dict(ego_pose),
+        },
+        "actor_samples": samples,
+        "clock": "carla_snapshot",
+    }
+
+
+def _validate_sensor_frame_evidence(evidence: Any, frame_id: int) -> None:
+    if not isinstance(evidence, dict):
+        raise RuntimeError("sensor_frame_handler must return evidence as a dictionary")
+    from adapters.nurec_multimodal import (
+        NuRecMultimodalError,
+        validate_nurec_multimodal_evidence,
+    )
+
+    try:
+        validate_nurec_multimodal_evidence(evidence)
+    except NuRecMultimodalError as exc:
+        raise RuntimeError(f"invalid NuRec multimodal evidence: {exc}") from exc
+    if evidence.get("frame_id") != frame_id:
+        raise RuntimeError(
+            f"NuRec evidence frame mismatch: expected={frame_id}, actual={evidence.get('frame_id')}"
+        )
+
+
+def _multimodal_runtime_summary(
+    trace: list[dict[str, Any]],
+    *,
+    required: bool,
+    handler_present: bool,
+) -> dict[str, Any]:
+    if not handler_present:
+        status = "not_configured"
+    elif not trace:
+        status = "no_frames"
+    elif all(item.get("status") == "passed" for item in trace):
+        status = "passed"
+    else:
+        status = "failed"
+    return {
+        "required": bool(required),
+        "handler_present": bool(handler_present),
+        "status": status,
+        "sensor_closed_loop": status == "passed",
+        "frame_count": len(trace),
+        "passed_frame_count": sum(item.get("status") == "passed" for item in trace),
+        "failed_frame_count": sum(item.get("status") != "passed" for item in trace),
+        "modalities": ["rgb", "lidar"] if handler_present else [],
+    }
+
+
+def _load_actor_behavior_planner(plugin: Any) -> Any:
+    if plugin is None or plugin == "":
+        return plan_reactive_actor_control
+    if not isinstance(plugin, str) or ":" not in plugin:
+        raise ValueError("actor behavior_plugin must use module:function syntax")
+    module_name, function_name = plugin.split(":", 1)
+    function = getattr(importlib.import_module(module_name), function_name, None)
+    if not callable(function):
+        raise ValueError(f"actor behavior plugin is not callable: {plugin}")
+    return function
 
 
 def _vehicle_control(carla_module: Any, *, throttle: float, brake: float, steer: float) -> Any:
@@ -1282,9 +2390,14 @@ def _write_runtime_evidence(
     frame_trace: list[dict[str, Any]],
     metrics_trace: list[dict[str, Any]],
     cleanup_audit: list[dict[str, Any]],
+    multimodal_trace: list[dict[str, Any]],
 ) -> None:
     artifacts = plan.get("artifacts") or {}
-    for name, rows in (("frame_trace", frame_trace), ("metrics_trace", metrics_trace)):
+    for name, rows in (
+        ("frame_trace", frame_trace),
+        ("metrics_trace", metrics_trace),
+        ("nurec_multimodal_trace", multimodal_trace),
+    ):
         target = artifacts.get(name)
         if not target:
             continue
@@ -1333,6 +2446,7 @@ def main(argv=None) -> int:
     parser.add_argument("--output", default=None, help="Path to write basic_agent_plan.json.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=2000, type=int)
+    parser.add_argument("--timeout-sec", default=60.0, type=float)
     parser.add_argument("--max-ticks", default=600, type=int)
     parser.add_argument("--async-world", action="store_true", help="Do not request synchronous stepping.")
     parser.add_argument("--execute", action="store_true", help="Attempt real CARLA execution instead of dry-run planning.")
@@ -1345,13 +2459,45 @@ def main(argv=None) -> int:
         help="Disable CARLA TrafficManager for traffic_manager_reactive actors.",
     )
     parser.add_argument("--traffic-manager-port", default=8000, type=int)
-    parser.add_argument("--ego-driver", choices=("basic_agent", "ros2_control"), default="basic_agent")
+    parser.add_argument(
+        "--ego-driver",
+        choices=("basic_agent", "topology_follower", "ros2_control", "ros2_observation_control"),
+        default="basic_agent",
+    )
     parser.add_argument("--control-topic", default=None)
+    parser.add_argument("--observation-topic", default=None)
     parser.add_argument("--control-timeout-sec", default=0.5, type=float)
     parser.add_argument(
         "--acceptance-evidence",
         action="store_true",
         help="Fail closed unless frame, collision, route, actor-response, and cleanup evidence is complete.",
+    )
+    parser.add_argument(
+        "--opendrive",
+        default=None,
+        help="Generate the CARLA world from this OpenDRIVE file instead of loading a native map.",
+    )
+    parser.add_argument(
+        "--runtime-route-distance-m",
+        default=None,
+        type=float,
+        help=(
+            "Replace the source route with a connected route sampled from the loaded "
+            "CARLA topology. This is only a physics-runtime acceptance route."
+        ),
+    )
+    parser.add_argument(
+        "--physics-smoke",
+        action="store_true",
+        help="Evaluate only collision and route-completion criteria for a no-actor physics smoke.",
+    )
+    parser.add_argument(
+        "--multimodal-sensor-required",
+        action="store_true",
+        help=(
+            "Mark the plan fail-closed for injected NuRec RGB/LiDAR frame evidence. "
+            "Execution requires a sensor_frame_handler from the host integration."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -1371,8 +2517,14 @@ def main(argv=None) -> int:
         traffic_manager_port=args.traffic_manager_port,
         ego_driver=args.ego_driver,
         control_topic=args.control_topic,
+        observation_topic=args.observation_topic,
         control_timeout_sec=args.control_timeout_sec,
         acceptance_evidence=args.acceptance_evidence,
+        opendrive_path=args.opendrive,
+        timeout_sec=args.timeout_sec,
+        runtime_route_distance_m=args.runtime_route_distance_m,
+        physics_smoke=args.physics_smoke,
+        multimodal_sensor_required=args.multimodal_sensor_required,
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)

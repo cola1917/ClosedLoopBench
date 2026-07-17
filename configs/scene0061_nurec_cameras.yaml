@@ -1,0 +1,27 @@
+- nurec_camera: camera_front_left
+
+- nurec_camera: camera_front
+
+- nurec_camera: camera_front_right
+
+- nurec_camera: camera_back_left
+
+- nurec_camera: camera_back
+
+- nurec_camera: camera_back_right
+
+# Native CARLA overhead view for checking ego motion against OpenDRIVE.
+- sensor: rgb
+  attributes:
+    image_size_x: 800
+    image_size_y: 450
+    fov: 90
+  transform:
+    location:
+      x: 0
+      y: 0
+      z: 10
+    rotation:
+      pitch: -90
+      yaw: 0
+      roll: 0

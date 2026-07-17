@@ -1,0 +1,85 @@
+{
+  "schema_version": "closed_loop_experiment_matrix.v0",
+  "matrix_id": "scene0061-nurec-v7-pure-pursuit",
+  "producer": {
+    "project": "ClosedLoopBench",
+    "component": "matrix-planner",
+    "version": "1.0.0"
+  },
+  "scenes": [
+    {
+      "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+      "scene_version": "nurec-40k-route-extended-both-v7",
+      "correlation_id": "flow-scene-0061-nurec-v7",
+      "root_message_id": "msg-scene0061-selection",
+      "scene_result_message_id": "msg-scene0061-reconstruction-40k",
+      "scene_package": {
+        "schema_version": "shared_artifact_ref.v1",
+        "path": "outputs/scene-0061-1000step/scene_package.json",
+        "role": "scene_package",
+        "media_type": "application/json",
+        "sha256": "e187e2dfef4755c9834e1964dfa36ba483663cd374a371c4c74fdd42abd7bc4e",
+        "size_bytes": 2260,
+        "content_schema": "closed_loop_scene_package.v1",
+        "immutable": true
+      }
+    }
+  ],
+  "algorithms": [
+    {
+      "algorithm_id": "reference_pure_pursuit_short",
+      "algorithm_version": "carla-0.9.16",
+      "driver": "external_plugin",
+      "parameters": {
+        "lookahead_points": 3,
+        "target_speed_mps": 4.0,
+        "observation_transport": "ros2_std_msgs_json",
+        "control_frame_matching": true,
+        "control_transport": "ros2_fastdds_udp4",
+        "ros_domain_id": 61
+      }
+    },
+    {
+      "algorithm_id": "reference_pure_pursuit_long",
+      "algorithm_version": "carla-0.9.16",
+      "driver": "external_plugin",
+      "parameters": {
+        "lookahead_points": 7,
+        "target_speed_mps": 5.0,
+        "observation_transport": "ros2_std_msgs_json",
+        "control_frame_matching": true,
+        "control_transport": "ros2_fastdds_udp4",
+        "ros_domain_id": 61
+      }
+    }
+  ],
+  "odds": [
+    {
+      "odd_id": "default",
+      "parameters": {
+        "route_xodr": "road.nurec-route-extended-both-v7.xodr",
+        "reconstruction": "nurec-40k",
+        "camera_count": 6
+      }
+    }
+  ],
+  "seeds": [61, 62, 63],
+  "simulator": {
+    "name": "carla",
+    "version": "0.9.16",
+    "synchronous_mode": true,
+    "fixed_delta_seconds": 0.05
+  },
+  "actor_control": {
+    "mode": "replay",
+    "style": "normal"
+  },
+  "metrics": [
+    "collision_count",
+    "min_ttc",
+    "route_progress",
+    "hard_brake_count",
+    "max_jerk"
+  ],
+  "timeout_sec": 120
+}

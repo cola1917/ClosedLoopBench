@@ -120,8 +120,33 @@ class ScenePackageTests(unittest.TestCase):
         self.assertEqual(package["source"]["dataset"], "nuscenes")
         self.assertEqual(package["map"]["location"], "singapore-onenorth")
         self.assertEqual(package["map"]["opendrive"], "road.xodr")
+        self.assertIsNone(package["motion"]["actor_bindings"])
         self.assertIsNone(package["visual"]["nurec_usdz"])
         self.assertEqual(package["alignment"]["status"], "log_to_sim_defined")
+
+    def test_can_reference_the_actor_binding_artifact(self):
+        from adapters.scene_package import build_scene_package
+
+        scene_ir = {
+            "scenario_id": "cc8c0bf57f984915a77078b10eb33198",
+            "source": {
+                "dataset": "nuscenes",
+                "scene_name": "scene-0061",
+                "scene_token": "cc8c0bf57f984915a77078b10eb33198",
+            },
+            "coordinate_frame": _coordinate_frame(),
+            "map_context": {"location": "singapore-onenorth"},
+        }
+        package = build_scene_package(
+            scene_ir,
+            scene_ir_path="scene_ir.json",
+            actor_bindings_path="actor_bindings.json",
+            openscenario_path="scenario.xosc",
+            opendrive_path="road.xodr",
+            map_source="nuscenes_map_expansion",
+        )
+
+        self.assertEqual(package["motion"]["actor_bindings"], "actor_bindings.json")
 
 
 if __name__ == "__main__":
