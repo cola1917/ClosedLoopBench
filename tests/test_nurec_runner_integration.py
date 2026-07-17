@@ -21,6 +21,7 @@ def _plan():
         "schema_version": "actor_runtime_binding.v1",
         "nurec_track_id": "track-trigger",
         "sensor_pose_source": "carla_runtime_actor_pose",
+        "sensor_pose_reference": "carla_bounding_box_center",
         "required_modalities": ["rgb", "lidar"],
         "same_dynamic_object_for_all_modalities": True,
         "declared_status": "ready",
@@ -184,6 +185,7 @@ class NuRecRunnerIntegrationTests(unittest.TestCase):
         self.assertEqual([item["frame_id"] for item in contexts], [1, 2])
         sample = contexts[0]["actor_samples"]["trigger"]
         self.assertEqual(sample["source"], "carla_runtime_actor_pose")
+        self.assertEqual(sample["pose_reference"], "carla_bounding_box_center")
         self.assertEqual(sample["carla_runtime_actor_id"], 101)
         self.assertEqual(sample["nurec_track_id"], "track-trigger")
         self.assertNotEqual(sample["pose_pair"]["start"]["x"], sample["pose_pair"]["end"]["x"])

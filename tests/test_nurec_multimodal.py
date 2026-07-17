@@ -56,6 +56,7 @@ def _frame():
         actor_samples={
             VEHICLE_TRACK: {
                 "source": "carla_runtime_actor_pose",
+                "pose_reference": "carla_bounding_box_center",
                 "pose_pair": actor_pair,
             }
         },
@@ -117,7 +118,11 @@ class NuRecMultimodalTests(unittest.TestCase):
             interval_start_sec=0.0,
             camera_specs=[{"sensor_id": "cam", "model": "pinhole", "width": 10, "pose_pair": pair}],
             lidar_specs=[{"sensor_id": "lidar", "model": "verified", "pose_pair": pair}],
-            actor_samples={VEHICLE_TRACK: {"source": "carla_runtime_actor_pose", "pose_pair": pair}},
+            actor_samples={VEHICLE_TRACK: {
+                "source": "carla_runtime_actor_pose",
+                "pose_reference": "carla_bounding_box_center",
+                "pose_pair": pair,
+            }},
         )
         with self.assertRaisesRegex(NuRecMultimodalError, "runtime_validated"):
             build_nurec_multimodal_frame(package, _binding_set(), **kwargs)

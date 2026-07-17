@@ -67,6 +67,11 @@ def _result(actor_type="vehicle"):
                         "source_track_id": "source-track",
                         "nurec_track_id": "source-track",
                         "sensor_pose_source": "carla_runtime_actor_pose",
+                        "sensor_pose_reference": (
+                            "carla_actor_origin"
+                            if actor_type == "pedestrian"
+                            else "carla_bounding_box_center"
+                        ),
                         "required_modalities": ["rgb", "lidar"],
                         "carla": {"runtime_actor_id": 101},
                         "status": "passed",
@@ -97,6 +102,7 @@ class MultimodalClosedLoopAcceptanceTests(unittest.TestCase):
         self.assertEqual(vehicle["status"], "passed")
         self.assertEqual(pedestrian["status"], "passed")
         self.assertEqual(vehicle["modalities"], ["rgb", "lidar"])
+        self.assertEqual(vehicle["pose_references"]["trigger"], "carla_bounding_box_center")
 
     def test_rejects_missing_lidar_or_incomplete_frame_coverage(self):
         from runners.validate_multimodal_closed_loop import (
@@ -129,6 +135,13 @@ class MultimodalClosedLoopAcceptanceTests(unittest.TestCase):
         no_reason["report"]["metrics"][0]["actor_decisions"]["trigger"].pop("reason")
         with self.assertRaisesRegex(MultimodalClosedLoopError, "reason/constraint"):
             validate_multimodal_closed_loop_result(no_reason)
+
+        wrong_reference = _result()
+        wrong_reference["report"]["runtime"]["actor_runtime_binding"]["records"][0][
+            "sensor_pose_reference"
+        ] = "carla_actor_origin"
+        with self.assertRaisesRegex(MultimodalClosedLoopError, "pose reference"):
+            validate_multimodal_closed_loop_result(wrong_reference)
 
     def test_rejects_pedestrian_free_space_edit(self):
         from runners.validate_multimodal_closed_loop import (

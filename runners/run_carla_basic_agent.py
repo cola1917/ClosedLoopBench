@@ -551,9 +551,18 @@ def _run_basic_agent_loop(
             }
             actor_states = {}
             for actor_id, vehicle in actor_vehicles.items():
-                pose = _vehicle_pose(vehicle)
+                transform, pose = _vehicle_transform_and_pose(vehicle)
                 speed = _vehicle_speed_mps(vehicle)
                 actor = actor_by_id.get(actor_id, {})
+                render_pose = None
+                render_pose_reference = None
+                if isinstance(actor.get("binding"), dict):
+                    render_pose, render_pose_reference = _bound_actor_render_pose(
+                        actor,
+                        vehicle,
+                        transform=transform,
+                        actor_pose=pose,
+                    )
                 reference_pose = _reference_pose_at_time(
                     actor, run_time_sec
                 )
@@ -566,6 +575,8 @@ def _run_basic_agent_loop(
                         else None
                     ),
                     "pose": pose,
+                    "render_pose": render_pose,
+                    "render_pose_reference": render_pose_reference,
                     "speed_mps": speed,
                     "reference_pose": reference_pose,
                     "reference_error_m": (
@@ -1557,8 +1568,12 @@ def _set_agent_destination(agent: Any, carla_module: Any, destination: dict[str,
 def _vehicle_pose(vehicle: Any) -> dict[str, float]:
     """Return a CARLA actor pose in the canonical scene-local right-handed frame."""
 
+    return _vehicle_transform_and_pose(vehicle)[1]
+
+
+def _vehicle_transform_and_pose(vehicle: Any) -> tuple[Any | None, dict[str, float]]:
     if not hasattr(vehicle, "get_transform"):
-        return {
+        return None, {
             "x": 0.0,
             "y": 0.0,
             "z": 0.0,
@@ -1567,6 +1582,10 @@ def _vehicle_pose(vehicle: Any) -> dict[str, float]:
             "yaw": 0.0,
         }
     transform = vehicle.get_transform()
+    return transform, _scene_pose_from_carla_transform(transform)
+
+
+def _scene_pose_from_carla_transform(transform: Any) -> dict[str, float]:
     location = getattr(transform, "location", None)
     rotation = getattr(transform, "rotation", None)
     return {
@@ -1577,6 +1596,63 @@ def _vehicle_pose(vehicle: Any) -> dict[str, float]:
         "pitch": float(getattr(rotation, "pitch", 0.0)),
         "yaw": -float(getattr(rotation, "yaw", 0.0)),
     }
+
+
+def _bound_actor_render_pose(
+    actor: dict[str, Any],
+    entity: Any,
+    *,
+    transform: Any | None = None,
+    actor_pose: dict[str, float] | None = None,
+) -> tuple[dict[str, float], str]:
+    """Return the NuRec track reference pose used by NVIDIA's CARLA adapter.
+
+    NuRec vehicle/two-wheeler tracks are cuboid-centred. CARLA vehicle transforms
+    use the blueprint actor origin, so NVIDIA composes ``bounding_box.location``
+    before sending a controllable dynamic object to gRPC. Pedestrian tracks keep
+    the CARLA actor origin in the upstream adapter.
+    """
+
+    reference = str((actor.get("binding") or {}).get("sensor_pose_reference") or "")
+    if transform is None or actor_pose is None:
+        transform, actor_pose = _vehicle_transform_and_pose(entity)
+    if reference == "carla_actor_origin":
+        return dict(actor_pose), reference
+    if reference != "carla_bounding_box_center":
+        raise RuntimeError(
+            f"bound actor {actor.get('actor_id', 'actor')} has unsupported render pose reference: {reference}"
+        )
+    bounding_box = getattr(entity, "bounding_box", None)
+    offset = getattr(bounding_box, "location", None)
+    if offset is None:
+        raise RuntimeError(
+            f"bound vehicle actor {actor.get('actor_id', 'actor')} has no CARLA bounding-box offset"
+        )
+    pose = dict(actor_pose)
+    if transform is not None and hasattr(transform, "transform"):
+        world_location = transform.transform(offset)
+        if world_location is not None:
+            pose.update(
+                {
+                    "x": float(getattr(world_location, "x", 0.0)),
+                    "y": -float(getattr(world_location, "y", 0.0)),
+                    "z": float(getattr(world_location, "z", 0.0)),
+                }
+            )
+            return pose, reference
+    local_x = float(getattr(offset, "x", 0.0))
+    local_y = -float(getattr(offset, "y", 0.0))
+    local_z = float(getattr(offset, "z", 0.0))
+    roll = math.radians(float(actor_pose.get("roll", 0.0)))
+    pitch = math.radians(float(actor_pose.get("pitch", 0.0)))
+    yaw = math.radians(float(actor_pose.get("yaw", 0.0)))
+    cr, sr = math.cos(roll), math.sin(roll)
+    cp, sp = math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    pose["x"] += (cy * cp) * local_x + (cy * sp * sr - sy * cr) * local_y + (cy * sp * cr + sy * sr) * local_z
+    pose["y"] += (sy * cp) * local_x + (sy * sp * sr + cy * cr) * local_y + (sy * sp * cr - cy * sr) * local_z
+    pose["z"] += (-sp) * local_x + (cp * sr) * local_y + (cp * cr) * local_z
+    return pose, reference
 
 
 def _vehicle_speed_mps(vehicle: Any) -> float:
@@ -2162,6 +2238,17 @@ def _actor_runtime_binding_evidence(
             "scenario_ir_reference_trajectory",
         }:
             record_issues.append("sensor_pose_source_invalid")
+        expected_pose_reference = (
+            "source_track_frame"
+            if binding.get("sensor_pose_source") == "scenario_ir_reference_trajectory"
+            else (
+                "carla_actor_origin"
+                if _actor_kind(actor or {}) == "pedestrian"
+                else "carla_bounding_box_center"
+            )
+        )
+        if binding.get("sensor_pose_reference") != expected_pose_reference:
+            record_issues.append("sensor_pose_reference_invalid")
         record = {
             "actor_id": actor_id,
             "actor_type": _actor_kind(actor or {}),
@@ -2173,6 +2260,7 @@ def _actor_runtime_binding_evidence(
             },
             "nurec_track_id": binding.get("nurec_track_id"),
             "sensor_pose_source": binding.get("sensor_pose_source"),
+            "sensor_pose_reference": binding.get("sensor_pose_reference"),
             "required_modalities": list(binding.get("required_modalities") or []),
             "status": "passed" if not record_issues else "failed",
             "issues": record_issues,
@@ -2208,7 +2296,11 @@ def _initial_bound_actor_poses(
             pose = _reference_pose_at_time(actor, 0.0)
         else:
             entity = actor_vehicles.get(actor_id)
-            pose = _vehicle_pose(entity) if entity is not None else None
+            pose = (
+                _bound_actor_render_pose(actor, entity)[0]
+                if entity is not None
+                else None
+            )
         if pose is not None:
             result[actor_id] = dict(pose)
     return result
@@ -2229,7 +2321,7 @@ def _current_bound_actor_poses(
             pose = _reference_pose_at_time(actor, simulation_time_sec)
         else:
             state = actor_states.get(actor_id) or {}
-            pose = state.get("pose")
+            pose = state.get("render_pose")
         if isinstance(pose, dict):
             result[actor_id] = dict(pose)
     return result
@@ -2270,6 +2362,11 @@ def _build_sensor_frame_context(
             raise RuntimeError(f"bound actor has no render pose pair: {actor_id}")
         samples[actor_id] = {
             "source": binding.get("sensor_pose_source"),
+            "pose_reference": (
+                binding.get("sensor_pose_reference")
+                if binding.get("sensor_pose_source") == "scenario_ir_reference_trajectory"
+                else (actor_states.get(actor_id) or {}).get("render_pose_reference")
+            ),
             "pose_pair": {"start": dict(previous), "end": dict(current)},
             "carla_runtime_actor_id": (actor_states.get(actor_id) or {}).get(
                 "carla_runtime_actor_id"

@@ -188,6 +188,7 @@ def bind_carla_run_config(
             "schema_version": "actor_runtime_binding.v1",
             "nurec_track_id": binding["nurec"]["track_id"],
             "sensor_pose_source": binding["sensor_sync"]["pose_source"],
+            "sensor_pose_reference": binding["sensor_sync"]["pose_reference"],
             "required_modalities": list(binding["sensor_sync"]["required_modalities"]),
             "same_dynamic_object_for_all_modalities": True,
             "declared_status": binding["status"],
@@ -273,6 +274,15 @@ def _build_binding(
                 "carla_runtime_actor_pose"
                 if interactive
                 else "scenario_ir_reference_trajectory"
+            ),
+            "pose_reference": (
+                "source_track_frame"
+                if not interactive
+                else (
+                    "carla_actor_origin"
+                    if actor_type == "pedestrian"
+                    else "carla_bounding_box_center"
+                )
             ),
             "same_dynamic_object_for_all_modalities": True,
         },

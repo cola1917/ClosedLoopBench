@@ -66,6 +66,11 @@ class FakeVehicle:
         ]
         self.transform_reads = 0
         self.velocity = velocity or FakeVelocity()
+        self.bounding_box = type(
+            "FakeBoundingBox",
+            (),
+            {"location": FakeLocation(0.5, 0.0, 0.75)},
+        )()
 
     def get_transform(self):
         transform = self.transforms[min(self.transform_reads, len(self.transforms) - 1)]

@@ -381,6 +381,11 @@ def _dynamic_objects(
             raise NuRecMultimodalError(
                 f"actor {actor_id} pose source must be {expected_source}"
             )
+        expected_reference = binding["sensor_sync"]["pose_reference"]
+        if sample.get("pose_reference") != expected_reference:
+            raise NuRecMultimodalError(
+                f"actor {actor_id} pose reference must be {expected_reference}"
+            )
         pose_pair = sample.get("pose_pair")
         _validate_sim_pose_pair(pose_pair, f"actor {actor_id}")
         result.append(
@@ -389,6 +394,7 @@ def _dynamic_objects(
                 "track_id": binding["nurec"]["track_id"],
                 "actor_type": binding["actor_type"],
                 "pose_source": expected_source,
+                "pose_reference": expected_reference,
                 "pose_pair": _transform_pose_pair(pose_pair, log_from_sim),
             }
         )

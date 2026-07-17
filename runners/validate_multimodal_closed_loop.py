@@ -52,6 +52,15 @@ def validate_multimodal_closed_loop_result(result: Mapping[str, Any]) -> dict[st
             raise MultimodalClosedLoopError(
                 f"actor {record.get('actor_id')} source/NuRec identity changed"
             )
+        expected_reference = (
+            "carla_actor_origin"
+            if record.get("actor_type") == "pedestrian"
+            else "carla_bounding_box_center"
+        )
+        if record.get("sensor_pose_reference") != expected_reference:
+            raise MultimodalClosedLoopError(
+                f"actor {record.get('actor_id')} has an invalid NuRec pose reference"
+            )
     runtime_actor_ids = [record["carla"]["runtime_actor_id"] for record in binding_records]
     if len(runtime_actor_ids) != len(set(runtime_actor_ids)):
         raise MultimodalClosedLoopError("two bindings reference the same CARLA runtime actor")
@@ -159,6 +168,10 @@ def validate_multimodal_closed_loop_result(result: Mapping[str, Any]) -> dict[st
         "interactive_actor_ids": sorted(interactive_ids),
         "dynamic_object_digest_count": len(digests),
         "modalities": ["rgb", "lidar"],
+        "pose_references": {
+            str(record["actor_id"]): record["sensor_pose_reference"]
+            for record in binding_records
+        },
         "explainable_decision_actor_count": sum(bool(value) for value in decisions_by_actor.values()),
     }
 

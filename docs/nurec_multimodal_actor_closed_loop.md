@@ -5,8 +5,8 @@
 The final project is not a general neural-scene editor.
 
 - Ego is fully parameterized by the driving algorithm.
-- One primary vehicle is ego-responsive in CARLA and its current physical root
-  pose is sent to NuRec.
+- One primary vehicle is ego-responsive in CARLA. Its physical actor pose is
+  converted to the NuRec cuboid-centre reference before dispatch.
 - One pedestrian may be ego-responsive only through speed, pause, yield, and
   abort along the recorded source corridor. Free-space path edits and skeleton
   animation edits are not supported.
@@ -61,6 +61,24 @@ The binding, runtime inventory, synchronized frame request, and response
 evidence are canonical SceneExchangeContracts artifacts. They remain
 independently inspectable outside the runner, and the gRPC dispatch metadata is
 validated again after a version-specific encoder returns.
+
+### Pose-reference contract
+
+Identity alone is insufficient: the pose must refer to the same point in both
+runtimes. NVIDIA's CARLA 0.9.16 NuRec adapter composes a vehicle actor transform
+with `bounding_box.location` before sending a controllable dynamic object to
+gRPC, and applies the inverse offset when placing a replayed NuRec track in
+CARLA. ClosedLoopBench follows that boundary explicitly:
+
+- vehicle and two-wheeler runtime poses use `carla_bounding_box_center`;
+- restricted pedestrian runtime poses use `carla_actor_origin`, matching the
+  upstream walker path;
+- source replay poses use `source_track_frame`.
+
+`actor_binding_set.v1`, every shared dynamic object, runtime binding evidence,
+and the final acceptance artifact record this reference. A missing CARLA
+vehicle bounding-box offset fails closed instead of silently sending its actor
+origin.
 
 ## Frame Transaction
 

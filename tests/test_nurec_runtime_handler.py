@@ -33,6 +33,7 @@ def _context():
         "actor_samples": {
             VEHICLE_TRACK: {
                 "source": "carla_runtime_actor_pose",
+                "pose_reference": "carla_bounding_box_center",
                 "pose_pair": {"start": actor_start, "end": actor_end},
             }
         },

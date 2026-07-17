@@ -54,6 +54,7 @@ class ActorBindingTests(unittest.TestCase):
         self.assertEqual(binding["source_track_id"], binding["nurec"]["track_id"])
         self.assertEqual(binding["sensor_sync"]["required_modalities"], ["rgb", "lidar"])
         self.assertEqual(binding["sensor_sync"]["pose_source"], "carla_runtime_actor_pose")
+        self.assertEqual(binding["sensor_sync"]["pose_reference"], "carla_bounding_box_center")
         self.assertTrue(binding["control"]["ego_responsive"])
 
     def test_inventory_is_evidence_not_an_assumption(self):
@@ -86,6 +87,7 @@ class ActorBindingTests(unittest.TestCase):
         self.assertEqual(binding["control"]["corridor_constraint"], "source_reference")
         self.assertEqual(binding["control"]["capabilities"], ["speed", "pause", "yield", "abort"])
         self.assertEqual(binding["carla"]["blueprint"], "walker.pedestrian.*")
+        self.assertEqual(binding["sensor_sync"]["pose_reference"], "carla_actor_origin")
 
     def test_pedestrian_traffic_manager_and_unknown_actor_fail_closed(self):
         from adapters.actor_binding import ActorBindingError, build_actor_binding_set
@@ -124,6 +126,7 @@ class ActorBindingTests(unittest.TestCase):
         self.assertEqual(actor["role_name"], f"actor.{VEHICLE_TRACK[:24]}")
         self.assertEqual(actor["binding"]["nurec_track_id"], VEHICLE_TRACK)
         self.assertEqual(actor["binding"]["required_modalities"], ["rgb", "lidar"])
+        self.assertEqual(actor["binding"]["sensor_pose_reference"], "carla_bounding_box_center")
 
         wrong = copy.deepcopy(run)
         wrong["actors"][0]["closed_loop_level"] = "traffic_manager_reactive"
