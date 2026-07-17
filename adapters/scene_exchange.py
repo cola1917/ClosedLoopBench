@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -251,8 +252,17 @@ def publish_scene_version(
         )
         try:
             os.rename(staging, target)
-        except FileExistsError as error:
-            raise SceneVersionExistsError(f"scene version already exists: {target}") from error
+        except OSError as error:
+            # POSIX rename(2) may report ENOTEMPTY when another publisher wins
+            # the race and creates a non-empty target directory. Windows and
+            # other filesystems commonly surface the same condition as
+            # FileExistsError/EEXIST. Only translate it when the immutable
+            # target now exists; unrelated rename failures must remain visible.
+            if error.errno in {errno.EEXIST, errno.ENOTEMPTY} and target.exists():
+                raise SceneVersionExistsError(
+                    f"scene version already exists: {target}"
+                ) from error
+            raise
     finally:
         if staging.exists():
             shutil.rmtree(staging)
