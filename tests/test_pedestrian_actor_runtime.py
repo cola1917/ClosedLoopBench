@@ -8,8 +8,10 @@ class Vector:
 
 
 class Rotation:
-    def __init__(self, yaw=0.0):
+    def __init__(self, yaw=0.0, pitch=0.0, roll=0.0):
         self.yaw = yaw
+        self.pitch = pitch
+        self.roll = roll
 
 
 class Transform:
@@ -100,7 +102,7 @@ class PedestrianActorRuntimeTests(unittest.TestCase):
         )
 
         self.assertEqual(evidence, {"vehicle-1": "scripted_vehicle_control"})
-        self.assertGreater(vehicle.controls[0].steer, 0.0)
+        self.assertLess(vehicle.controls[0].steer, 0.0)
 
     def test_behavior_plugin_loader_requires_callable_module_function(self):
         from runners.run_carla_basic_agent import _load_actor_behavior_planner
@@ -244,7 +246,8 @@ class PedestrianActorRuntimeTests(unittest.TestCase):
         self.assertIs(spawned, world.walker)
         self.assertEqual(world.library.patterns, ["walker.pedestrian.*"])
         self.assertEqual(world.spawn_transform.location.x, 4.0)
-        self.assertEqual(world.spawn_transform.rotation.yaw, 90.0)
+        self.assertEqual(world.spawn_transform.location.y, -5.0)
+        self.assertEqual(world.spawn_transform.rotation.yaw, -90.0)
 
     def test_scripted_walker_follows_reference_and_emits_evidence(self):
         from runners.run_carla_basic_agent import _apply_scripted_actor_controls
@@ -270,7 +273,7 @@ class PedestrianActorRuntimeTests(unittest.TestCase):
         self.assertEqual(evidence, {"ped-1": "scripted_walker_control"})
         self.assertAlmostEqual(control.speed, 1.2)
         self.assertAlmostEqual(control.direction.x, 0.0)
-        self.assertAlmostEqual(control.direction.y, 1.0)
+        self.assertAlmostEqual(control.direction.y, -1.0)
         self.assertFalse(control.jump)
 
     def test_pedestrian_plugin_cannot_send_walker_off_source_corridor(self):
@@ -300,7 +303,7 @@ class PedestrianActorRuntimeTests(unittest.TestCase):
         )
 
         self.assertAlmostEqual(walker.controls[0].direction.x, 0.0)
-        self.assertAlmostEqual(walker.controls[0].direction.y, 1.0)
+        self.assertAlmostEqual(walker.controls[0].direction.y, -1.0)
 
     def test_abort_stops_walker_and_tm_mode_is_rejected(self):
         from runners.run_carla_basic_agent import (

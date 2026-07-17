@@ -1438,9 +1438,9 @@ def _pose_from_transform(transform: Any) -> dict[str, float]:
     rotation = getattr(transform, "rotation", None)
     return {
         "x": float(getattr(location, "x", 0.0)),
-        "y": float(getattr(location, "y", 0.0)),
+        "y": -float(getattr(location, "y", 0.0)),
         "z": float(getattr(location, "z", 0.0)),
-        "yaw": float(getattr(rotation, "yaw", 0.0)),
+        "yaw": -float(getattr(rotation, "yaw", 0.0)),
     }
 
 
@@ -1525,16 +1525,24 @@ def _set_blueprint_attribute(blueprint: Any, name: str, value: str) -> None:
 
 
 def _carla_location(carla_module: Any, pose: dict[str, Any]) -> Any:
+    """Convert a canonical scene-local pose to CARLA's native left-handed frame."""
+
     return carla_module.Location(
         x=float(pose.get("x", 0.0)),
-        y=float(pose.get("y", 0.0)),
+        y=-float(pose.get("y", 0.0)),
         z=float(pose.get("z", 0.0)),
     )
 
 
 def _carla_transform(carla_module: Any, pose: dict[str, Any]) -> Any:
     location = _carla_location(carla_module, pose)
-    rotation = carla_module.Rotation(yaw=float(pose.get("yaw", 0.0)))
+    # Reflecting across the x-z plane maps the protocol's right-handed
+    # x-forward/y-left frame to CARLA's left-handed x-forward/y-right frame.
+    rotation = carla_module.Rotation(
+        roll=-float(pose.get("roll", 0.0)),
+        pitch=float(pose.get("pitch", 0.0)),
+        yaw=-float(pose.get("yaw", 0.0)),
+    )
     return carla_module.Transform(location, rotation)
 
 
@@ -1547,6 +1555,8 @@ def _set_agent_destination(agent: Any, carla_module: Any, destination: dict[str,
 
 
 def _vehicle_pose(vehicle: Any) -> dict[str, float]:
+    """Return a CARLA actor pose in the canonical scene-local right-handed frame."""
+
     if not hasattr(vehicle, "get_transform"):
         return {
             "x": 0.0,
@@ -1561,11 +1571,11 @@ def _vehicle_pose(vehicle: Any) -> dict[str, float]:
     rotation = getattr(transform, "rotation", None)
     return {
         "x": float(getattr(location, "x", 0.0)),
-        "y": float(getattr(location, "y", 0.0)),
+        "y": -float(getattr(location, "y", 0.0)),
         "z": float(getattr(location, "z", 0.0)),
-        "roll": float(getattr(rotation, "roll", 0.0)),
+        "roll": -float(getattr(rotation, "roll", 0.0)),
         "pitch": float(getattr(rotation, "pitch", 0.0)),
-        "yaw": float(getattr(rotation, "yaw", 0.0)),
+        "yaw": -float(getattr(rotation, "yaw", 0.0)),
     }
 
 
@@ -1658,10 +1668,13 @@ def _draw_route_lane_lines(
 
 def _route_offset_location(carla_module: Any, pose: dict[str, Any], offset_m: float) -> Any:
     yaw_rad = math.radians(float(pose.get("yaw", 0.0)))
-    return carla_module.Location(
-        x=float(pose.get("x", 0.0)) - math.sin(yaw_rad) * float(offset_m),
-        y=float(pose.get("y", 0.0)) + math.cos(yaw_rad) * float(offset_m),
-        z=float(pose.get("z", 0.0)) + 0.08,
+    return _carla_location(
+        carla_module,
+        {
+            "x": float(pose.get("x", 0.0)) - math.sin(yaw_rad) * float(offset_m),
+            "y": float(pose.get("y", 0.0)) + math.cos(yaw_rad) * float(offset_m),
+            "z": float(pose.get("z", 0.0)) + 0.08,
+        },
     )
 
 
@@ -2007,9 +2020,9 @@ def _walker_control(
         dx, dy, norm = math.cos(yaw), math.sin(yaw), 1.0
     direction_type = getattr(carla_module, "Vector3D", None)
     direction = (
-        direction_type(x=dx / norm, y=dy / norm, z=0.0)
+        direction_type(x=dx / norm, y=-dy / norm, z=0.0)
         if direction_type is not None
-        else SimpleNamespace(x=dx / norm, y=dy / norm, z=0.0)
+        else SimpleNamespace(x=dx / norm, y=-dy / norm, z=0.0)
     )
     speed = float(decision.get("desired_speed_mps", 0.0))
     if bool(decision.get("should_abort", False)):
@@ -2341,7 +2354,9 @@ def _vehicle_control(carla_module: Any, *, throttle: float, brake: float, steer:
     values = {
         "throttle": float(throttle),
         "brake": float(brake),
-        "steer": float(steer),
+        # Internal planners use positive-left steering in the canonical frame;
+        # CARLA VehicleControl uses positive-right steering.
+        "steer": -float(steer),
         "hand_brake": False,
         "reverse": False,
     }

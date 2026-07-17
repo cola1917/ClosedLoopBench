@@ -18,7 +18,8 @@ class FakeLocation:
 
 
 class FakeRotation:
-    def __init__(self, pitch=0.0, yaw=0.0):
+    def __init__(self, roll=0.0, pitch=0.0, yaw=0.0):
+        self.roll = roll
         self.pitch = pitch
         self.yaw = yaw
 
@@ -268,6 +269,30 @@ class FakeBasicAgent:
 
 
 class BasicAgentRuntimeLoopTests(unittest.TestCase):
+    def test_carla_boundary_reflects_scene_pose_and_round_trips(self):
+        from runners.run_carla_basic_agent import _carla_transform, _vehicle_pose
+
+        events = []
+        carla = FakeCarlaModule(events)
+        scene_pose = {
+            "x": 3.0,
+            "y": 4.0,
+            "z": 1.0,
+            "roll": 5.0,
+            "pitch": 6.0,
+            "yaw": 30.0,
+        }
+        transform = _carla_transform(carla, scene_pose)
+
+        self.assertEqual(transform.location.x, 3.0)
+        self.assertEqual(transform.location.y, -4.0)
+        self.assertEqual(transform.rotation.roll, -5.0)
+        self.assertEqual(transform.rotation.pitch, 6.0)
+        self.assertEqual(transform.rotation.yaw, -30.0)
+
+        vehicle = FakeVehicle(events, transforms=[transform])
+        self.assertEqual(_vehicle_pose(vehicle), scene_pose)
+
     def _plan(self):
         from runners.run_carla_basic_agent import build_basic_agent_plan
 
@@ -462,10 +487,10 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(result["status"], "interactive_closed_loop")
         self.assertIn("world.try_spawn_actor.role=ego_vehicle.x=101.0", events)
         self.assertIn("world.try_spawn_actor.role=trigger.x=103.0", events)
-        self.assertEqual(plan["ego"]["spawn"]["yaw"], 45.0)
+        self.assertEqual(plan["ego"]["spawn"]["yaw"], -45.0)
         self.assertEqual(plan["ego"]["route"][0]["x"], 101.0)
         self.assertEqual(plan["ego"]["route"][-1]["x"], 110.0)
-        self.assertEqual(plan["actors"][0]["initial_state"]["yaw"], 45.0)
+        self.assertEqual(plan["actors"][0]["initial_state"]["yaw"], -45.0)
 
     def test_actor_autopilot_binds_interactive_actor_to_traffic_manager(self):
         from runners.run_carla_basic_agent import run_basic_agent
