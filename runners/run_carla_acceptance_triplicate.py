@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import sys
 from copy import deepcopy
@@ -31,8 +32,18 @@ def run_acceptance_triplicate(
     port: int = 2000,
     max_ticks: int = 600,
     require_multimodal: bool = False,
+    opendrive_path: str | None = None,
+    ego_driver: str = "basic_agent",
+    sensor_frame_handler_factory: Callable[
+        [dict[str, Any], Path], Callable[[dict[str, Any]], dict[str, Any]]
+    ]
+    | None = None,
     execute: Callable[[dict[str, Any]], dict[str, Any]] = run_basic_agent,
 ) -> dict[str, Any]:
+    if require_multimodal and sensor_frame_handler_factory is None and execute is run_basic_agent:
+        raise CarlaAcceptanceError(
+            "--require-multimodal needs a real sensor frame handler factory"
+        )
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     base_run_id = str(run_config.get("run_id") or "basic-agent-acceptance")
@@ -56,12 +67,22 @@ def run_acceptance_triplicate(
             output=str(report_path),
             acceptance_evidence=True,
             multimodal_sensor_required=require_multimodal,
+            opendrive_path=opendrive_path,
+            ego_driver=ego_driver,
         )
         (run_dir / "basic_agent_plan.json").write_text(
             json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        result = execute(plan)
+        if sensor_frame_handler_factory is None:
+            result = execute(plan)
+        else:
+            handler = sensor_frame_handler_factory(config, run_dir)
+            if not callable(handler):
+                raise CarlaAcceptanceError(
+                    f"attempt {attempt} sensor frame handler factory returned a non-callable"
+                )
+            result = execute(plan, sensor_frame_handler=handler)
         (run_dir / "runtime_result.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -145,6 +166,12 @@ def main(argv=None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=2000, type=int)
     parser.add_argument("--max-ticks", default=600, type=int)
+    parser.add_argument("--opendrive", type=Path)
+    parser.add_argument("--ego-driver", default="basic_agent")
+    parser.add_argument(
+        "--sensor-handler-factory",
+        help="Python module:callable returning handler(run_config, attempt_dir).",
+    )
     parser.add_argument(
         "--require-multimodal",
         action="store_true",
@@ -153,6 +180,11 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     config = json.loads(args.run_config.read_text(encoding="utf-8"))
     try:
+        handler_factory = (
+            _load_callable(args.sensor_handler_factory)
+            if args.sensor_handler_factory
+            else None
+        )
         result = run_acceptance_triplicate(
             config,
             args.output_root,
@@ -160,12 +192,25 @@ def main(argv=None) -> int:
             port=args.port,
             max_ticks=args.max_ticks,
             require_multimodal=args.require_multimodal,
+            opendrive_path=str(args.opendrive) if args.opendrive else None,
+            ego_driver=args.ego_driver,
+            sensor_frame_handler_factory=handler_factory,
         )
-    except (CarlaAcceptanceError, FileExistsError) as exc:
+    except (CarlaAcceptanceError, FileExistsError, ImportError) as exc:
         print(json.dumps({"status": "failed", "detail": str(exc)}, ensure_ascii=False))
         return 2
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
+
+
+def _load_callable(spec: str) -> Callable[..., Any]:
+    if ":" not in spec:
+        raise CarlaAcceptanceError("sensor handler factory must use module:callable")
+    module_name, attribute = spec.split(":", 1)
+    value = getattr(importlib.import_module(module_name), attribute, None)
+    if not callable(value):
+        raise CarlaAcceptanceError(f"sensor handler factory is not callable: {spec}")
+    return value
 
 
 if __name__ == "__main__":

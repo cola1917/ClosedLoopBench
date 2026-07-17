@@ -1,5 +1,8 @@
 import copy
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 
 SCENE_TOKEN = "cc8c0bf57f984915a77078b10eb33198"
@@ -126,6 +129,48 @@ class ActorBindingTests(unittest.TestCase):
         wrong["actors"][0]["closed_loop_level"] = "traffic_manager_reactive"
         with self.assertRaisesRegex(ActorBindingError, "control mismatch"):
             bind_carla_run_config(wrong, binding_set)
+
+    def test_cli_materializes_actor_bound_run_config(self):
+        from adapters.actor_binding import build_actor_binding_set
+        from runners.bind_actor_run_config import main
+
+        binding_set = build_actor_binding_set(
+            _scenario_ir(),
+            selected_actor_ids=[VEHICLE_TRACK],
+            nurec_track_ids=[VEHICLE_TRACK],
+            control_modes={VEHICLE_TRACK: "scripted"},
+        )
+        run = {
+            "scenario_id": SCENE_TOKEN,
+            "actors": [
+                {
+                    "actor_id": VEHICLE_TRACK,
+                    "source_track_id": VEHICLE_TRACK,
+                    "closed_loop_level": "scripted",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            run_path = root / "run.json"
+            binding_path = root / "bindings.json"
+            output = root / "bound.json"
+            run_path.write_text(json.dumps(run), encoding="utf-8")
+            binding_path.write_text(json.dumps(binding_set), encoding="utf-8")
+            status = main(
+                [
+                    "--run-config",
+                    str(run_path),
+                    "--actor-bindings",
+                    str(binding_path),
+                    "--output",
+                    str(output),
+                ]
+            )
+            bound = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertEqual(status, 0)
+        self.assertEqual(bound["actors"][0]["binding"]["nurec_track_id"], VEHICLE_TRACK)
 
 
 if __name__ == "__main__":

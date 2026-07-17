@@ -1,5 +1,7 @@
 import copy
+import tempfile
 import unittest
+from pathlib import Path
 
 
 def _result(status="interactive_closed_loop"):
@@ -20,6 +22,62 @@ def _result(status="interactive_closed_loop"):
 
 
 class CarlaAcceptanceTriplicateTests(unittest.TestCase):
+    def test_triplicate_carries_formal_map_driver_and_injected_handler(self):
+        from runners.run_carla_acceptance_triplicate import run_acceptance_triplicate
+
+        plans = []
+        handlers = []
+
+        def handler_factory(config, run_dir):
+            handler = lambda context: {"frame": context.get("frame_id")}
+            handlers.append((config["run_id"], run_dir, handler))
+            return handler
+
+        def execute(plan, *, sensor_frame_handler):
+            plans.append((plan, sensor_frame_handler))
+            return _result()
+
+        config = {
+            "scenario_id": "scene-triplicate",
+            "run_id": "formal",
+            "ego": {"initial_state": {"x": 0.0, "y": 0.0}},
+            "actors": [],
+            "metrics": ["collision", "route_progress"],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_acceptance_triplicate(
+                config,
+                Path(directory),
+                max_ticks=1200,
+                opendrive_path="/runtime/scene0061-v7.xodr",
+                ego_driver="topology_follower",
+                sensor_frame_handler_factory=handler_factory,
+                execute=execute,
+            )
+
+        self.assertEqual(result["run_count"], 3)
+        self.assertEqual(len(handlers), 3)
+        self.assertEqual(len(plans), 3)
+        self.assertTrue(
+            all(plan["world"]["opendrive_path"].endswith("scene0061-v7.xodr") for plan, _ in plans)
+        )
+        self.assertTrue(all(plan["ego"]["driver"] == "topology_follower" for plan, _ in plans))
+        self.assertTrue(all(plan["limits"]["max_ticks"] == 1200 for plan, _ in plans))
+
+    def test_real_multimodal_triplicate_requires_handler_factory(self):
+        from runners.run_carla_acceptance_triplicate import (
+            CarlaAcceptanceError,
+            run_acceptance_triplicate,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(CarlaAcceptanceError, "real sensor frame handler"):
+                run_acceptance_triplicate(
+                    {"scenario_id": "scene-triplicate"},
+                    Path(directory),
+                    require_multimodal=True,
+                )
+
     def test_requires_three_complete_physical_runs(self):
         from runners.run_carla_acceptance_triplicate import validate_acceptance_runs
 
