@@ -112,9 +112,21 @@ def _probe_status(probe: Mapping[str, Any] | None) -> tuple[bool, list[str]]:
         if evidence.get("dynamic_object_sha256") != digest:
             issues.append(f"{modality}_dynamic_object_digest_mismatch")
         baseline_payload = str(evidence.get("baseline_payload_sha256") or "")
+        baseline_repeat_payload = str(
+            evidence.get("baseline_repeat_payload_sha256") or ""
+        )
         moved_payload = str(evidence.get("moved_payload_sha256") or "")
-        if not _is_sha256(baseline_payload) or not _is_sha256(moved_payload):
+        if (
+            not _is_sha256(baseline_payload)
+            or not _is_sha256(baseline_repeat_payload)
+            or not _is_sha256(moved_payload)
+        ):
             issues.append(f"{modality}_render_digest_invalid")
+        elif (
+            baseline_payload != baseline_repeat_payload
+            or evidence.get("baseline_repeatable") is not True
+        ):
+            issues.append(f"{modality}_baseline_unrepeatable")
         elif baseline_payload == moved_payload or evidence.get("content_changed") is not True:
             issues.append(f"{modality}_render_unchanged")
     return not issues, issues

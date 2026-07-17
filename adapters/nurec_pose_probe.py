@@ -25,9 +25,10 @@ def run_nurec_dynamic_pose_ab_probe(
 ) -> dict[str, Any]:
     """Prove that changing one dynamic root pose changes both rendered modalities.
 
-    Both requests keep scene time, sensor poses, and every other dynamic object
-    fixed. A successful RPC alone is insufficient: the aggregate RGB and LiDAR
-    response digests must each change between the baseline and moved request.
+    The baseline is rendered twice and must be repeatable. All three requests
+    keep scene time, sensor poses, and every other dynamic object fixed. A
+    successful RPC alone is insufficient: the aggregate RGB and LiDAR response
+    digests must be stable across A/A and each change for B.
     """
 
     baseline = deepcopy(dict(baseline_frame))
@@ -42,23 +43,41 @@ def run_nurec_dynamic_pose_ab_probe(
         raise NuRecMultimodalError("pose probe dispatch_frame must be callable")
 
     baseline_evidence = dict(dispatch_frame(baseline))
+    baseline_repeat_evidence = dict(dispatch_frame(baseline))
     moved_evidence = dict(dispatch_frame(moved))
     _validate_evidence_identity(baseline_evidence, baseline)
+    _validate_evidence_identity(baseline_repeat_evidence, baseline)
     _validate_evidence_identity(moved_evidence, moved)
 
     modality_results = {}
     issues = []
     for modality in ("rgb", "lidar"):
         baseline_digest = _aggregate_modality_digest(baseline_evidence, modality)
+        baseline_repeat_digest = _aggregate_modality_digest(
+            baseline_repeat_evidence, modality
+        )
         moved_digest = _aggregate_modality_digest(moved_evidence, modality)
-        changed = (
+        repeatable = (
             baseline_digest is not None
+            and baseline_repeat_digest is not None
+            and baseline_digest == baseline_repeat_digest
+        )
+        changed = (
+            repeatable
             and moved_digest is not None
             and baseline_digest != moved_digest
         )
         status = "passed" if changed else "failed"
         if baseline_digest is None:
             issues.append(f"{modality}_baseline_failed")
+        if baseline_repeat_digest is None:
+            issues.append(f"{modality}_baseline_repeat_failed")
+        if (
+            baseline_digest is not None
+            and baseline_repeat_digest is not None
+            and baseline_digest != baseline_repeat_digest
+        ):
+            issues.append(f"{modality}_baseline_unrepeatable")
         if moved_digest is None:
             issues.append(f"{modality}_moved_failed")
         if baseline_digest is not None and moved_digest == baseline_digest:
@@ -67,7 +86,9 @@ def run_nurec_dynamic_pose_ab_probe(
             "status": status,
             "dynamic_object_sha256": moved["shared_dynamic_object_sha256"],
             "baseline_payload_sha256": baseline_digest,
+            "baseline_repeat_payload_sha256": baseline_repeat_digest,
             "moved_payload_sha256": moved_digest,
+            "baseline_repeatable": repeatable,
             "content_changed": changed,
         }
 
@@ -88,6 +109,7 @@ def run_nurec_dynamic_pose_ab_probe(
         "issues": sorted(set(issues)),
         "probe": probe,
         "baseline_evidence": baseline_evidence,
+        "baseline_repeat_evidence": baseline_repeat_evidence,
         "moved_evidence": moved_evidence,
     }
 

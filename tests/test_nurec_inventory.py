@@ -17,14 +17,18 @@ def _probe(digest="a" * 64):
                 "status": "passed",
                 "dynamic_object_sha256": digest,
                 "baseline_payload_sha256": "1" * 64,
+                "baseline_repeat_payload_sha256": "1" * 64,
                 "moved_payload_sha256": "2" * 64,
+                "baseline_repeatable": True,
                 "content_changed": True,
             },
             "lidar": {
                 "status": "passed",
                 "dynamic_object_sha256": digest,
                 "baseline_payload_sha256": "3" * 64,
+                "baseline_repeat_payload_sha256": "3" * 64,
                 "moved_payload_sha256": "4" * 64,
+                "baseline_repeatable": True,
                 "content_changed": True,
             },
         },
@@ -94,6 +98,53 @@ class NuRecInventoryTests(unittest.TestCase):
 
         self.assertFalse(inventory["tracks"][0]["dynamic_object_pose_verified"])
         self.assertIn("rgb_render_unchanged", inventory["tracks"][0]["issues"])
+
+    def test_unrepeatable_baseline_keeps_track_unverified(self):
+        from adapters.nurec_inventory import build_nurec_runtime_track_inventory
+
+        probe = _probe()
+        probe["modalities"]["lidar"]["baseline_repeat_payload_sha256"] = "5" * 64
+        probe["modalities"]["lidar"]["baseline_repeatable"] = False
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "last.usdz"
+            artifact.write_bytes(b"usdz")
+            inventory = build_nurec_runtime_track_inventory(
+                {VEHICLE_TRACK: SimpleNamespace(actor_inst=SimpleNamespace(id=101, type_id="vehicle.car"))},
+                artifact_path=artifact,
+                renderer_version="26.04",
+                probe_results={VEHICLE_TRACK: probe},
+            )
+
+        self.assertFalse(inventory["tracks"][0]["dynamic_object_pose_verified"])
+        self.assertIn("lidar_baseline_unrepeatable", inventory["tracks"][0]["issues"])
+
+    def test_failed_rpc_with_null_render_hashes_remains_valid_unverified_evidence(self):
+        from adapters.nurec_inventory import build_nurec_runtime_track_inventory
+
+        probe = _probe()
+        rgb = probe["modalities"]["rgb"]
+        rgb.update(
+            status="failed",
+            baseline_payload_sha256=None,
+            baseline_repeat_payload_sha256=None,
+            moved_payload_sha256=None,
+            baseline_repeatable=False,
+            content_changed=False,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "last.usdz"
+            artifact.write_bytes(b"usdz")
+            inventory = build_nurec_runtime_track_inventory(
+                {VEHICLE_TRACK: SimpleNamespace(actor_inst=SimpleNamespace(id=101, type_id="vehicle.car"))},
+                artifact_path=artifact,
+                renderer_version="26.04",
+                probe_results={VEHICLE_TRACK: probe},
+            )
+
+        record = inventory["tracks"][0]
+        self.assertFalse(record["dynamic_object_pose_verified"])
+        self.assertIn("rgb_probe_failed", record["issues"])
+        self.assertIn("rgb_render_digest_invalid", record["issues"])
 
     def test_rejects_probe_for_track_not_loaded_by_runtime(self):
         from adapters.nurec_inventory import NuRecInventoryError, build_nurec_runtime_track_inventory

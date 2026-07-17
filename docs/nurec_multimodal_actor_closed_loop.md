@@ -34,10 +34,11 @@ nuScenes instance_token
 
 An asset-level track name is not sufficient. A formal inventory promotes a
 track only after the loaded NuRec runtime accepts a non-zero dynamic pose probe
-for RGB and LiDAR with the same actor digest. The probe is fixed-time A/B: all
-sensors and non-target actors remain identical, the target root pose moves at
-least 0.05 m, and the aggregate response digest must change independently for
-both RGB and LiDAR. A successful RPC with unchanged pixels/points is rejected.
+for RGB and LiDAR with the same actor digest. The probe is fixed-time A/A/B:
+all sensors and non-target actors remain identical, two baseline renders must
+have identical aggregate hashes, the target root pose then moves at least
+0.05 m, and the digest must change independently for both RGB and LiDAR. A
+successful RPC with unstable or unchanged pixels/points is rejected.
 
 Relevant code:
 
@@ -212,9 +213,9 @@ python -m runners.probe_nurec_260_runtime \
   --output /path/to/nurec_runtime_inventory.json
 ```
 
-Then run one isolated A/B request pair per candidate track. The two input frame
-documents must have identical scene time and sensors; only the named target
-pose may differ:
+Then run one isolated A/A/B transaction per candidate track. The runner renders
+the baseline document twice; the two input documents must have identical scene
+time and sensors, and only the named target pose may differ:
 
 ```bash
 python -m runners.probe_nurec_260_pose \
@@ -226,6 +227,7 @@ python -m runners.probe_nurec_260_pose \
 ```
 
 The canonical runtime track inventory accepts the probe only when
-`content_changed=true` and the baseline/moved aggregate response hashes differ
-for each modality. This is still root-pose evidence, not proof of editable mesh
-geometry or pedestrian skeleton animation.
+`baseline_repeatable=true`, `content_changed=true`, the two baseline hashes
+match, and the moved aggregate response hash differs for each modality. This is
+still root-pose evidence, not proof of editable mesh geometry or pedestrian
+skeleton animation.

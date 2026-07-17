@@ -34,13 +34,19 @@ def _moved_frame(delta=1.0):
     return frame
 
 
-def _dispatcher(*, unchanged_modality=None):
+def _dispatcher(*, unchanged_modality=None, unstable_modality=None):
+    call_count = 0
+
     def dispatch(frame):
+        nonlocal call_count
+        call_count += 1
         responses = []
         for payload in materialize_nurec_rpc_requests(frame):
             source = (
                 f"fixed:{payload['modality']}"
                 if payload["modality"] == unchanged_modality
+                else f"unstable:{call_count}:{payload['modality']}"
+                if payload["modality"] == unstable_modality
                 else f"{payload['modality']}:{payload['dynamic_object_sha256']}"
             )
             responses.append(
@@ -78,6 +84,7 @@ class NuRecPoseProbeTests(unittest.TestCase):
         for modality in ("rgb", "lidar"):
             evidence = report["probe"]["modalities"][modality]
             self.assertEqual(evidence["status"], "passed")
+            self.assertTrue(evidence["baseline_repeatable"])
             self.assertTrue(evidence["content_changed"])
             self.assertNotEqual(
                 evidence["baseline_payload_sha256"],
@@ -97,6 +104,20 @@ class NuRecPoseProbeTests(unittest.TestCase):
         self.assertEqual(report["status"], "failed")
         self.assertIn("lidar_render_unchanged", report["issues"])
         self.assertFalse(report["probe"]["modalities"]["lidar"]["content_changed"])
+
+    def test_unrepeatable_rgb_baseline_fails_instead_of_claiming_actor_effect(self):
+        from adapters.nurec_pose_probe import run_nurec_dynamic_pose_ab_probe
+
+        report = run_nurec_dynamic_pose_ab_probe(
+            VEHICLE_TRACK,
+            _frame(),
+            _moved_frame(),
+            dispatch_frame=_dispatcher(unstable_modality="rgb"),
+        )
+
+        self.assertEqual(report["status"], "failed")
+        self.assertIn("rgb_baseline_unrepeatable", report["issues"])
+        self.assertFalse(report["probe"]["modalities"]["rgb"]["baseline_repeatable"])
 
     def test_probe_result_is_sufficient_for_verified_runtime_inventory(self):
         from adapters.nurec_inventory import build_nurec_runtime_track_inventory

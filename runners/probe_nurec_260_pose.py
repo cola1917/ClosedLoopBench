@@ -41,8 +41,8 @@ def run_probe(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Run a fixed-time NuRec 26.04 A/B dynamic-pose probe. Both RGB and "
-            "LiDAR render digests must change before the track can be promoted."
+            "Run a fixed-time NuRec 26.04 A/A/B dynamic-pose probe. Both RGB and "
+            "LiDAR baselines must repeat and then change before promotion."
         )
     )
     parser.add_argument("--config", required=True, type=Path)
