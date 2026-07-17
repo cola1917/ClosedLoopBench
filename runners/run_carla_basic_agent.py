@@ -527,6 +527,7 @@ def _run_basic_agent_loop(
                 plan.get("actors") or [],
                 ego_pose=ego_pose,
                 ego_speed_mps=ego_speed_mps,
+                simulation_time_sec=simulation_time_sec,
                 actor_vehicles=actor_vehicles,
                 behavior_planner=actor_behavior_planner,
             )
@@ -1256,6 +1257,12 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
     if vehicle is not None:
         return vehicle
 
+    if actor_kind == "vehicle" and isinstance(actor.get("binding"), dict):
+        raise RuntimeError(
+            f"failed to spawn bound interactive vehicle actor {actor_id} at declared pose; "
+            "map fallback would invalidate actor identity and alignment evidence"
+        )
+
     if actor_kind == "vehicle":
         for fallback_transform in _map_spawn_points(world):
             vehicle = _try_spawn(world, blueprint, fallback_transform)
@@ -1743,6 +1750,7 @@ def _reactive_actor_tick(
     *,
     ego_pose: dict[str, float],
     ego_speed_mps: float,
+    simulation_time_sec: float | None = None,
     actor_vehicles: dict[str, Any] | None = None,
     behavior_planner: Any = plan_reactive_actor_control,
 ) -> tuple[dict[str, float], dict[str, dict[str, Any]], float | None]:
@@ -1775,13 +1783,13 @@ def _reactive_actor_tick(
                 "relative_speed_mps": relative_speed_mps,
             },
             style=_actor_style(actor),
-            reference_speed_mps=_actor_reference_speed(actor),
+            reference_speed_mps=_actor_reference_speed(actor, simulation_time_sec),
         )
         decision = dict(decision)
+        decision["target_point"] = _next_reference_target(actor, actor_state)
         if _actor_kind(actor) == "pedestrian":
             # Pedestrian closed loop is intentionally root-pose only: ego may
             # change speed/pause/yield/abort, never the recorded walking corridor.
-            decision["target_point"] = _next_reference_target(actor, actor_state)
             decision["motion_constraint"] = "source_reference_corridor"
             decision["allowed_actions"] = ["speed", "pause", "yield", "abort"]
         else:
@@ -1840,8 +1848,26 @@ def _actor_style(actor: dict[str, Any]) -> str:
     return str(actor.get("style", style_profile.get("name", "normal")))
 
 
-def _actor_reference_speed(actor: dict[str, Any]) -> float | None:
+def _actor_reference_speed(
+    actor: dict[str, Any], simulation_time_sec: float | None = None
+) -> float | None:
     trajectory = actor.get("reference_trajectory") or []
+    if simulation_time_sec is not None:
+        timed = [
+            point
+            for point in trajectory
+            if isinstance(point, dict)
+            and point.get("t_sec") is not None
+            and point.get("speed_mps") is not None
+        ]
+        if timed:
+            point = min(
+                timed,
+                key=lambda sample: abs(
+                    float(sample["t_sec"]) - float(simulation_time_sec)
+                ),
+            )
+            return max(0.0, float(point["speed_mps"]))
     if trajectory and isinstance(trajectory[-1], dict) and trajectory[-1].get("speed_mps") is not None:
         return float(trajectory[-1]["speed_mps"])
     return None

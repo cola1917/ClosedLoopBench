@@ -554,6 +554,89 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertIn("world.try_spawn_actor.role=trigger.x=50.0", events)
         self.assertIn("actor.trigger.destroy", events)
 
+    def test_bound_actor_spawn_collision_fails_without_random_fallback(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class BoundActorCollisionWorld(FakeWorld):
+            def try_spawn_actor(self, blueprint, transform):
+                role_name = blueprint.attributes.get("role_name", "vehicle")
+                self.events.append(
+                    "world.try_spawn_actor.role={}.x={}".format(
+                        role_name,
+                        getattr(transform.location, "x", None),
+                    )
+                )
+                if role_name != "ego_vehicle":
+                    return None
+                return self._vehicle_for_blueprint(blueprint)
+
+        class BoundActorCollisionClient(FakeClient):
+            def __init__(self, events, host, port):
+                self.events = events
+                self.host = host
+                self.port = port
+                self.world = BoundActorCollisionWorld(events)
+
+        class BoundActorCollisionCarla(FakeCarlaModule):
+            def Client(self, host, port):
+                return BoundActorCollisionClient(self.events, host, port)
+
+        plan = self._interactive_plan()
+        plan["actors"][0]["binding"] = {
+            "schema_version": "actor_runtime_binding.v1"
+        }
+        events = []
+        result = run_basic_agent(
+            plan,
+            carla_module=BoundActorCollisionCarla(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("map fallback would invalidate actor identity", result["detail"])
+        self.assertNotIn("world.try_spawn_actor.role=trigger.x=50.0", events)
+
+    def test_scripted_vehicle_uses_time_sampled_speed_and_next_reference_target(self):
+        from runners.run_carla_basic_agent import _reactive_actor_tick
+
+        captured = {}
+
+        def planner(actor_state, ego_state, *, style, reference_speed_mps):
+            captured["reference_speed_mps"] = reference_speed_mps
+            return {
+                "distance_m": ego_state["distance_m"],
+                "desired_speed_mps": reference_speed_mps,
+                "brake": False,
+                "ttc_sec": float("inf"),
+            }
+
+        actor = {
+            "actor_id": "trigger",
+            "closed_loop_level": "scripted",
+            "initial_state": {"x": 1.0, "y": 2.0, "speed_mps": 2.0},
+            "reference_trajectory": [
+                {"t_sec": 0.0, "x": 1.0, "y": 2.0, "speed_mps": 2.0},
+                {"t_sec": 5.0, "x": 10.0, "y": 2.0, "speed_mps": 7.0},
+            ],
+        }
+        _, decisions, _ = _reactive_actor_tick(
+            [actor],
+            ego_pose={"x": 20.0, "y": 2.0},
+            ego_speed_mps=5.0,
+            simulation_time_sec=5.0,
+            actor_vehicles={
+                "trigger": FakeVehicle(
+                    [],
+                    label="actor.trigger",
+                    velocity=FakeVelocity(x=1.0, y=0.0, z=0.0),
+                )
+            },
+            behavior_planner=planner,
+        )
+
+        self.assertEqual(captured["reference_speed_mps"], 7.0)
+        self.assertEqual(decisions["trigger"]["target_point"]["x"], 10.0)
+
     def test_follow_ego_moves_spectator_each_tick(self):
         from runners.run_carla_basic_agent import run_basic_agent
 
