@@ -41,6 +41,29 @@ class _Stub:
         )
 
 
+class _InventoryStub(_Stub):
+    def get_version(self, request, *, timeout):
+        return SimpleNamespace(
+            version_id="26.04",
+            git_hash="abc123",
+            grpc_api_version=SimpleNamespace(major=1, minor=2, patch=3),
+        )
+
+    def get_available_scenes(self, request, *, timeout):
+        return SimpleNamespace(scene_ids=["scene-0062", "scene-0061"])
+
+    def get_available_cameras(self, request, *, timeout):
+        return SimpleNamespace(
+            available_cameras=[
+                SimpleNamespace(
+                    logical_id="camera_front",
+                    trajectory_idx=0,
+                    intrinsics=SimpleNamespace(resolution_w=1600, resolution_h=900),
+                )
+            ]
+        )
+
+
 def _protobuf_module():
     return SimpleNamespace(
         RGBRenderRequest=_Message,
@@ -75,6 +98,7 @@ class NuRec260ClientTests(unittest.TestCase):
             scene_start_us=1_000_000,
             timeout_sec=12.0,
             protobuf_module=_protobuf_module(),
+            common_protobuf_module=SimpleNamespace(Empty=_Message),
             stub=stub or _Stub(),
             camera_specs={
                 "camera_front": SimpleNamespace(
@@ -145,6 +169,18 @@ class NuRec260ClientTests(unittest.TestCase):
                 {"nurec_runtime": {"runtime_scene_id": "scene-0061"}},
                 SimpleNamespace(),
             )
+
+    def test_runtime_inventory_reports_service_identity_and_lidar_boundary(self):
+        inventory = self._client(_InventoryStub()).query_runtime_inventory()
+
+        self.assertEqual(inventory["status"], "passed")
+        self.assertEqual(inventory["renderer"]["version_id"], "26.04")
+        self.assertEqual(inventory["available_scene_ids"], ["scene-0061", "scene-0062"])
+        self.assertEqual(inventory["cameras"][0]["logical_id"], "camera_front")
+        self.assertEqual(
+            inventory["lidar"]["supported_device_types"],
+            ["PANDAR128", "AT128"],
+        )
 
 
 if __name__ == "__main__":

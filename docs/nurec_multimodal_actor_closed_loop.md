@@ -34,7 +34,10 @@ nuScenes instance_token
 
 An asset-level track name is not sufficient. A formal inventory promotes a
 track only after the loaded NuRec runtime accepts a non-zero dynamic pose probe
-for RGB and LiDAR with the same actor digest.
+for RGB and LiDAR with the same actor digest. The probe is fixed-time A/B: all
+sensors and non-target actors remain identical, the target root pose moves at
+least 0.05 m, and the aggregate response digest must change independently for
+both RGB and LiDAR. A successful RPC with unchanged pixels/points is rejected.
 
 Relevant code:
 
@@ -200,3 +203,29 @@ from local tests:
 Until these pass, the accurate status is: CARLA actor/multimodal integration
 implemented and locally tested; real NuRec actor RGB/LiDAR closure pending
 server evidence.
+
+Query the live service before any render probe:
+
+```bash
+python -m runners.probe_nurec_260_runtime \
+  --config /path/to/run_config.json \
+  --output /path/to/nurec_runtime_inventory.json
+```
+
+Then run one isolated A/B request pair per candidate track. The two input frame
+documents must have identical scene time and sensors; only the named target
+pose may differ:
+
+```bash
+python -m runners.probe_nurec_260_pose \
+  --config /path/to/run_config.json \
+  --baseline-frame /path/to/vehicle_baseline_frame.json \
+  --moved-frame /path/to/vehicle_moved_frame.json \
+  --track-id c1958768d48640948f6053d04cffd35b \
+  --output /path/to/vehicle_pose_ab_probe.json
+```
+
+The canonical runtime track inventory accepts the probe only when
+`content_changed=true` and the baseline/moved aggregate response hashes differ
+for each modality. This is still root-pose evidence, not proof of editable mesh
+geometry or pedestrian skeleton animation.

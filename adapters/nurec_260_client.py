@@ -30,6 +30,7 @@ class NuRec260Client:
         timeout_sec: float = 60.0,
         max_message_bytes: int = 1024 * 1024 * 1024,
         protobuf_module: Any | None = None,
+        common_protobuf_module: Any | None = None,
         stub: Any | None = None,
         channel: Any | None = None,
         camera_specs: Mapping[str, Any] | None = None,
@@ -44,6 +45,9 @@ class NuRec260Client:
         self.timeout_sec = float(timeout_sec)
         self._pb = protobuf_module or importlib.import_module(
             "nre.grpc.protos.sensorsim_pb2"
+        )
+        self._common_pb = common_protobuf_module or importlib.import_module(
+            "nre.grpc.protos.common_pb2"
         )
         self._channel = channel
         if stub is None:
@@ -80,6 +84,61 @@ class NuRec260Client:
         evidence["dispatch"]["canonical_scene_id"] = frame.get("scene_id")
         evidence["dispatch"]["nre_api"] = "SensorsimService/26.04"
         return evidence
+
+    def query_runtime_inventory(self) -> dict[str, Any]:
+        """Query the live service before accepting any render evidence."""
+
+        empty = self._common_pb.Empty()
+        version = self.stub.get_version(empty, timeout=self.timeout_sec)
+        scenes = self.stub.get_available_scenes(empty, timeout=self.timeout_sec)
+        cameras = self.stub.get_available_cameras(
+            self._pb.AvailableCamerasRequest(scene_id=self.runtime_scene_id),
+            timeout=self.timeout_sec,
+        )
+        scene_ids = sorted(str(value) for value in scenes.scene_ids)
+        if self.runtime_scene_id not in scene_ids:
+            raise NuRecMultimodalError(
+                f"configured runtime_scene_id is unavailable: {self.runtime_scene_id}"
+            )
+        camera_rows = []
+        for item in cameras.available_cameras:
+            logical_id = str(item.logical_id)
+            if not logical_id:
+                raise NuRecMultimodalError("NRE advertised a camera without logical_id")
+            camera_rows.append(
+                {
+                    "logical_id": logical_id,
+                    "trajectory_idx": int(item.trajectory_idx),
+                    "resolution_w": int(item.intrinsics.resolution_w),
+                    "resolution_h": int(item.intrinsics.resolution_h),
+                }
+            )
+        if not camera_rows:
+            raise NuRecMultimodalError(
+                f"NRE scene has no available cameras: {self.runtime_scene_id}"
+            )
+        api = version.grpc_api_version
+        return {
+            "schema_version": "nurec_260_runtime_inventory.v1",
+            "target": self.target,
+            "runtime_scene_id": self.runtime_scene_id,
+            "available_scene_ids": scene_ids,
+            "renderer": {
+                "version_id": str(version.version_id),
+                "git_hash": str(version.git_hash),
+                "grpc_api_version": {
+                    "major": int(api.major),
+                    "minor": int(api.minor),
+                    "patch": int(api.patch),
+                },
+            },
+            "cameras": sorted(camera_rows, key=lambda item: item["logical_id"]),
+            "lidar": {
+                "supported_device_types": ["PANDAR128", "AT128"],
+                "parameterization": "device_type_only",
+            },
+            "status": "passed",
+        }
 
     def encode_rgb(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         sensor = payload["sensor"]
@@ -218,11 +277,8 @@ class NuRec260Client:
         }
 
 
-def build_nurec_260_handler(
-    run_config: Mapping[str, Any], attempt_dir: Path
-) -> Any:
-    """Triplicate sensor-handler factory configured by ``nurec_runtime``."""
-
+def build_nurec_260_client(run_config: Mapping[str, Any]) -> NuRec260Client:
+    """Build the concrete client from the shared ``nurec_runtime`` config."""
     config = run_config.get("nurec_runtime")
     if not isinstance(config, Mapping):
         raise NuRecMultimodalError("run config requires nurec_runtime")
@@ -233,15 +289,25 @@ def build_nurec_260_handler(
         resolved = str(Path(str(runtime_path)).resolve())
         if resolved not in sys.path:
             sys.path.insert(0, resolved)
-
-    scene_package = _load_json(config, "scene_package")
-    binding_set = _load_json(config, "actor_bindings")
-    client = NuRec260Client(
+    return NuRec260Client(
         target=str(config.get("target") or "127.0.0.1:46435"),
         runtime_scene_id=str(config.get("runtime_scene_id") or ""),
         scene_start_us=int(config["scene_start_us"]),
         timeout_sec=float(config.get("timeout_sec") or 60.0),
     )
+
+
+def build_nurec_260_handler(
+    run_config: Mapping[str, Any], attempt_dir: Path
+) -> Any:
+    """Triplicate sensor-handler factory configured by ``nurec_runtime``."""
+
+    config = run_config.get("nurec_runtime")
+    if not isinstance(config, Mapping):
+        raise NuRecMultimodalError("run config requires nurec_runtime")
+    client = build_nurec_260_client(run_config)
+    scene_package = _load_json(config, "scene_package")
+    binding_set = _load_json(config, "actor_bindings")
     handler = make_nurec_sensor_frame_handler(
         scene_package,
         binding_set,

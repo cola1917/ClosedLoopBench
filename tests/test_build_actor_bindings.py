@@ -10,10 +10,23 @@ def _probe(digest="a" * 64):
     return {
         "frame_id": 10,
         "pose_delta_m": 0.5,
+        "baseline_dynamic_object_sha256": "d" * 64,
         "dynamic_object_sha256": digest,
         "modalities": {
-            "rgb": {"status": "passed", "dynamic_object_sha256": digest},
-            "lidar": {"status": "passed", "dynamic_object_sha256": digest},
+            "rgb": {
+                "status": "passed",
+                "dynamic_object_sha256": digest,
+                "baseline_payload_sha256": "1" * 64,
+                "moved_payload_sha256": "2" * 64,
+                "content_changed": True,
+            },
+            "lidar": {
+                "status": "passed",
+                "dynamic_object_sha256": digest,
+                "baseline_payload_sha256": "3" * 64,
+                "moved_payload_sha256": "4" * 64,
+                "content_changed": True,
+            },
         },
     }
 

@@ -97,8 +97,13 @@ def _probe_status(probe: Mapping[str, Any] | None) -> tuple[bool, list[str]]:
     ):
         issues.append("pose_delta_too_small")
     digest = str(probe.get("dynamic_object_sha256") or "")
-    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+    if not _is_sha256(digest):
         issues.append("dynamic_object_digest_invalid")
+    baseline_digest = str(probe.get("baseline_dynamic_object_sha256") or "")
+    if not _is_sha256(baseline_digest):
+        issues.append("baseline_dynamic_object_digest_invalid")
+    elif baseline_digest == digest:
+        issues.append("dynamic_object_payload_unchanged")
     modalities = probe.get("modalities") or {}
     for modality in ("rgb", "lidar"):
         evidence = modalities.get(modality) or {}
@@ -106,7 +111,19 @@ def _probe_status(probe: Mapping[str, Any] | None) -> tuple[bool, list[str]]:
             issues.append(f"{modality}_probe_failed")
         if evidence.get("dynamic_object_sha256") != digest:
             issues.append(f"{modality}_dynamic_object_digest_mismatch")
+        baseline_payload = str(evidence.get("baseline_payload_sha256") or "")
+        moved_payload = str(evidence.get("moved_payload_sha256") or "")
+        if not _is_sha256(baseline_payload) or not _is_sha256(moved_payload):
+            issues.append(f"{modality}_render_digest_invalid")
+        elif baseline_payload == moved_payload or evidence.get("content_changed") is not True:
+            issues.append(f"{modality}_render_unchanged")
     return not issues, issues
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
 
 
 def _sha256(path: Path) -> str:

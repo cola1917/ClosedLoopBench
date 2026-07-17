@@ -10,10 +10,23 @@ def _probe(digest="a" * 64):
     return {
         "frame_id": 10,
         "pose_delta_m": 0.5,
+        "baseline_dynamic_object_sha256": "d" * 64,
         "dynamic_object_sha256": digest,
         "modalities": {
-            "rgb": {"status": "passed", "dynamic_object_sha256": digest},
-            "lidar": {"status": "passed", "dynamic_object_sha256": digest},
+            "rgb": {
+                "status": "passed",
+                "dynamic_object_sha256": digest,
+                "baseline_payload_sha256": "1" * 64,
+                "moved_payload_sha256": "2" * 64,
+                "content_changed": True,
+            },
+            "lidar": {
+                "status": "passed",
+                "dynamic_object_sha256": digest,
+                "baseline_payload_sha256": "3" * 64,
+                "moved_payload_sha256": "4" * 64,
+                "content_changed": True,
+            },
         },
     }
 
@@ -62,6 +75,25 @@ class NuRecInventoryTests(unittest.TestCase):
         record = inventory["tracks"][0]
         self.assertFalse(record["dynamic_object_pose_verified"])
         self.assertIn("lidar_dynamic_object_digest_mismatch", record["issues"])
+
+    def test_unchanged_render_keeps_track_unverified(self):
+        from adapters.nurec_inventory import build_nurec_runtime_track_inventory
+
+        probe = _probe()
+        probe["modalities"]["rgb"]["moved_payload_sha256"] = "1" * 64
+        probe["modalities"]["rgb"]["content_changed"] = False
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "last.usdz"
+            artifact.write_bytes(b"usdz")
+            inventory = build_nurec_runtime_track_inventory(
+                {VEHICLE_TRACK: SimpleNamespace(actor_inst=SimpleNamespace(id=101, type_id="vehicle.car"))},
+                artifact_path=artifact,
+                renderer_version="26.04",
+                probe_results={VEHICLE_TRACK: probe},
+            )
+
+        self.assertFalse(inventory["tracks"][0]["dynamic_object_pose_verified"])
+        self.assertIn("rgb_render_unchanged", inventory["tracks"][0]["issues"])
 
     def test_rejects_probe_for_track_not_loaded_by_runtime(self):
         from adapters.nurec_inventory import NuRecInventoryError, build_nurec_runtime_track_inventory
