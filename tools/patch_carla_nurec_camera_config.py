@@ -56,6 +56,12 @@ NEW_SENSOR_BRANCH = '''        # Case 2: A recorded NuRec camera with authoritat
         elif "sensor" in cam_cfg:
 '''
 
+RECORDED_CAMERA_MARKERS = (
+    'elif "nurec_camera" in cam_cfg:',
+    'camera_name = cam_cfg["nurec_camera"]',
+    "scenario.add_camera(",
+)
+
 OLD_CLI = '''    argparser.add_argument(
         "--resolution-ratio",
         type=float,
@@ -123,10 +129,13 @@ def apply_patch(target: Path) -> str:
             1,
         )
     text = deduplicated
+    has_recorded_camera_branch = all(
+        marker in text for marker in RECORDED_CAMERA_MARKERS
+    )
     if (
         NEW_SIGNATURE in text
         and NEW_CONFIG_OPEN in text
-        and NEW_SENSOR_BRANCH in text
+        and has_recorded_camera_branch
         and NEW_CLI in text
         and NEW_CALL in text
         and text == original_text
@@ -143,6 +152,10 @@ def apply_patch(target: Path) -> str:
     changes = []
     for old, new, name in replacements:
         if name == "cli" and '"--camera-config"' in patched:
+            continue
+        if name == "recorded-camera" and all(
+            marker in patched for marker in RECORDED_CAMERA_MARKERS
+        ):
             continue
         if new in patched:
             continue

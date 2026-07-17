@@ -11,7 +11,14 @@ TOKEN = "cc8c0bf57f984915a77078b10eb33198"
 
 
 class ReconstructionPlanningTests(unittest.TestCase):
-    def _fixture(self, root: Path, *, step: int = 1000):
+    def _fixture(
+        self,
+        root: Path,
+        *,
+        step: int = 1000,
+        cameras=None,
+        samples_per_epoch: int = 1000,
+    ):
         from adapters.reconstruction_package import load_reconstruction_package
 
         artifact_dir = root / "reconstruction"
@@ -25,8 +32,9 @@ class ReconstructionPlanningTests(unittest.TestCase):
         config.write_text(
             json.dumps({
                 "dataset": {
-                    "camera_ids": ["camera_front", "camera_front_left", "camera_front_right"],
-                    "n_samples_per_epoch": 1000,
+                    "camera_ids": cameras
+                    or ["camera_front", "camera_front_left", "camera_front_right"],
+                    "n_samples_per_epoch": samples_per_epoch,
                 },
                 "trainer": {"max_epochs": 1},
             }),
@@ -84,6 +92,34 @@ class ReconstructionPlanningTests(unittest.TestCase):
             package = self._fixture(Path(directory), step=999)
             with self.assertRaisesRegex(ReconstructionPlanningError, "expected global_step=1000"):
                 build_reconstruction_integration_plan(self._scenario_ir(), package)
+
+    def test_accepts_formal_six_camera_40000_step_result(self):
+        from adapters.reconstruction_planning import build_reconstruction_integration_plan
+
+        cameras = (
+            "camera_front",
+            "camera_front_left",
+            "camera_front_right",
+            "camera_back",
+            "camera_back_left",
+            "camera_back_right",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            package = self._fixture(
+                Path(directory),
+                step=40000,
+                cameras=list(cameras),
+                samples_per_epoch=40000,
+            )
+            plan = build_reconstruction_integration_plan(
+                self._scenario_ir(),
+                package,
+                expected_camera_ids=cameras,
+                expected_global_step=40000,
+                expected_samples_per_epoch=40000,
+                expected_max_epochs=1,
+            )
+        self.assertEqual(plan["validation"]["training_gate"]["global_step"], 40000)
 
     def test_materializing_package_in_place_does_not_copy_file_onto_itself(self):
         from adapters.reconstruction_package import materialize_reconstruction_package

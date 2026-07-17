@@ -4,9 +4,9 @@ ClosedLoopBench can validate and plan against an existing NeuralSceneBridge
 training result before any CARLA process is started. The gate verifies:
 
 - Reconstruction Package scene identity and artifact SHA-256/size inventory
-- the three requested cameras in `parsed.yaml`
-- `n_samples_per_epoch = 1000` and `max_epochs = 1`
-- `last.ckpt.global_step = 1000` without unpickling executable checkpoint data
+- the requested camera set in `parsed.yaml`
+- the requested `n_samples_per_epoch` and `max_epochs`
+- the requested `last.ckpt.global_step` without unpickling executable checkpoint data
 
 Run the gate with a Reconstruction Package produced by NeuralSceneBridge:
 
@@ -16,6 +16,11 @@ python runners/plan_reconstruction_integration.py \
   --reconstruction-package /path/to/reconstruction_package.json \
   --output outputs/scene-0061/reconstruction_integration_plan.json
 ```
+
+The defaults retain the three-camera, 1000-step smoke gate. A formal 40k
+result must explicitly pass all six `--expected-camera-id` arguments together
+with `--expected-global-step 40000 --expected-samples-per-epoch 40000`; this
+prevents a smoke artifact from being promoted as the formal reconstruction.
 
 Then build the portable motion/map/scenario bundle with the same package:
 

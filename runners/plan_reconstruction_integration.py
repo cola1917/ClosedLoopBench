@@ -26,6 +26,14 @@ def main(argv=None) -> int:
     source.add_argument("--reconstruction-result", type=Path)
     parser.add_argument("--exchange-root", type=Path)
     parser.add_argument("--expected-global-step", type=int, default=1000)
+    parser.add_argument(
+        "--expected-camera-id",
+        action="append",
+        dest="expected_camera_ids",
+        help="Expected NuRec camera ID; repeat for every formal camera",
+    )
+    parser.add_argument("--expected-samples-per-epoch", type=int, default=1000)
+    parser.add_argument("--expected-max-epochs", type=int, default=1)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
 
@@ -44,11 +52,14 @@ def main(argv=None) -> int:
             args.reconstruction_package,
             expected_scene_id=scene_id,
         )
-    plan = build_reconstruction_integration_plan(
-        scenario_ir,
-        package,
-        expected_global_step=args.expected_global_step,
-    )
+    plan_kwargs = {
+        "expected_global_step": args.expected_global_step,
+        "expected_samples_per_epoch": args.expected_samples_per_epoch,
+        "expected_max_epochs": args.expected_max_epochs,
+    }
+    if args.expected_camera_ids:
+        plan_kwargs["expected_camera_ids"] = tuple(args.expected_camera_ids)
+    plan = build_reconstruction_integration_plan(scenario_ir, package, **plan_kwargs)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"status": "passed", "plan": str(args.output)}, ensure_ascii=False))

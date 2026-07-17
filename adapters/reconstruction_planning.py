@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pickletools
 import zipfile
 from pathlib import Path
@@ -118,14 +119,18 @@ def build_reconstruction_integration_plan(
 
 
 def _load_yaml(path: Path) -> Any:
+    text = path.read_text(encoding="utf-8")
     try:
         import yaml
     except ImportError as exc:
-        raise ReconstructionPlanningError(
-            "PyYAML is required to validate the NuRec parsed configuration"
-        ) from exc
-    with path.open("r", encoding="utf-8") as stream:
-        result = yaml.safe_load(stream)
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError:
+            raise ReconstructionPlanningError(
+                "PyYAML is required to validate a non-JSON NuRec parsed configuration"
+            ) from exc
+    else:
+        result = yaml.safe_load(text)
     if not isinstance(result, dict):
         raise ReconstructionPlanningError("NuRec parsed config is not a mapping")
     return result
