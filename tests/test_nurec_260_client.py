@@ -1,3 +1,4 @@
+import struct
 import unittest
 from types import SimpleNamespace
 
@@ -39,6 +40,31 @@ class _Stub:
             point_xyzs=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
             point_intensities=[0.25, 0.75],
         )
+
+
+class _BufferedLidarStub(_Stub):
+    def __init__(self, *, point_count=2, xyz_bytes=None, intensity_bytes=None):
+        super().__init__()
+        self.point_count = point_count
+        self.xyz_bytes = (
+            xyz_bytes
+            if xyz_bytes is not None
+            else struct.pack("<6f", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+        )
+        self.intensity_bytes = (
+            intensity_bytes
+            if intensity_bytes is not None
+            else struct.pack("<2f", 0.25, 0.75)
+        )
+
+    def render_lidar(self, request, *, timeout):
+        self.calls.append(("lidar", request, timeout))
+        body = (
+            _wire_varint(3, self.point_count)
+            + _wire_bytes(4, self.xyz_bytes)
+            + _wire_bytes(5, self.intensity_bytes)
+        )
+        return _Response(body, point_xyzs=[], point_intensities=[])
 
 
 class _InventoryStub(_Stub):
@@ -86,6 +112,23 @@ def _jpeg(width, height):
         + int(width).to_bytes(2, "big")
         + b"\x01\x01\x11\x00\xff\xd9"
     )
+
+
+def _varint(value):
+    result = bytearray()
+    while value > 0x7F:
+        result.append((value & 0x7F) | 0x80)
+        value >>= 7
+    result.append(value)
+    return bytes(result)
+
+
+def _wire_varint(field_number, value):
+    return _varint(field_number << 3) + _varint(value)
+
+
+def _wire_bytes(field_number, value):
+    return _varint((field_number << 3) | 2) + _varint(len(value)) + value
 
 
 class NuRec260ClientTests(unittest.TestCase):
@@ -159,6 +202,26 @@ class NuRec260ClientTests(unittest.TestCase):
         self.assertEqual(evidence["status"], "failed")
         self.assertEqual(evidence["modalities"]["rgb"]["passed_count"], 0)
         self.assertEqual(evidence["modalities"]["lidar"]["passed_count"], 1)
+
+    def test_accepts_nre_260_buffered_lidar_response_with_old_client_proto(self):
+        evidence = self._client(_BufferedLidarStub()).dispatch_frame(_frame())
+
+        self.assertEqual(evidence["status"], "passed")
+        lidar = next(row for row in evidence["records"] if row["modality"] == "lidar")
+        self.assertEqual(
+            lidar["response_metadata"],
+            {"point_count": 2, "encoding": "float_xyz_intensity"},
+        )
+
+    def test_rejects_malformed_nre_260_buffered_lidar_response(self):
+        evidence = self._client(
+            _BufferedLidarStub(point_count=2, xyz_bytes=struct.pack("<3f", 1, 2, 3))
+        ).dispatch_frame(_frame())
+
+        self.assertEqual(evidence["status"], "failed")
+        lidar = next(row for row in evidence["records"] if row["modality"] == "lidar")
+        self.assertIn("rpc_status_not_ok", lidar["issues"])
+        self.assertIn("payload_sha256_invalid", lidar["issues"])
 
     def test_factory_requires_explicit_scene_epoch(self):
         from adapters.nurec_260_client import build_nurec_260_handler

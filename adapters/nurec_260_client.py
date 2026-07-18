@@ -208,7 +208,6 @@ class NuRec260Client:
     def inspect_response(
         self, payload: Mapping[str, Any], response: Any, body: bytes
     ) -> Mapping[str, Any]:
-        del body
         if payload["modality"] == "rgb":
             image = bytes(getattr(response, "image_bytes", b""))
             if not image:
@@ -223,18 +222,7 @@ class NuRec260Client:
                 )
             return {"width": width, "height": height, "encoding": "jpeg"}
 
-        xyz = getattr(response, "point_xyzs", ())
-        intensities = getattr(response, "point_intensities", ())
-        if not xyz or len(xyz) % 3:
-            raise NuRecMultimodalError(
-                "NRE LiDAR response must contain non-empty XYZ triples"
-            )
-        point_count = len(xyz) // 3
-        if len(intensities) != point_count:
-            raise NuRecMultimodalError(
-                "NRE LiDAR intensity count does not match XYZ point count"
-            )
-        return {"point_count": point_count, "encoding": "float_xyz_intensity"}
+        return _inspect_lidar_response(response, body)
 
     def _load_camera_specs(self) -> dict[str, Any]:
         response = self.stub.get_available_cameras(
@@ -373,3 +361,131 @@ def _jpeg_dimensions(data: bytes) -> tuple[int, int]:
             return int(width), int(height)
         offset += segment_length
     raise NuRecMultimodalError("NRE JPEG response has no supported SOF dimensions")
+
+
+def _inspect_lidar_response(response: Any, body: bytes) -> dict[str, Any]:
+    """Inspect both legacy and NRE 26.04 buffered LiDAR responses.
+
+    CARLA 0.9.16 ships an older ``LidarRenderReturn`` descriptor whose fields
+    1/2 are repeated floats.  The NRE 26.04 server keeps those legacy fields
+    but normally returns the efficient layout below instead::
+
+        uint32 num_points = 3;
+        bytes point_xyzs_buffer = 4;
+        bytes point_intensities_buffer = 5;
+
+    Protobuf preserves those fields as unknown data when the response is
+    parsed with CARLA's older generated module.  Decode only the three exact
+    top-level fields needed for validation; the full serialized response stays
+    unchanged and remains the source of the acceptance SHA-256.
+    """
+
+    xyz = getattr(response, "point_xyzs", ())
+    intensities = getattr(response, "point_intensities", ())
+    if xyz or intensities:
+        if not xyz or len(xyz) % 3:
+            raise NuRecMultimodalError(
+                "NRE LiDAR response must contain non-empty XYZ triples"
+            )
+        point_count = len(xyz) // 3
+        if len(intensities) != point_count:
+            raise NuRecMultimodalError(
+                "NRE LiDAR intensity count does not match XYZ point count"
+            )
+        return {"point_count": point_count, "encoding": "float_xyz_intensity"}
+
+    fields = _protobuf_wire_fields(body)
+    point_counts = fields.get(3, [])
+    xyz_buffers = fields.get(4, [])
+    intensity_buffers = fields.get(5, [])
+    if not point_counts and not xyz_buffers and not intensity_buffers:
+        raise NuRecMultimodalError(
+            "NRE LiDAR response contains neither legacy points nor 26.04 buffers"
+        )
+    if (
+        len(point_counts) != 1
+        or len(xyz_buffers) != 1
+        or len(intensity_buffers) != 1
+        or not isinstance(point_counts[0], int)
+        or not isinstance(xyz_buffers[0], bytes)
+        or not isinstance(intensity_buffers[0], bytes)
+    ):
+        raise NuRecMultimodalError(
+            "NRE 26.04 LiDAR response buffer fields are missing or duplicated"
+        )
+    point_count = int(point_counts[0])
+    xyz_buffer = xyz_buffers[0]
+    intensity_buffer = intensity_buffers[0]
+    if point_count < 1:
+        raise NuRecMultimodalError(
+            "NRE 26.04 LiDAR response num_points must be positive"
+        )
+    expected_xyz_bytes = point_count * 3 * 4
+    expected_intensity_bytes = point_count * 4
+    if len(xyz_buffer) != expected_xyz_bytes:
+        raise NuRecMultimodalError(
+            "NRE 26.04 LiDAR XYZ buffer size does not match num_points"
+        )
+    if len(intensity_buffer) != expected_intensity_bytes:
+        raise NuRecMultimodalError(
+            "NRE 26.04 LiDAR intensity buffer size does not match num_points"
+        )
+    # Buffer hashes are deliberately covered by the caller's hash of the full
+    # serialized protobuf.  Keep response_metadata within the canonical Scene
+    # Exchange contract shared by legacy and buffered layouts.
+    return {"point_count": point_count, "encoding": "float_xyz_intensity"}
+
+
+def _protobuf_wire_fields(data: bytes) -> dict[int, list[int | bytes]]:
+    """Return top-level varint and length-delimited protobuf fields."""
+
+    fields: dict[int, list[int | bytes]] = {}
+    offset = 0
+    while offset < len(data):
+        key, offset = _read_protobuf_varint(data, offset)
+        field_number = key >> 3
+        wire_type = key & 7
+        if field_number < 1:
+            raise NuRecMultimodalError("NRE response contains invalid protobuf field 0")
+        if wire_type == 0:
+            value, offset = _read_protobuf_varint(data, offset)
+        elif wire_type == 1:
+            end = offset + 8
+            if end > len(data):
+                raise NuRecMultimodalError("NRE response has a truncated fixed64 field")
+            value = data[offset:end]
+            offset = end
+        elif wire_type == 2:
+            length, offset = _read_protobuf_varint(data, offset)
+            end = offset + length
+            if end > len(data):
+                raise NuRecMultimodalError(
+                    "NRE response has a truncated length-delimited field"
+                )
+            value = data[offset:end]
+            offset = end
+        elif wire_type == 5:
+            end = offset + 4
+            if end > len(data):
+                raise NuRecMultimodalError("NRE response has a truncated fixed32 field")
+            value = data[offset:end]
+            offset = end
+        else:
+            raise NuRecMultimodalError(
+                f"NRE response uses unsupported protobuf wire type {wire_type}"
+            )
+        fields.setdefault(field_number, []).append(value)
+    return fields
+
+
+def _read_protobuf_varint(data: bytes, offset: int) -> tuple[int, int]:
+    value = 0
+    shift = 0
+    while offset < len(data) and shift <= 63:
+        byte = data[offset]
+        offset += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, offset
+        shift += 7
+    raise NuRecMultimodalError("NRE response contains a truncated protobuf varint")
