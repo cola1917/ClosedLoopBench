@@ -47,3 +47,19 @@ python runners/validate_runtime_alignment.py `
 Defaults are 0.25 m horizontal error, 0.25 m vertical error and 2 degrees yaw
 error. A package can become `runtime_validated` only from passed evidence; the
 validated package must be published as a new immutable scene version.
+
+For scene-0061, capture all 39 raw nuScenes `LIDAR_TOP` keyframe ego poses
+against the driving waypoints of the actually loaded OpenDRIVE world. The
+capture command applies the canonical y-left to CARLA y-right conversion only
+at the API boundary and hashes the exact NuRec artifact:
+
+```powershell
+python runners/capture_runtime_alignment_observations.py `
+  --dataroot /path/to/nuscenes-mini-scene-0061 `
+  --scene scene-0061 `
+  --scene-package /path/to/scene_package.json `
+  --artifact /path/to/last.usdz `
+  --opendrive /path/to/road.nurec-route-extended-both-v7.xodr `
+  --renderer-version 26.4.146 `
+  --output /path/to/runtime_alignment_observations.json
+```
