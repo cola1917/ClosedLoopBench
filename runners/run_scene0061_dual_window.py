@@ -35,11 +35,11 @@ from runners.diagnose_nurec_260_lidar import (  # noqa: E402
 
 
 CAMERA_ORDER = (
-    "camera_front",
     "camera_front_left",
+    "camera_front",
     "camera_front_right",
-    "camera_back",
     "camera_back_left",
+    "camera_back",
     "camera_back_right",
 )
 PREVIEW_CAMERAS = (
@@ -75,6 +75,7 @@ class FramePacket:
     ego: ActorState
     actors: tuple[ActorState, ...]
     cameras: Mapping[str, Any]
+    camera_jpegs: Mapping[str, bytes]
     camera_records: tuple[Mapping[str, Any], ...]
 
 
@@ -82,6 +83,7 @@ def run_visualization(
     *,
     config_path: Path,
     artifact_path: Path,
+    scene_package_path: Path,
     baseline_path: Path,
     moved_path: Path,
     scenario_ir_path: Path,
@@ -113,6 +115,7 @@ def run_visualization(
     baseline = _load_object(baseline_path)
     moved = _load_object(moved_path)
     scenario_ir = _load_object(scenario_ir_path)
+    scene_package = _load_object(scene_package_path)
     actor_mapping = _load_object(actor_mapping_path)
     overlap = _load_object(overlap_path)
     lidar_diagnostic = _load_object(lidar_diagnostic_path)
@@ -137,6 +140,7 @@ def run_visualization(
     selected_scan = _select_native_scan(artifact, reference_us)
     mapping_by_track = _mapping_by_track(actor_mapping)
     roads = _sample_xodr(xodr_path)
+    map_validation = _validate_map_contract(scene_package, xodr_path)
     scenario_actors = {
         str(actor["actor_id"]): actor for actor in scenario_ir.get("actors", [])
     }
@@ -159,7 +163,7 @@ def run_visualization(
     packet_reports: list[dict[str, Any]] = []
     try:
         for state_name, frame in (("baseline", baseline), ("moved", moved)):
-            camera_images, camera_records = _capture_cameras(
+            camera_images, camera_jpegs, camera_records = _capture_cameras(
                 client,
                 frame,
                 camera_names,
@@ -179,6 +183,7 @@ def run_visualization(
                 mapping_by_track=mapping_by_track,
                 controlled_track_id=controlled_track_id,
                 camera_images=camera_images,
+                camera_jpegs=camera_jpegs,
                 camera_records=camera_records,
                 baseline=baseline,
             )
@@ -213,10 +218,9 @@ def run_visualization(
             if output_dir is not None and mode == "formal_acceptance":
                 raw_dir = output_dir / "raw" / state_name
                 raw_dir.mkdir(parents=True)
-                for name, image in camera_images.items():
+                for name in camera_images:
                     raw_path = raw_dir / f"{name}.{packet.frame_id:05d}.jpg"
-                    if not cv2.imwrite(str(raw_path), image):
-                        raise RuntimeError(f"failed to save raw camera image: {raw_path}")
+                    raw_path.write_bytes(packet.camera_jpegs[name])
                 carla_path = output_dir / f"frame_{packet.frame_id:05d}.{state_name}.carla.png"
                 grid_path = output_dir / f"frame_{packet.frame_id:05d}.{state_name}.nurec_grid.png"
                 if not cv2.imwrite(str(carla_path), carla_canvas):
@@ -227,6 +231,12 @@ def run_visualization(
                 report_row["nurec_grid_screenshot"] = _file_record(grid_path)
                 report_row["raw_frame_paths"] = {
                     name: str((raw_dir / f"{name}.{packet.frame_id:05d}.jpg").resolve())
+                    for name in camera_images
+                }
+                report_row["raw_frame_files"] = {
+                    name: _file_record(
+                        raw_dir / f"{name}.{packet.frame_id:05d}.jpg"
+                    )
                     for name in camera_images
                 }
             packet_reports.append(report_row)
@@ -258,6 +268,12 @@ def run_visualization(
         "same_frame_packet_drives_both_windows": all(
             row["synchronization_error_us"] == 0 for row in packet_reports
         ),
+        "rgb_color_health": all(
+            float(record["exact_gray_pixel_fraction"]) < 0.98
+            and float(record["mean_channel_spread"]) > 1.0
+            for row in packet_reports
+            for record in row["camera_records"]
+        ),
     }
     if mode == "formal_acceptance":
         status = "passed" if all(gates.values()) else "blocked"
@@ -284,6 +300,7 @@ def run_visualization(
         "inputs": {
             "config": _input_record(config_path),
             "artifact": _input_record(artifact_path),
+            "scene_package": _input_record(scene_package_path),
             "baseline": _input_record(baseline_path),
             "moved": _input_record(moved_path),
             "scenario_ir": _input_record(scenario_ir_path),
@@ -303,6 +320,7 @@ def run_visualization(
             "dynamic_objects": "inverse(T_world_base) times nuscenes_global pose",
             "selected_native_scan": selected_scan["summary"],
         },
+        "map_validation": map_validation,
         "packets": packet_reports,
         "statistics": {
             "packet_count": len(packets),
@@ -341,7 +359,11 @@ def _capture_cameras(
     selected_scan: Mapping[str, Any],
     cv2: Any,
     np: Any,
-) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, bytes],
+    tuple[dict[str, Any], ...],
+]:
     payloads = {
         str(payload["sensor"]["sensor_id"]): payload
         for payload in materialize_nurec_rpc_requests(frame)
@@ -351,6 +373,7 @@ def _capture_cameras(
     if missing:
         raise ValueError(f"frame lacks requested cameras: {missing}")
     images: dict[str, Any] = {}
+    jpeg_payloads: dict[str, bytes] = {}
     records = []
     for camera_name in camera_names:
         payload = deepcopy(payloads[camera_name])
@@ -379,6 +402,14 @@ def _capture_cameras(
                 f"decoded {camera_name} dimensions do not match {width}x{height}"
             )
         images[camera_name] = image
+        jpeg_payloads[camera_name] = image_bytes
+        sample = image[::8, ::8].reshape(-1, 3)
+        exact_gray_fraction = float(
+            np.mean((sample[:, 0] == sample[:, 1]) & (sample[:, 1] == sample[:, 2]))
+        )
+        mean_channel_spread = float(
+            np.mean(np.max(sample, axis=1) - np.min(sample, axis=1))
+        )
         records.append(
             {
                 "camera_name": camera_name,
@@ -388,10 +419,14 @@ def _capture_cameras(
                 "jpeg_bytes": len(image_bytes),
                 "width": int(metadata["width"]),
                 "height": int(metadata["height"]),
+                "logical_image_quality": float(parameters.get("image_quality", 0.95)),
+                "wire_image_quality": float(encoded["wire_request"].image_quality),
+                "exact_gray_pixel_fraction": exact_gray_fraction,
+                "mean_channel_spread": mean_channel_spread,
                 "latency_ms": (time.monotonic() - started) * 1000.0,
             }
         )
-    return images, tuple(records)
+    return images, jpeg_payloads, tuple(records)
 
 
 def _build_packet(
@@ -404,6 +439,7 @@ def _build_packet(
     mapping_by_track: Mapping[str, Mapping[str, Any]],
     controlled_track_id: str,
     camera_images: Mapping[str, Any],
+    camera_jpegs: Mapping[str, bytes],
     camera_records: tuple[Mapping[str, Any], ...],
     baseline: Mapping[str, Any],
 ) -> FramePacket:
@@ -455,6 +491,7 @@ def _build_packet(
         ego=ego,
         actors=tuple(actors),
         cameras=camera_images,
+        camera_jpegs=camera_jpegs,
         camera_records=camera_records,
     )
 
@@ -662,6 +699,31 @@ def _sample_xodr(path: Path) -> list[list[tuple[float, float]]]:
     return roads
 
 
+def _validate_map_contract(
+    scene_package: Mapping[str, Any], xodr_path: Path
+) -> dict[str, Any]:
+    map_info = scene_package.get("map")
+    if not isinstance(map_info, Mapping):
+        raise ValueError("scene package has no map contract")
+    declared = str(map_info.get("opendrive") or "")
+    if declared != "road.xodr":
+        raise ValueError(
+            f"scene package declares {declared!r}, expected road.xodr"
+        )
+    if xodr_path.name != declared:
+        raise ValueError(
+            f"selected OpenDRIVE basename {xodr_path.name!r} != scene package {declared!r}"
+        )
+    return {
+        "status": "matched",
+        "declared_opendrive": declared,
+        "selected_path": str(xodr_path.resolve()),
+        "selected_sha256": _sha256_file(xodr_path),
+        "map_source": str(map_info.get("source") or ""),
+        "location": str(map_info.get("location") or ""),
+    }
+
+
 def _bbox_corners(actor: ActorState) -> list[tuple[float, float]]:
     half_length = actor.length / 2.0
     half_width = actor.width / 2.0
@@ -765,6 +827,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--artifact", required=True, type=Path)
+    parser.add_argument("--scene-package", required=True, type=Path)
     parser.add_argument("--baseline-frame", required=True, type=Path)
     parser.add_argument("--moved-frame", required=True, type=Path)
     parser.add_argument("--scenario-ir", required=True, type=Path)
@@ -790,6 +853,7 @@ def main(argv: list[str] | None = None) -> int:
         report = run_visualization(
             config_path=args.config,
             artifact_path=args.artifact,
+            scene_package_path=args.scene_package,
             baseline_path=args.baseline_frame,
             moved_path=args.moved_frame,
             scenario_ir_path=args.scenario_ir,

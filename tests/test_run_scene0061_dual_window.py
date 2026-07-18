@@ -11,6 +11,7 @@ from runners.run_scene0061_dual_window import (
     _dynamic_delta,
     _same_frame_gate,
     _sample_xodr,
+    _validate_map_contract,
 )
 
 
@@ -79,6 +80,16 @@ class Scene0061DualWindowTests(unittest.TestCase):
         self.assertEqual(roads[0][0], (0.0, 0.0))
         self.assertAlmostEqual(roads[0][-1][0], 10.0)
         self.assertGreater(roads[1][-1][1], 0.0)
+
+    def test_scene_package_map_contract_requires_road_xodr(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            path = Path(raw_root) / "road.xodr"
+            path.write_text("<OpenDRIVE/>", encoding="utf-8")
+            report = _validate_map_contract(
+                {"map": {"opendrive": "road.xodr", "source": "nuscenes_map_expansion"}},
+                path,
+            )
+        self.assertEqual(report["status"], "matched")
 
 
 if __name__ == "__main__":
