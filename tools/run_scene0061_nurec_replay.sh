@@ -21,6 +21,7 @@ NUREC_CAMERA_CONFIG="${NUREC_CAMERA_CONFIG:-/home/cwadmin/workspace/ClosedLoopBe
 DISPLAY="${DISPLAY:-:1}"
 LOG_FILE="${LOG_FILE:-}"
 OVERLAP_LOG="${OVERLAP_LOG:-}"
+ACTOR_MAPPING_LOG="${ACTOR_MAPPING_LOG:-}"
 
 for path in "${PYTHON_BIN}" "${NUREC_USDZ}" "${NUREC_XODR_PATH}" "${NUREC_CAMERA_CONFIG}"; do
   if [[ ! -e "${path}" ]]; then
@@ -51,6 +52,9 @@ replay_args=(
 )
 if [[ -n "${OVERLAP_LOG}" ]]; then
   replay_args+=(--overlap-log "${OVERLAP_LOG}")
+fi
+if [[ -n "${ACTOR_MAPPING_LOG}" ]]; then
+  replay_args+=(--actor-mapping-log "${ACTOR_MAPPING_LOG}")
 fi
 
 if [[ -n "${LOG_FILE}" ]]; then

@@ -249,3 +249,23 @@ The canonical runtime track inventory accepts the probe only when
 match, and the moved aggregate response hash differs for each modality. This is
 still root-pose evidence, not proof of editable mesh geometry or pedestrian
 skeleton animation.
+
+The CARLA replay must also observe the same tracks in the actually loaded
+`NurecScenario.actor_mapping`. Apply
+`tools/patch_carla_nurec_actor_inventory.py` to NVIDIA's replay example, set
+`ACTOR_MAPPING_LOG` when invoking `tools/run_scene0061_nurec_replay.sh`, and
+combine that observation with the passed probe reports:
+
+```bash
+python -m runners.build_nurec_runtime_inventory \
+  --actor-mapping /path/to/nurec_actor_mapping.json \
+  --artifact /path/to/last.usdz \
+  --renderer-version 26.4.146 \
+  --pose-probe /path/to/vehicle_pose_ab_probe.json \
+  --pose-probe /path/to/pedestrian_pose_ab_probe.json \
+  --output /path/to/nurec_runtime_track_inventory.json
+```
+
+The builder rejects an actor mapping captured from a different USDZ and keeps
+all loaded tracks in the inventory; only tracks with passed, repeatable RGB and
+LiDAR pose probes are marked `dynamic_object_pose_verified=true`.
