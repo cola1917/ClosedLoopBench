@@ -81,6 +81,65 @@ class RuntimeAlignmentTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeAlignmentError, "scene_id"):
             validate_runtime_alignment(_package(), observations)
 
+    def test_nurec_runtime_pose_supplies_observed_vertical_reference(self):
+        from adapters.runtime_alignment import promote_runtime_validated_package, validate_runtime_alignment
+
+        observations = _observations()
+        observations["capture"] = {
+            "runtime_reference": "nurec_usdz_ego_trajectory",
+            "vertical_reference": "nurec_usdz_ego_trajectory",
+            "coordinate_boundary": "canonical_y_left_to_carla_y_right",
+        }
+        for index, landmark in enumerate(observations["landmarks"]):
+            measured = landmark["sim_measured"]
+            landmark["measurement"] = {"timestamp_us": 1000 + index}
+            landmark["nurec_runtime"] = {
+                "x": measured["x"],
+                "y": measured["y"],
+                "z": float(index),
+                "yaw_deg": measured.get("yaw_deg", 0.0),
+                "timestamp_us": 1000 + index,
+                "pose_source": "nurec_usdz_rig_trajectory_interpolated",
+            }
+            measured["z"] = float(index)
+
+        evidence = validate_runtime_alignment(_package(), observations)
+        self.assertEqual(evidence["status"], "passed")
+        self.assertEqual(
+            evidence["summary"]["vertical_source"], "nurec_usdz_ego_trajectory"
+        )
+        self.assertGreater(
+            evidence["landmarks"][2]["log_to_runtime_vertical_delta_m_not_gated"],
+            0.0,
+        )
+        promoted = promote_runtime_validated_package(
+            _package(), evidence, evidence_path="runtime_alignment_evidence.json"
+        )
+        self.assertEqual(
+            promoted["alignment"]["runtime_reference"]["vertical"],
+            "nurec_usdz_ego_trajectory",
+        )
+
+    def test_nurec_runtime_pose_must_match_lidar_timestamp(self):
+        from adapters.runtime_alignment import RuntimeAlignmentError, validate_runtime_alignment
+
+        observations = _observations()
+        observations["capture"] = {
+            "runtime_reference": "nurec_usdz_ego_trajectory",
+            "vertical_reference": "nurec_usdz_ego_trajectory",
+            "coordinate_boundary": "canonical_y_left_to_carla_y_right",
+        }
+        for index, landmark in enumerate(observations["landmarks"]):
+            landmark["measurement"] = {"timestamp_us": index}
+            landmark["nurec_runtime"] = {
+                **landmark["sim_measured"],
+                "timestamp_us": index,
+                "pose_source": "nurec_usdz_rig_trajectory_interpolated",
+            }
+        observations["landmarks"][1]["nurec_runtime"]["timestamp_us"] = 99
+        with self.assertRaisesRegex(RuntimeAlignmentError, "timestamps differ"):
+            validate_runtime_alignment(_package(), observations)
+
 
 if __name__ == "__main__":
     unittest.main()

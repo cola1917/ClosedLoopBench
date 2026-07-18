@@ -48,8 +48,13 @@ Defaults are 0.25 m horizontal error, 0.25 m vertical error and 2 degrees yaw
 error. A package can become `runtime_validated` only from passed evidence; the
 validated package must be published as a new immutable scene version.
 
-For scene-0061, capture all 39 raw nuScenes `LIDAR_TOP` keyframe ego poses
-against the driving waypoints of the actually loaded OpenDRIVE world. The
+For scene-0061, use all 39 raw nuScenes `LIDAR_TOP` keyframe timestamps.  The
+mini table has a zero-filled ego z component, so it is not valid vertical
+ground truth.  At each timestamp the capture runner interpolates the ego rig
+trajectory from the exact USDZ and applies NVIDIA's
+`get_t_rig_enu_from_ecef`, then compares that 3D runtime pose with the driving
+waypoint of the actually loaded OpenDRIVE world.  The raw nuScenes global pose
+is retained to cross-check the Scene Package horizontal/yaw transform.  The
 capture command applies the canonical y-left to CARLA y-right conversion only
 at the API boundary and hashes the exact NuRec artifact:
 
@@ -60,6 +65,13 @@ python runners/capture_runtime_alignment_observations.py `
   --scene-package /path/to/scene_package.json `
   --artifact /path/to/last.usdz `
   --opendrive /path/to/road.nurec-route-extended-both-v7.xodr `
+  --nurec-example-root /path/to/CARLA_0.9.16/PythonAPI/examples/nvidia/nurec `
+  --carla-python-api /path/to/CARLA_0.9.16/PythonAPI/carla `
   --renderer-version 26.4.146 `
   --output /path/to/runtime_alignment_observations.json
 ```
+
+This is not a threshold workaround: vertical error remains gated at 0.25 m,
+but its reference is the trajectory actually consumed by NuRec/CARLA rather
+than an unavailable source measurement represented as zero.  The promoted
+Scene Package records this split reference model explicitly.

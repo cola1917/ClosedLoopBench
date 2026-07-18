@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -68,6 +69,64 @@ def load_nuscenes_ego_landmarks(
     return str(scene["token"]), result
 
 
+def attach_nurec_runtime_references(
+    landmarks: Iterable[dict[str, Any]],
+    *,
+    artifact_path: str | Path,
+    xodr_data: str,
+    nurec_example_root: str | Path,
+) -> list[dict[str, Any]]:
+    """Attach the exact NuRec rig pose used by NVIDIA's CARLA adapter.
+
+    The nuScenes mini ego-pose table used for scene-0061 has a zeroed vertical
+    component.  NuRec's USDZ rig trajectory contains the reconstructed road
+    elevation, so a formal 3D runtime check must interpolate that trajectory at
+    each LiDAR keyframe timestamp instead of pretending the raw log z is an
+    observable height.
+    """
+
+    example_root = str(Path(nurec_example_root).resolve())
+    if example_root not in sys.path:
+        sys.path.insert(0, example_root)
+    try:
+        import numpy as np
+        from projection_functions import get_t_rig_enu_from_ecef
+        from scenario import Scenario
+    except ImportError as exc:
+        raise ValueError(f"cannot import NVIDIA NuRec example runtime: {exc}") from exc
+
+    artifact = Path(artifact_path)
+    scenario = Scenario(str(artifact))
+    scenario_to_carla = np.asarray(
+        get_t_rig_enu_from_ecef(scenario.t_world_base, xodr_data), dtype=float
+    )
+    if scenario_to_carla.shape != (4, 4):
+        raise ValueError("NVIDIA scenario-to-CARLA transform is not 4x4")
+
+    attached = []
+    for landmark in landmarks:
+        timestamp_us = int(landmark["timestamp_us"])
+        pose = scenario.ego_poses.interpolate_pose_matrix(timestamp_us)
+        if pose is None:
+            raise ValueError(
+                f"NuRec ego trajectory has no pose for timestamp {timestamp_us}"
+            )
+        matrix = scenario_to_carla @ np.asarray(pose, dtype=float)
+        item = deepcopy(landmark)
+        item["nurec_runtime"] = {
+            "x": float(matrix[0, 3]),
+            "y": float(matrix[1, 3]),
+            "z": float(matrix[2, 3]),
+            "yaw_deg": _normalize_degrees(
+                math.degrees(math.atan2(float(matrix[1, 0]), float(matrix[0, 0])))
+            ),
+            "timestamp_us": timestamp_us,
+            "pose_source": "nurec_usdz_rig_trajectory_interpolated",
+        }
+        attached.append(item)
+    return attached
+
+
 def capture_observations(
     scene_package: dict[str, Any],
     landmarks: Iterable[dict[str, Any]],
@@ -88,11 +147,23 @@ def capture_observations(
         raise ValueError(f"NuRec artifact does not exist: {artifact}")
 
     captured = []
+    reference_modes = set()
     for landmark in landmarks:
         log_global = landmark.get("log_global")
         if not isinstance(log_global, dict):
             raise ValueError("landmark lacks log_global")
-        expected = _apply(matrix, log_global)
+        log_expected = _apply(matrix, log_global)
+        nurec_runtime = landmark.get("nurec_runtime")
+        if nurec_runtime is None:
+            expected = log_expected
+            reference_modes.add("scene_package_rigid_transform")
+        elif isinstance(nurec_runtime, dict):
+            expected = {
+                name: float(nurec_runtime[name]) for name in ("x", "y", "z")
+            }
+            reference_modes.add("nurec_usdz_ego_trajectory")
+        else:
+            raise ValueError("nurec_runtime must be an object when provided")
         # Canonical scene coordinates are right-handed x-forward/y-left;
         # CARLA's API is x-forward/y-right. Convert only at the API boundary.
         query = carla_module.Location(
@@ -116,6 +187,11 @@ def capture_observations(
             {
                 "landmark_id": str(landmark["landmark_id"]),
                 "log_global": dict(log_global),
+                **(
+                    {"nurec_runtime": deepcopy(nurec_runtime)}
+                    if nurec_runtime is not None
+                    else {}
+                ),
                 "sim_measured": measured,
                 "measurement": {
                     "sample_token": landmark.get("sample_token"),
@@ -131,6 +207,9 @@ def capture_observations(
 
     if len(captured) < 3:
         raise ValueError("at least three runtime landmarks are required")
+    if len(reference_modes) != 1:
+        raise ValueError("runtime landmarks must use one consistent pose reference")
+    reference_mode = reference_modes.pop()
     return {
         "schema_version": "runtime_alignment_observations.v1",
         "scene_id": scene_id,
@@ -139,7 +218,10 @@ def capture_observations(
             "simulator": f"CARLA {simulator_version}",
             "renderer": f"NRE {renderer_version}",
             "capture_method": (
-                "all_nuscenes_lidar_keyframe_ego_poses_projected_to_"
+                "nurec_usdz_rig_poses_at_nuscenes_lidar_keyframes_projected_"
+                "to_loaded_carla_opendrive_driving_waypoints"
+                if reference_mode == "nurec_usdz_ego_trajectory"
+                else "all_nuscenes_lidar_keyframe_ego_poses_projected_to_"
                 "loaded_carla_opendrive_driving_waypoints"
             ),
             "nurec_artifact_sha256": _sha256(artifact),
@@ -148,7 +230,17 @@ def capture_observations(
             "map_name": str(carla_map.name),
             "carla_frame": int(carla_frame),
             "coordinate_boundary": "canonical_y_left_to_carla_y_right",
-            "landmark_source": "nuscenes_raw_ego_pose_and_lidar_keyframes",
+            "landmark_source": (
+                "nuscenes_lidar_keyframe_timestamps_plus_nurec_usdz_ego_trajectory"
+                if reference_mode == "nurec_usdz_ego_trajectory"
+                else "nuscenes_raw_ego_pose_and_lidar_keyframes"
+            ),
+            "runtime_reference": reference_mode,
+            "vertical_reference": (
+                "nurec_usdz_ego_trajectory"
+                if reference_mode == "nurec_usdz_ego_trajectory"
+                else "nuscenes_global_z"
+            ),
             "landmark_count": len(captured),
         },
         "landmarks": captured,
@@ -198,6 +290,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scene-package", required=True, type=Path)
     parser.add_argument("--artifact", required=True, type=Path)
     parser.add_argument("--opendrive", required=True, type=Path)
+    parser.add_argument(
+        "--nurec-example-root",
+        type=Path,
+        required=True,
+        help="NVIDIA CARLA Python example directory containing scenario.py",
+    )
     parser.add_argument("--renderer-version", required=True)
     parser.add_argument("--carla-python-api", type=Path)
     parser.add_argument("--host", default="127.0.0.1")
@@ -221,6 +319,12 @@ def main(argv: list[str] | None = None) -> int:
         xodr = args.opendrive.read_text(encoding="utf-8")
         if not xodr.strip():
             raise ValueError("OpenDRIVE file is empty")
+        landmarks = attach_nurec_runtime_references(
+            landmarks,
+            artifact_path=args.artifact,
+            xodr_data=xodr,
+            nurec_example_root=args.nurec_example_root,
+        )
         client = carla.Client(args.host, args.port)
         client.set_timeout(args.timeout_sec)
         generation_type = getattr(carla, "OpendriveGenerationParameters", None)
