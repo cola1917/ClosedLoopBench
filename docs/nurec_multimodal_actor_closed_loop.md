@@ -236,6 +236,15 @@ the baseline document twice; the two input documents must have identical scene
 time and sensors, and only the named target pose may differ:
 
 ```bash
+python -m runners.prepare_nurec_pose_probe_frames \
+  --dataroot /path/to/nuscenes-mini-scene-0061 \
+  --scene scene-0061 \
+  --track-id c1958768d48640948f6053d04cffd35b \
+  --actor-type vehicle \
+  --baseline-output /path/to/vehicle_baseline_frame.json \
+  --moved-output /path/to/vehicle_moved_frame.json \
+  --context-output /path/to/vehicle_probe_context.json
+
 python -m runners.probe_nurec_260_pose \
   --config /path/to/run_config.json \
   --baseline-frame /path/to/vehicle_baseline_frame.json \
