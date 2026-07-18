@@ -476,14 +476,15 @@ def _actor_state(
 def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, float]]], *, cv2: Any, np: Any) -> Any:
     canvas = np.zeros((900, 1440, 3), dtype=np.uint8)
     canvas[:] = (24, 26, 31)
-    points = [point for road in roads for point in road]
-    points.extend((actor.x, actor.y) for actor in (packet.ego,) + packet.actors)
-    if not points:
-        points = [(0.0, 0.0), (1.0, 1.0)]
-    min_x = min(point[0] for point in points)
-    max_x = max(point[0] for point in points)
-    min_y = min(point[1] for point in points)
-    max_y = max(point[1] for point in points)
+    # Keep the explanatory view near the synchronized actors.  Fitting the
+    # complete scene-0061 XODR makes a 4.7 m vehicle only a few pixels wide and
+    # defeats the bbox/mapping purpose of this window.
+    actors = (packet.ego,) + packet.actors
+    actor_points = [(actor.x, actor.y) for actor in actors]
+    min_x = min(point[0] for point in actor_points) - 32.0
+    max_x = max(point[0] for point in actor_points) + 32.0
+    min_y = min(point[1] for point in actor_points) - 28.0
+    max_y = max(point[1] for point in actor_points) + 28.0
     margin = 55
     scale = min(
         (canvas.shape[1] - 2 * margin) / max(max_x - min_x, 1.0),
@@ -505,7 +506,7 @@ def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, floa
                 2,
                 cv2.LINE_AA,
             )
-    for actor in (packet.ego,) + packet.actors:
+    for actor_index, actor in enumerate(actors):
         color = (
             (0, 170, 255)
             if actor.controlled
@@ -527,12 +528,23 @@ def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, floa
         corners = _bbox_corners(actor)
         pixel_corners = np.asarray([screen(point) for point in corners], dtype=np.int32)
         cv2.polylines(canvas, [pixel_corners], True, color, 3, cv2.LINE_AA)
+        # A small vertical projection makes the top-down rectangle an explicit
+        # 3D bbox proxy while retaining legibility on the simple XODR view.
+        lift = max(6, int(actor.height * scale * 0.35))
+        raised_corners = pixel_corners.copy()
+        raised_corners[:, 1] -= lift
+        cv2.polylines(canvas, [raised_corners], True, color, 2, cv2.LINE_AA)
+        for lower, upper in zip(pixel_corners, raised_corners):
+            cv2.line(canvas, tuple(lower), tuple(upper), color, 2, cv2.LINE_AA)
         anchor = screen((actor.x, actor.y))
         carla_id = actor.carla_actor_id if actor.carla_actor_id is not None else "unmapped"
         label1 = f"CARLA {carla_id} | {actor.actor_type} | {actor.speed_mps:.2f} m/s"
         label2 = f"NuRec {actor.track_id}"
-        cv2.putText(canvas, label1, (anchor[0] + 8, anchor[1] - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.48, color, 1, cv2.LINE_AA)
-        cv2.putText(canvas, label2, (anchor[0] + 8, anchor[1] + 8), cv2.FONT_HERSHEY_SIMPLEX, 0.40, color, 1, cv2.LINE_AA)
+        label_x = min(anchor[0] + 18, canvas.shape[1] - 540)
+        label_y = anchor[1] - 42 + actor_index * 32
+        cv2.line(canvas, anchor, (label_x - 4, label_y + 4), color, 1, cv2.LINE_AA)
+        cv2.putText(canvas, label1, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 2, cv2.LINE_AA)
+        cv2.putText(canvas, label2, (label_x, label_y + 21), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
     title = (
         f"CARLA OpenDRIVE state | {packet.state_name} | frame {packet.frame_id} | "
         f"timestamp {packet.timestamp_us} us | sim {packet.simulation_time_sec:.6f} s"
