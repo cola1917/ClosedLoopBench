@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Make CARLA 0.9.16's NuRec Scenario parser accept pinhole cameras.
+"""Patch CARLA 0.9.16's NuRec Scenario parser for the replay contract.
 
 The bundled parser documents OpenCV pinhole support but unconditionally reads
 f-theta-only polynomial fields. NeuralSceneBridge's nuScenes exports correctly
 store ``opencv-pinhole`` intrinsics, so those f-theta fields are optional. The
 gRPC server remains authoritative for rendering intrinsics; this parser only
-needs the logical camera names and rig transforms.
+needs the logical camera names and rig transforms.  The patch also teaches the
+bundled scenario loader that NuRec v4 uses ``pedestrian`` (not the older
+``person``) as the track label.  Without that normalization, pedestrian tracks
+are skipped before ``NurecScenario.actor_mapping`` is populated.
 """
 
 from __future__ import annotations
@@ -60,6 +63,27 @@ NORMALIZE_V4_PREFIX = '''        if "pose-range" not in self.metadata:
 
 NEW_V4_BLOCK = NORMALIZE_V4_PREFIX + OLD_ZERO_TIME_BLOCK
 
+OLD_ACTOR_FILTER_BLOCK = '''            if not (track.label in VEHICLE_LABELS or track.label == "person"):
+                continue
+
+            best_fit_blueprint = self.blueprint_library.get_best_fit_blueprint(
+                track.dims, track.label != "person"
+            )
+'''
+
+NEW_ACTOR_FILTER_BLOCK = '''            # NuRec v4 scene packages label walker tracks as
+            # ``pedestrian``. Keep the legacy ``person`` spelling for older
+            # packages, and make the vehicle/walker blueprint choice explicit.
+            is_vehicle_track = track.label in VEHICLE_LABELS
+            is_pedestrian_track = track.label in {"person", "pedestrian"}
+            if not (is_vehicle_track or is_pedestrian_track):
+                continue
+
+            best_fit_blueprint = self.blueprint_library.get_best_fit_blueprint(
+                track.dims, is_vehicle_track
+            )
+'''
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -92,6 +116,11 @@ def main() -> int:
         changes.append("v4-metadata")
     else:
         raise RuntimeError("expected metadata zero-time block was not found")
+    if OLD_ACTOR_FILTER_BLOCK in patched:
+        patched = patched.replace(OLD_ACTOR_FILTER_BLOCK, NEW_ACTOR_FILTER_BLOCK, 1)
+        changes.append("pedestrian-label")
+    elif NEW_ACTOR_FILTER_BLOCK not in patched:
+        raise RuntimeError("expected actor label/blueprint block was not found")
     if not changes:
         print("already_patched")
         return 0
