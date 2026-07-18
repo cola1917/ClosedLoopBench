@@ -153,6 +153,11 @@ class NuRec260Client:
         parameters = sensor.get("parameters") or {}
         width = int(parameters.get("width") or camera_spec.resolution_w)
         height = int(parameters.get("height") or camera_spec.resolution_h)
+        image_quality = float(parameters.get("image_quality", 0.95))
+        if not 0.0 <= image_quality <= 1.0:
+            raise NuRecMultimodalError(
+                "NRE 26.04 RGB image_quality must be between 0.0 and 1.0"
+            )
         frame_start_us, frame_end_us = self._time_window_us(payload)
         request = self._pb.RGBRenderRequest(
             scene_id=self.runtime_scene_id,
@@ -164,7 +169,7 @@ class NuRec260Client:
             sensor_pose=self._pose_pair(sensor["pose_pair"]),
             dynamic_objects=self._dynamic_objects(payload["dynamic_objects"]),
             image_format=self._pb.JPEG,
-            image_quality=float(parameters.get("image_quality", 95.0)),
+            image_quality=image_quality,
         )
         return self._encoded(payload, request)
 
@@ -394,7 +399,7 @@ def _inspect_lidar_response(response: Any, body: bytes) -> dict[str, Any]:
             )
         return {"point_count": point_count, "encoding": "float_xyz_intensity"}
 
-    fields = _protobuf_wire_fields(body)
+    fields = _protobuf_wire_field_records(body)
     point_counts = fields.get(3, [])
     xyz_buffers = fields.get(4, [])
     intensity_buffers = fields.get(5, [])
@@ -406,16 +411,20 @@ def _inspect_lidar_response(response: Any, body: bytes) -> dict[str, Any]:
         len(point_counts) != 1
         or len(xyz_buffers) != 1
         or len(intensity_buffers) != 1
-        or not isinstance(point_counts[0], int)
-        or not isinstance(xyz_buffers[0], bytes)
-        or not isinstance(intensity_buffers[0], bytes)
+        or point_counts[0][0] != 0
+        or xyz_buffers[0][0] != 2
+        or intensity_buffers[0][0] != 2
+        or not isinstance(point_counts[0][1], int)
+        or not isinstance(xyz_buffers[0][1], bytes)
+        or not isinstance(intensity_buffers[0][1], bytes)
     ):
         raise NuRecMultimodalError(
-            "NRE 26.04 LiDAR response buffer fields are missing or duplicated"
+            "NRE 26.04 LiDAR response buffer fields are missing, duplicated, "
+            "or use the wrong protobuf wire type"
         )
-    point_count = int(point_counts[0])
-    xyz_buffer = xyz_buffers[0]
-    intensity_buffer = intensity_buffers[0]
+    point_count = int(point_counts[0][1])
+    xyz_buffer = xyz_buffers[0][1]
+    intensity_buffer = intensity_buffers[0][1]
     if point_count < 1:
         raise NuRecMultimodalError(
             "NRE 26.04 LiDAR response num_points must be positive"
@@ -439,14 +448,27 @@ def _inspect_lidar_response(response: Any, body: bytes) -> dict[str, Any]:
 def _protobuf_wire_fields(data: bytes) -> dict[int, list[int | bytes]]:
     """Return top-level varint and length-delimited protobuf fields."""
 
-    fields: dict[int, list[int | bytes]] = {}
+    return {
+        field_number: [value for _, value in records]
+        for field_number, records in _protobuf_wire_field_records(data).items()
+    }
+
+
+def _protobuf_wire_field_records(
+    data: bytes,
+) -> dict[int, list[tuple[int, int | bytes]]]:
+    """Return top-level protobuf fields without discarding their wire types."""
+
+    fields: dict[int, list[tuple[int, int | bytes]]] = {}
     offset = 0
     while offset < len(data):
         key, offset = _read_protobuf_varint(data, offset)
         field_number = key >> 3
         wire_type = key & 7
-        if field_number < 1:
-            raise NuRecMultimodalError("NRE response contains invalid protobuf field 0")
+        if field_number < 1 or field_number > (1 << 29) - 1:
+            raise NuRecMultimodalError(
+                f"NRE response contains invalid protobuf field {field_number}"
+            )
         if wire_type == 0:
             value, offset = _read_protobuf_varint(data, offset)
         elif wire_type == 1:
@@ -474,18 +496,26 @@ def _protobuf_wire_fields(data: bytes) -> dict[int, list[int | bytes]]:
             raise NuRecMultimodalError(
                 f"NRE response uses unsupported protobuf wire type {wire_type}"
             )
-        fields.setdefault(field_number, []).append(value)
+        fields.setdefault(field_number, []).append((wire_type, value))
     return fields
 
 
 def _read_protobuf_varint(data: bytes, offset: int) -> tuple[int, int]:
     value = 0
-    shift = 0
-    while offset < len(data) and shift <= 63:
+    for index in range(10):
+        if offset >= len(data):
+            raise NuRecMultimodalError(
+                "NRE response contains a truncated protobuf varint"
+            )
         byte = data[offset]
         offset += 1
-        value |= (byte & 0x7F) << shift
+        if index == 9 and byte > 1:
+            raise NuRecMultimodalError(
+                "NRE response contains a protobuf varint larger than uint64"
+            )
+        value |= (byte & 0x7F) << (index * 7)
         if not byte & 0x80:
             return value, offset
-        shift += 7
-    raise NuRecMultimodalError("NRE response contains a truncated protobuf varint")
+    raise NuRecMultimodalError(
+        "NRE response contains a protobuf varint larger than uint64"
+    )

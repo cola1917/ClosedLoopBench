@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from adapters.nurec_260_client import (  # noqa: E402
     NuRec260Client,
-    _protobuf_wire_fields,
+    _protobuf_wire_field_records,
     build_nurec_260_client,
 )
 from adapters.nurec_multimodal import (  # noqa: E402
@@ -43,6 +43,15 @@ def diagnose_lidar(
     device_types: list[str],
     client_factory=build_nurec_260_client,
 ) -> dict[str, Any]:
+    targets = [str(value) for value in targets]
+    device_types = [str(value).upper() for value in device_types]
+    if not targets or not all(targets):
+        raise ValueError("at least one non-empty NRE target is required")
+    if not device_types:
+        raise ValueError("at least one LiDAR device type is required")
+    unsupported = sorted(set(device_types) - set(SUPPORTED_DEVICE_TYPES))
+    if unsupported:
+        raise ValueError("unsupported device types: " + ", ".join(unsupported))
     config = _load_object(config_path)
     baseline_bytes = baseline_frame_path.read_bytes()
     moved_bytes = moved_frame_path.read_bytes()
@@ -63,7 +72,24 @@ def diagnose_lidar(
         scene_start_us
         + int(round(float(baseline["simulation_time_sec"]) * 1_000_000)),
     )
-    coordinate_check = _coordinate_check(baseline, moved, artifact, selected_scan)
+    coordinate_check = _coordinate_check(
+        baseline,
+        moved,
+        artifact,
+        selected_scan,
+        configured_scene_start_us=scene_start_us,
+    )
+    input_issues = []
+    if not coordinate_check["scene_start_matches_artifact"]:
+        input_issues.append("configured_scene_start_us_mismatch")
+    if not coordinate_check["baseline_absolute_time_inside_artifact_range"]:
+        input_issues.append("baseline_time_outside_artifact_range")
+    if not coordinate_check["selected_scan_inside_artifact_range"]:
+        input_issues.append("selected_scan_outside_artifact_range")
+    if not coordinate_check["baseline_and_moved_same_scene_frame_time"]:
+        input_issues.append("baseline_moved_identity_mismatch")
+    if not coordinate_check["moved_frame_changes_exactly_one_track"]:
+        input_issues.append("moved_frame_must_change_exactly_one_track")
 
     target_rows = []
     for target in targets:
@@ -130,10 +156,13 @@ def diagnose_lidar(
             "selected_scan": selected_scan["summary"],
         },
         "coordinate_and_input_checks": coordinate_check,
+        "input_issues": input_issues,
         "targets": target_rows,
         "status": (
             "passed"
-            if target_rows and all(row["status"] == "passed" for row in target_rows)
+            if not input_issues
+            and target_rows
+            and all(row["status"] == "passed" for row in target_rows)
             else "failed"
         ),
     }
@@ -328,13 +357,21 @@ def _run_rpc_case(
         case["request"] = _request_summary(client, payload, request, request_body)
         response = rpc(request)
         body = client.response_bytes(response)
-        metadata = client.inspect_response(payload, response, body)
-        case["response"] = {
+        # Preserve transport evidence before semantic inspection can fail.  A
+        # malformed LiDAR response is the primary diagnostic target, so the
+        # report must still contain its serialized size/hash and any decodable
+        # top-level wire fields when ``inspect_response`` rejects it.
+        response_summary: dict[str, Any] = {
             "serialized_bytes": len(body),
             "payload_sha256": hashlib.sha256(body).hexdigest(),
-            "metadata": dict(metadata),
-            "wire_layout": _response_wire_layout(response, body),
         }
+        case["response"] = response_summary
+        try:
+            response_summary["wire_layout"] = _response_wire_layout(response, body)
+        except Exception as wire_exc:
+            response_summary["wire_layout_exception"] = _exception_record(wire_exc)
+        metadata = client.inspect_response(payload, response, body)
+        response_summary["metadata"] = dict(metadata)
         case["status"] = "passed"
     except Exception as exc:
         case["exception"] = _exception_record(exc)
@@ -387,28 +424,31 @@ def _response_wire_layout(response: Any, body: bytes) -> dict[str, Any]:
     if not body:
         result["top_level_fields"] = []
         return result
-    fields = _protobuf_wire_fields(body)
+    fields = _protobuf_wire_field_records(body)
     rows = []
     for field_number in sorted(fields):
-        for value in fields[field_number]:
+        for wire_type, value in fields[field_number]:
             row: dict[str, Any] = {"field_number": field_number}
-            if isinstance(value, int):
-                row.update(wire_type="varint", value=value)
+            if wire_type == 0:
+                row.update(wire_type="varint", value=int(value))
             else:
+                wire_name = {1: "fixed64", 2: "length_delimited", 5: "fixed32"}.get(
+                    wire_type, f"wire_{wire_type}"
+                )
                 row.update(
-                    wire_type="bytes_or_fixed",
+                    wire_type=wire_name,
                     byte_count=len(value),
                     sha256=hashlib.sha256(value).hexdigest(),
                     prefix_hex=value[:32].hex(),
                 )
             rows.append(row)
     result["top_level_fields"] = rows
-    if fields.get(3) and isinstance(fields[3][0], int):
-        result["buffered_num_points"] = fields[3][0]
-    if fields.get(4) and isinstance(fields[4][0], bytes):
-        result["point_xyzs_buffer_bytes"] = len(fields[4][0])
-    if fields.get(5) and isinstance(fields[5][0], bytes):
-        result["point_intensities_buffer_bytes"] = len(fields[5][0])
+    if fields.get(3) and fields[3][0][0] == 0:
+        result["buffered_num_points"] = int(fields[3][0][1])
+    if fields.get(4) and fields[4][0][0] != 0:
+        result["point_xyzs_buffer_bytes"] = len(fields[4][0][1])
+    if fields.get(5) and fields[5][0][0] != 0:
+        result["point_intensities_buffer_bytes"] = len(fields[5][0][1])
     return result
 
 
@@ -577,6 +617,8 @@ def _coordinate_check(
     moved: Mapping[str, Any],
     artifact: Mapping[str, Any],
     selected_scan: Mapping[str, Any],
+    *,
+    configured_scene_start_us: int,
 ) -> dict[str, Any]:
     baseline_objects = baseline["shared_dynamic_objects"]
     moved_objects = moved["shared_dynamic_objects"]
@@ -598,12 +640,26 @@ def _coordinate_check(
     )
     original_position = baseline_lidar["sensor"]["pose_pair"]["start"]["position_m"]
     native_position = native_pair["start"]["position_m"]
+    baseline_absolute_time_us = int(configured_scene_start_us) + int(
+        round(float(baseline["simulation_time_sec"]) * 1_000_000)
+    )
     return {
         "input_coordinate_frame": deepcopy(baseline["coordinate_frame"]),
-        "scene_start_us": artifact["timestamp_range_us"]["start"],
+        "scene_start_us": int(configured_scene_start_us),
+        "configured_scene_start_us": int(configured_scene_start_us),
+        "artifact_scene_start_us": int(artifact["timestamp_range_us"]["start"]),
+        "scene_start_matches_artifact": int(configured_scene_start_us)
+        == int(artifact["timestamp_range_us"]["start"]),
         "baseline_simulation_time_sec": baseline["simulation_time_sec"],
-        "baseline_absolute_time_us": artifact["timestamp_range_us"]["start"]
-        + int(round(float(baseline["simulation_time_sec"]) * 1_000_000)),
+        "baseline_absolute_time_us": baseline_absolute_time_us,
+        "baseline_absolute_time_inside_artifact_range": _timestamp_inside(
+            baseline_absolute_time_us,
+            artifact["timestamp_range_us"],
+        ),
+        "baseline_and_moved_same_scene_frame_time": all(
+            baseline.get(name) == moved.get(name)
+            for name in ("scene_id", "frame_id", "simulation_time_sec", "pose_interval_sec")
+        ),
         "selected_scan_inside_artifact_range": _timestamp_inside(
             selected_scan["start_us"], artifact["timestamp_range_us"]
         )

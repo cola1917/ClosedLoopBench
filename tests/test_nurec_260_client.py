@@ -131,6 +131,10 @@ def _wire_bytes(field_number, value):
     return _varint((field_number << 3) | 2) + _varint(len(value)) + value
 
 
+def _wire_fixed64(field_number, value):
+    return _varint((field_number << 3) | 1) + value
+
+
 class NuRec260ClientTests(unittest.TestCase):
     def _client(self, stub=None):
         from adapters.nurec_260_client import NuRec260Client
@@ -179,6 +183,7 @@ class NuRec260ClientTests(unittest.TestCase):
         )
         self.assertEqual(rgb.scene_id, "scene-0061")
         self.assertEqual(lidar.scene_id, "scene-0061")
+        self.assertEqual(rgb.image_quality, 0.95)
         self.assertEqual(rgb.dynamic_objects[0].track_id, VEHICLE_TRACK)
         self.assertEqual(lidar.dynamic_objects[0].track_id, VEHICLE_TRACK)
         self.assertEqual(
@@ -203,6 +208,18 @@ class NuRec260ClientTests(unittest.TestCase):
         self.assertEqual(evidence["modalities"]["rgb"]["passed_count"], 0)
         self.assertEqual(evidence["modalities"]["lidar"]["passed_count"], 1)
 
+    def test_rejects_rgb_quality_outside_the_nre_fractional_range(self):
+        frame = _frame()
+        frame["modalities"]["rgb"]["requests"][0]["sensor"]["parameters"][
+            "image_quality"
+        ] = 95.0
+
+        evidence = self._client().dispatch_frame(frame)
+
+        self.assertEqual(evidence["status"], "failed")
+        rgb = next(row for row in evidence["records"] if row["modality"] == "rgb")
+        self.assertIn("rpc_status_not_ok", rgb["issues"])
+
     def test_accepts_nre_260_buffered_lidar_response_with_old_client_proto(self):
         evidence = self._client(_BufferedLidarStub()).dispatch_frame(_frame())
 
@@ -222,6 +239,23 @@ class NuRec260ClientTests(unittest.TestCase):
         lidar = next(row for row in evidence["records"] if row["modality"] == "lidar")
         self.assertIn("rpc_status_not_ok", lidar["issues"])
         self.assertIn("payload_sha256_invalid", lidar["issues"])
+
+    def test_rejects_buffer_field_with_wrong_protobuf_wire_type(self):
+        from adapters.nurec_260_client import _inspect_lidar_response
+        from adapters.nurec_multimodal import NuRecMultimodalError
+
+        xyz = struct.pack("<6f", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+        intensity = struct.pack("<2f", 0.25, 0.75)
+        body = (
+            _wire_varint(3, 2)
+            + _wire_bytes(4, xyz)
+            + _wire_fixed64(5, intensity)
+        )
+
+        with self.assertRaisesRegex(NuRecMultimodalError, "wrong protobuf wire type"):
+            _inspect_lidar_response(
+                _Response(body, point_xyzs=[], point_intensities=[]), body
+            )
 
     def test_factory_requires_explicit_scene_epoch(self):
         from adapters.nurec_260_client import build_nurec_260_handler
