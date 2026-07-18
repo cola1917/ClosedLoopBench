@@ -10,6 +10,7 @@ NUREC_EXAMPLE_DIR="${NUREC_EXAMPLE_DIR:-${CARLA_ROOT}/PythonAPI/examples/nvidia/
 # formal replay always uses nre-ga:26.04 with the serve-grpc subcommand.
 NUREC_IMAGE="${NUREC_IMAGE:-nvcr.io/nvidia/nre/nre-ga:26.04}"
 NUREC_IMAGE_COMMAND="${NUREC_IMAGE_COMMAND:-serve-grpc}"
+NUREC_SERVER_ARGS="${NUREC_SERVER_ARGS:---enable-editing-actors}"
 NUREC_USDZ="${NUREC_USDZ:-/home/cwadmin/workspace/NeuralSceneBridge/outputs/nurec_formal_scene0061_6cam_40k/nB3fGDTuUz5ptMbZzCXnjS/artifacts/last.usdz}"
 NUREC_XODR_PATH="${NUREC_XODR_PATH:-/home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-1000step/road.xodr}"
 OUTPUT_DIR="${OUTPUT_DIR:-/home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-40k-nurec-replay/images}"
@@ -35,7 +36,7 @@ if ! docker image inspect "${NUREC_IMAGE}" >/dev/null 2>&1; then
 fi
 
 mkdir -p "${OUTPUT_DIR}"
-export DISPLAY NUREC_IMAGE NUREC_IMAGE_COMMAND NUREC_XODR_PATH
+export DISPLAY NUREC_IMAGE NUREC_IMAGE_COMMAND NUREC_SERVER_ARGS NUREC_XODR_PATH
 export PYTHONPATH="${CARLA_ROOT}/PythonAPI/carla${PYTHONPATH:+:${PYTHONPATH}}"
 
 cd "${NUREC_EXAMPLE_DIR}"

@@ -93,10 +93,24 @@ PATCHED_FINALLY = '''        finally:
             if args.overlap_log:
 '''
 
+BASE_EXCEPTION = '''        except Exception as e:
+            handle_exception(e)
+'''
+PATCHED_EXCEPTION = '''        except Exception as e:
+            handle_exception(e)
+            raise
+'''
+
 
 def apply_patch(target: Path) -> str:
     original = target.read_text(encoding="utf-8")
-    markers = (PATCHED_CLI, PATCHED_STATE, PATCHED_TICK, PATCHED_FINALLY)
+    markers = (
+        PATCHED_CLI,
+        PATCHED_STATE,
+        PATCHED_TICK,
+        PATCHED_EXCEPTION,
+        PATCHED_FINALLY,
+    )
     if all(marker in original for marker in markers):
         return "already_patched"
 
@@ -106,6 +120,7 @@ def apply_patch(target: Path) -> str:
         (BASE_CLI, PATCHED_CLI, "cli"),
         (BASE_STATE, PATCHED_STATE, "state"),
         (BASE_TICK, PATCHED_TICK, "sampling"),
+        (BASE_EXCEPTION, PATCHED_EXCEPTION, "fail-closed"),
         (BASE_FINALLY, PATCHED_FINALLY, "report"),
     ):
         if replacement in patched:
