@@ -158,6 +158,12 @@ class NuRec260Client:
             raise NuRecMultimodalError(
                 "NRE 26.04 RGB image_quality must be between 0.0 and 1.0"
             )
+        # The 26.04.146 service forwards this float to nvJPEG after casting it
+        # to an integer.  Sending the documented normalized value (for
+        # example 0.95) therefore becomes quality 0 and emits nvJPEG error #2.
+        # Keep the public/client parameter normalized as documented, but adapt
+        # it to the percent value consumed by this deployed service boundary.
+        wire_image_quality = image_quality * 100.0
         frame_start_us, frame_end_us = self._time_window_us(payload)
         request = self._pb.RGBRenderRequest(
             scene_id=self.runtime_scene_id,
@@ -169,7 +175,7 @@ class NuRec260Client:
             sensor_pose=self._pose_pair(sensor["pose_pair"]),
             dynamic_objects=self._dynamic_objects(payload["dynamic_objects"]),
             image_format=self._pb.JPEG,
-            image_quality=image_quality,
+            image_quality=wire_image_quality,
         )
         return self._encoded(payload, request)
 

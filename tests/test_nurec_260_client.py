@@ -183,7 +183,7 @@ class NuRec260ClientTests(unittest.TestCase):
         )
         self.assertEqual(rgb.scene_id, "scene-0061")
         self.assertEqual(lidar.scene_id, "scene-0061")
-        self.assertEqual(rgb.image_quality, 0.95)
+        self.assertEqual(rgb.image_quality, 95.0)
         self.assertEqual(rgb.dynamic_objects[0].track_id, VEHICLE_TRACK)
         self.assertEqual(lidar.dynamic_objects[0].track_id, VEHICLE_TRACK)
         self.assertEqual(
