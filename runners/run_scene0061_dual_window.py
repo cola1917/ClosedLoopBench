@@ -25,6 +25,13 @@ from adapters.nurec_multimodal import (  # noqa: E402
     materialize_nurec_rpc_requests,
     validate_nurec_multimodal_frame,
 )
+from runners.diagnose_nurec_260_lidar import (  # noqa: E402
+    _load_artifact_runtime,
+    _native_sensor_pose_pair,
+    _relative_interval,
+    _select_native_scan,
+    _transform_dynamic_objects_to_nre,
+)
 
 
 CAMERA_ORDER = (
@@ -74,6 +81,7 @@ class FramePacket:
 def run_visualization(
     *,
     config_path: Path,
+    artifact_path: Path,
     baseline_path: Path,
     moved_path: Path,
     scenario_ir_path: Path,
@@ -122,6 +130,11 @@ def run_visualization(
     if not isinstance(runtime, Mapping):
         raise ValueError("config requires nurec_runtime")
     scene_start_us = int(runtime["scene_start_us"])
+    artifact = _load_artifact_runtime(artifact_path)
+    reference_us = scene_start_us + int(
+        round(float(baseline["simulation_time_sec"]) * 1_000_000)
+    )
+    selected_scan = _select_native_scan(artifact, reference_us)
     mapping_by_track = _mapping_by_track(actor_mapping)
     roads = _sample_xodr(xodr_path)
     scenario_actors = {
@@ -152,6 +165,8 @@ def run_visualization(
                 camera_names,
                 width=width,
                 height=height,
+                artifact=artifact,
+                selected_scan=selected_scan,
                 cv2=cv2,
                 np=np,
             )
@@ -268,6 +283,7 @@ def run_visualization(
         },
         "inputs": {
             "config": _input_record(config_path),
+            "artifact": _input_record(artifact_path),
             "baseline": _input_record(baseline_path),
             "moved": _input_record(moved_path),
             "scenario_ir": _input_record(scenario_ir_path),
@@ -282,6 +298,11 @@ def run_visualization(
         "missing_required_actor_mappings": missing_required,
         "camera_order": list(camera_names),
         "camera_source_dimensions": {"width": width, "height": height},
+        "render_coordinate_frame": {
+            "sensor_pose": "artifact T_rig_world times T_sensor_rig",
+            "dynamic_objects": "inverse(T_world_base) times nuscenes_global pose",
+            "selected_native_scan": selected_scan["summary"],
+        },
         "packets": packet_reports,
         "statistics": {
             "packet_count": len(packets),
@@ -316,6 +337,8 @@ def _capture_cameras(
     *,
     width: int,
     height: int,
+    artifact: Mapping[str, Any],
+    selected_scan: Mapping[str, Any],
     cv2: Any,
     np: Any,
 ) -> tuple[dict[str, Any], tuple[dict[str, Any], ...]]:
@@ -334,6 +357,16 @@ def _capture_cameras(
         parameters = dict(payload["sensor"].get("parameters") or {})
         parameters.update(width=width, height=height)
         payload["sensor"]["parameters"] = parameters
+        payload["pose_interval_sec"] = _relative_interval(client, selected_scan)
+        payload["sensor"]["pose_pair"] = _native_sensor_pose_pair(
+            artifact,
+            selected_scan,
+            "camera",
+            camera_name,
+        )
+        payload["dynamic_objects"] = _transform_dynamic_objects_to_nre(
+            payload["dynamic_objects"], artifact["nre_from_log"]
+        )
         started = time.monotonic()
         encoded = client.encode_rgb(payload)
         response = client.render_rgb(encoded["wire_request"])
@@ -506,7 +539,8 @@ def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, floa
                 2,
                 cv2.LINE_AA,
             )
-    for actor_index, actor in enumerate(actors):
+    actor_colors = []
+    for actor in actors:
         color = (
             (0, 170, 255)
             if actor.controlled
@@ -516,15 +550,7 @@ def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, floa
             if actor.actor_type == "pedestrian"
             else (220, 220, 220)
         )
-        if len(actor.trajectory) > 1:
-            cv2.polylines(
-                canvas,
-                [np.asarray([screen(point) for point in actor.trajectory], dtype=np.int32)],
-                False,
-                color,
-                2,
-                cv2.LINE_AA,
-            )
+        actor_colors.append(color)
         corners = _bbox_corners(actor)
         pixel_corners = np.asarray([screen(point) for point in corners], dtype=np.int32)
         cv2.polylines(canvas, [pixel_corners], True, color, 3, cv2.LINE_AA)
@@ -536,21 +562,48 @@ def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, floa
         cv2.polylines(canvas, [raised_corners], True, color, 2, cv2.LINE_AA)
         for lower, upper in zip(pixel_corners, raised_corners):
             cv2.line(canvas, tuple(lower), tuple(upper), color, 2, cv2.LINE_AA)
-        anchor = screen((actor.x, actor.y))
-        carla_id = actor.carla_actor_id if actor.carla_actor_id is not None else "unmapped"
-        label1 = f"CARLA {carla_id} | {actor.actor_type} | {actor.speed_mps:.2f} m/s"
-        label2 = f"NuRec {actor.track_id}"
-        label_x = min(anchor[0] + 18, canvas.shape[1] - 540)
-        label_y = anchor[1] - 42 + actor_index * 32
-        cv2.line(canvas, anchor, (label_x - 4, label_y + 4), color, 1, cv2.LINE_AA)
-        cv2.putText(canvas, label1, (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 2, cv2.LINE_AA)
-        cv2.putText(canvas, label2, (label_x, label_y + 21), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
-    title = (
-        f"CARLA OpenDRIVE state | {packet.state_name} | frame {packet.frame_id} | "
-        f"timestamp {packet.timestamp_us} us | sim {packet.simulation_time_sec:.6f} s"
+
+    # Keep the map itself clean: only road geometry and bboxes.  All identity,
+    # mapping and speed details live in one predictable top-left panel.
+    panel_right = 910
+    panel_bottom = 190 + 32 * len(actors)
+    cv2.rectangle(canvas, (12, 12), (panel_right, panel_bottom), (8, 10, 14), -1)
+    title = f"CARLA state | {packet.state_name} | frame {packet.frame_id} | timestamp_us {packet.timestamp_us}"
+    cv2.putText(canvas, title, (28, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.68, (245, 245, 245), 2, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        f"sim_time {packet.simulation_time_sec:.6f} s | bbox-only map | orange = controlled",
+        (28, 72),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.54,
+        (190, 195, 205),
+        1,
+        cv2.LINE_AA,
     )
-    cv2.putText(canvas, title, (24, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.72, (245, 245, 245), 2, cv2.LINE_AA)
-    cv2.putText(canvas, "Orange bbox = closed-loop controlled actor", (24, 63), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 170, 255), 2, cv2.LINE_AA)
+    for actor_index, (actor, color) in enumerate(zip(actors, actor_colors)):
+        carla_id = actor.carla_actor_id if actor.carla_actor_id is not None else "unmapped"
+        y = 106 + actor_index * 54
+        cv2.rectangle(canvas, (28, y - 15), (44, y + 1), color, -1)
+        cv2.putText(
+            canvas,
+            f"CARLA {carla_id} | {actor.actor_type} | {actor.speed_mps:.2f} m/s",
+            (56, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.52,
+            color,
+            2,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            canvas,
+            f"NuRec track: {actor.track_id}",
+            (56, y + 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.43,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
     return canvas
 
 
@@ -711,6 +764,7 @@ def main(argv: list[str] | None = None) -> int:
         description="Drive independent CARLA-state and NuRec-camera windows from one synchronized FramePacket loop."
     )
     parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--artifact", required=True, type=Path)
     parser.add_argument("--baseline-frame", required=True, type=Path)
     parser.add_argument("--moved-frame", required=True, type=Path)
     parser.add_argument("--scenario-ir", required=True, type=Path)
@@ -735,6 +789,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = run_visualization(
             config_path=args.config,
+            artifact_path=args.artifact,
             baseline_path=args.baseline_frame,
             moved_path=args.moved_frame,
             scenario_ir_path=args.scenario_ir,
