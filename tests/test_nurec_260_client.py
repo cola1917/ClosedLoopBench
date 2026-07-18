@@ -173,7 +173,7 @@ class NuRec260ClientTests(unittest.TestCase):
     def test_runtime_inventory_reports_service_identity_and_lidar_boundary(self):
         inventory = self._client(_InventoryStub()).query_runtime_inventory()
 
-        self.assertEqual(inventory["status"], "passed")
+        self.assertEqual(inventory["status"], "capability_only")
         self.assertEqual(inventory["renderer"]["version_id"], "26.04")
         self.assertEqual(inventory["available_scene_ids"], ["scene-0061", "scene-0062"])
         self.assertEqual(inventory["cameras"][0]["logical_id"], "camera_front")
@@ -181,6 +181,7 @@ class NuRec260ClientTests(unittest.TestCase):
             inventory["lidar"]["supported_device_types"],
             ["PANDAR128", "AT128"],
         )
+        self.assertFalse(inventory["lidar"]["render_verified"])
 
 
 if __name__ == "__main__":

@@ -28,8 +28,18 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
         plans = []
         handlers = []
 
+        class Handler:
+            def __init__(self):
+                self.closed = False
+
+            def __call__(self, context):
+                return {"frame": context.get("frame_id")}
+
+            def close(self):
+                self.closed = True
+
         def handler_factory(config, run_dir):
-            handler = lambda context: {"frame": context.get("frame_id")}
+            handler = Handler()
             handlers.append((config["run_id"], run_dir, handler))
             return handler
 
@@ -58,6 +68,7 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
         self.assertEqual(result["run_count"], 3)
         self.assertEqual(len(handlers), 3)
         self.assertEqual(len(plans), 3)
+        self.assertTrue(all(handler.closed for _, _, handler in handlers))
         self.assertTrue(
             all(plan["world"]["opendrive_path"].endswith("scene0061-v7.xodr") for plan, _ in plans)
         )
@@ -127,6 +138,7 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
 
         valid = multimodal_result()
         valid["cleanup_succeeded"] = True
+        valid["sensor_handler_cleanup_succeeded"] = True
         valid["report"]["summary"] = {"route_progress": 0.99, "collision_count": 0}
         valid["report"]["runtime"].update(
             collision_sensor_available=True,
@@ -145,6 +157,38 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                 [copy.deepcopy(valid), invalid, copy.deepcopy(valid)],
                 require_multimodal=True,
             )
+
+    def test_multimodal_handler_cleanup_is_fail_closed(self):
+        from runners.run_carla_acceptance_triplicate import (
+            CarlaAcceptanceError,
+            run_acceptance_triplicate,
+        )
+
+        class Handler:
+            def __call__(self, _context):
+                return {}
+
+            def close(self):
+                raise RuntimeError("grpc close failed")
+
+        def execute(_plan, *, sensor_frame_handler):
+            self.assertIsInstance(sensor_frame_handler, Handler)
+            return _result()
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(CarlaAcceptanceError, "cleanup failed"):
+                run_acceptance_triplicate(
+                    {
+                        "scenario_id": "scene-triplicate",
+                        "run_id": "cleanup",
+                        "ego": {"initial_state": {"x": 0.0, "y": 0.0}},
+                        "actors": [],
+                    },
+                    Path(directory),
+                    require_multimodal=True,
+                    sensor_frame_handler_factory=lambda _config, _run_dir: Handler(),
+                    execute=execute,
+                )
 
 
 if __name__ == "__main__":

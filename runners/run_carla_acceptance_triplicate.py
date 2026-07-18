@@ -82,7 +82,29 @@ def run_acceptance_triplicate(
                 raise CarlaAcceptanceError(
                     f"attempt {attempt} sensor frame handler factory returned a non-callable"
                 )
-            result = execute(plan, sensor_frame_handler=handler)
+            try:
+                result = execute(plan, sensor_frame_handler=handler)
+            finally:
+                close_handler = getattr(handler, "close", None)
+                if close_handler is None:
+                    if require_multimodal:
+                        raise CarlaAcceptanceError(
+                            f"attempt {attempt} real sensor handler has no close()"
+                        )
+                elif not callable(close_handler):
+                    raise CarlaAcceptanceError(
+                        f"attempt {attempt} sensor handler close is not callable"
+                    )
+                else:
+                    try:
+                        close_handler()
+                    except Exception as exc:
+                        raise CarlaAcceptanceError(
+                            f"attempt {attempt} sensor handler cleanup failed: {exc}"
+                        ) from exc
+            result["sensor_handler_cleanup_succeeded"] = callable(
+                getattr(handler, "close", None)
+            )
         (run_dir / "runtime_result.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -136,6 +158,10 @@ def validate_acceptance_runs(
             )
         multimodal_evidence = None
         if require_multimodal:
+            if not result.get("sensor_handler_cleanup_succeeded"):
+                raise CarlaAcceptanceError(
+                    f"attempt {index} NuRec sensor handler cleanup did not succeed"
+                )
             try:
                 multimodal_evidence = validate_multimodal_closed_loop_result(result)
             except MultimodalClosedLoopError as exc:
@@ -151,6 +177,9 @@ def validate_acceptance_runs(
                 "frame_trace_count": runtime["frame_trace_count"],
                 "actor_physical_response": runtime.get("actor_physical_response") or {},
                 "cleanup_succeeded": True,
+                "sensor_handler_cleanup_succeeded": result.get(
+                    "sensor_handler_cleanup_succeeded"
+                ),
                 "multimodal_closed_loop": multimodal_evidence,
             }
         )

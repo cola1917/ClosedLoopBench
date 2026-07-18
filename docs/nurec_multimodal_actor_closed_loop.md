@@ -223,12 +223,25 @@ Until these pass, the accurate status is: CARLA actor/multimodal integration
 implemented and locally tested; real NuRec actor RGB/LiDAR closure pending
 server evidence.
 
-Query the live service before any render probe:
+Querying the live service without a frame records API capability only; it does
+not prove that the loaded USDZ can return LiDAR points:
 
 ```bash
 python -m runners.probe_nurec_260_runtime \
   --config /path/to/run_config.json \
   --output /path/to/nurec_runtime_inventory.json
+```
+
+For acceptance, pass a real synchronized frame and require a non-empty LiDAR
+response. The command fails closed if the frame is missing, RGB fails, or any
+LiDAR response has zero XYZ points:
+
+```bash
+python -m runners.probe_nurec_260_runtime \
+  --config /path/to/run_config.json \
+  --probe-frame /path/to/vehicle_baseline_frame.json \
+  --require-renderable-lidar \
+  --output /path/to/nurec_render_verified_inventory.json
 ```
 
 Then run one isolated A/A/B transaction per candidate track. The runner renders

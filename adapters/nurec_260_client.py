@@ -136,8 +136,10 @@ class NuRec260Client:
             "lidar": {
                 "supported_device_types": ["PANDAR128", "AT128"],
                 "parameterization": "device_type_only",
+                "capability_source": "nre_26_04_protobuf_api_boundary",
+                "render_verified": False,
             },
-            "status": "passed",
+            "status": "capability_only",
         }
 
     def encode_rgb(self, payload: Mapping[str, Any]) -> dict[str, Any]:
