@@ -1,0 +1,14 @@
+{
+  "repo_path": "/bind/TCP",
+  "checkpoint_path": "/bind/checkpoints/tcp.pth",
+  "repo_sha256": "REPLACE_AFTER_REMOTE_BINDING",
+  "checkpoint_sha256": "REPLACE_AFTER_REMOTE_BINDING",
+  "real_checkpoint_loaded": false,
+  "supported_control_hz": 20.0,
+  "timeout_sec": 0.5,
+  "camera_preprocess": {
+    "resize": [900, 256],
+    "color_order": "RGB",
+    "normalization": "model_owned"
+  }
+}

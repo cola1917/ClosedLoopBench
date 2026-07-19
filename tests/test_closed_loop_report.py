@@ -35,7 +35,7 @@ class ClosedLoopReportTests(unittest.TestCase):
         self.assertEqual(report["schema_version"], "closed_loop_report.mvp.v0")
         self.assertEqual(report["scenario_id"], "scene-test-001")
         self.assertEqual(report["status"], "not_run")
-        self.assertEqual(report["summary"]["collision_count"], 0)
+        self.assertIsNone(report["summary"]["collision_count"])
         self.assertIsNone(report["summary"]["min_ttc"])
         self.assertEqual(report["summary"]["route_progress"], 0.0)
         self.assertEqual(report["evaluation"]["overall_result"], "unknown")
@@ -126,7 +126,7 @@ class ClosedLoopReportTests(unittest.TestCase):
             self.assertEqual(report["schema_version"], "closed_loop_report.mvp.v0")
             self.assertEqual(report["scenario_id"], "scene-test-001")
             self.assertEqual(report["status"], "not_run")
-            self.assertEqual(report["summary"]["collision_count"], 0)
+            self.assertIsNone(report["summary"]["collision_count"])
 
 
 if __name__ == "__main__":

@@ -1,0 +1,8 @@
+{
+  "repo_path": ".",
+  "profile": "long",
+  "target_speed_mps": 8.0,
+  "lookahead_m": 9.0,
+  "supported_control_hz": 20.0,
+  "timeout_sec": 0.05
+}

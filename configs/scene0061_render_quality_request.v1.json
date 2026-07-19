@@ -1,0 +1,124 @@
+{
+  "schema_version": "render_quality_evaluation_request.v1",
+  "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+  "case_id": "S3_lead_longitudinal_shift_pose_probe",
+  "edit_kind": "light_vehicle_edit",
+  "artifact": {
+    "path": "/home/cwadmin/workspace/NeuralSceneBridge/outputs/nurec_scene0061_renderable_lidar_v3_6cam_40k_formal_attempt_001/9aChcizbAsm4oDQKJMdBHM/artifacts/last.usdz",
+    "sha256": "69e2c36e31e113f9ad66968a0a0a4243c7989dae5582a91a43d150051eaf98b4",
+    "immutable": true
+  },
+  "remote_validation_required": true,
+  "harmonizer_applied": false,
+  "rgb_lidar_actor_change": {
+    "rgb_actor_changed": true,
+    "lidar_actor_changed": true,
+    "evidence_paths": [
+      "diagnostics/lidar-probes/replay.formal40k_v1.vehicle_pose_probe.v2.json"
+    ]
+  },
+  "cameras": [
+    {
+      "camera_name": "camera_front_left",
+      "baseline_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/baseline/camera_front_left.00038.jpg"
+      ],
+      "edited_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/moved/camera_front_left.00038.jpg"
+      ],
+      "mask_provenance": {
+        "kind": "none",
+        "reliable": false,
+        "source": "No actor segmentation mask was captured with the formal40k v4 pose probe.",
+        "limitations": [
+          "Actor ROI hole, boundary, edit-region, and unchanged-background metrics cannot be measured precisely."
+        ]
+      }
+    },
+    {
+      "camera_name": "camera_front",
+      "baseline_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/baseline/camera_front.00038.jpg"
+      ],
+      "edited_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/moved/camera_front.00038.jpg"
+      ],
+      "mask_provenance": {
+        "kind": "none",
+        "reliable": false,
+        "source": "No actor segmentation mask was captured with the formal40k v4 pose probe.",
+        "limitations": [
+          "Actor ROI hole, boundary, edit-region, and unchanged-background metrics cannot be measured precisely."
+        ]
+      }
+    },
+    {
+      "camera_name": "camera_front_right",
+      "baseline_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/baseline/camera_front_right.00038.jpg"
+      ],
+      "edited_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/moved/camera_front_right.00038.jpg"
+      ],
+      "mask_provenance": {
+        "kind": "none",
+        "reliable": false,
+        "source": "No actor segmentation mask was captured with the formal40k v4 pose probe.",
+        "limitations": [
+          "Actor ROI hole, boundary, edit-region, and unchanged-background metrics cannot be measured precisely."
+        ]
+      }
+    },
+    {
+      "camera_name": "camera_back_left",
+      "baseline_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/baseline/camera_back_left.00038.jpg"
+      ],
+      "edited_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/moved/camera_back_left.00038.jpg"
+      ],
+      "mask_provenance": {
+        "kind": "none",
+        "reliable": false,
+        "source": "No actor segmentation mask was captured with the formal40k v4 pose probe.",
+        "limitations": [
+          "Actor ROI hole, boundary, edit-region, and unchanged-background metrics cannot be measured precisely."
+        ]
+      }
+    },
+    {
+      "camera_name": "camera_back",
+      "baseline_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/baseline/camera_back.00038.jpg"
+      ],
+      "edited_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/moved/camera_back.00038.jpg"
+      ],
+      "mask_provenance": {
+        "kind": "none",
+        "reliable": false,
+        "source": "No actor segmentation mask was captured with the formal40k v4 pose probe.",
+        "limitations": [
+          "Actor ROI hole, boundary, edit-region, and unchanged-background metrics cannot be measured precisely."
+        ]
+      }
+    },
+    {
+      "camera_name": "camera_back_right",
+      "baseline_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/baseline/camera_back_right.00038.jpg"
+      ],
+      "edited_frames": [
+        "formal_acceptance/dual_window.formal40k_v4/raw/moved/camera_back_right.00038.jpg"
+      ],
+      "mask_provenance": {
+        "kind": "none",
+        "reliable": false,
+        "source": "No actor segmentation mask was captured with the formal40k v4 pose probe.",
+        "limitations": [
+          "Actor ROI hole, boundary, edit-region, and unchanged-background metrics cannot be measured precisely."
+        ]
+      }
+    }
+  ]
+}

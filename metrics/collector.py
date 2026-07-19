@@ -19,6 +19,15 @@ def build_tick_row(
     longitudinal_acceleration_mps2: float | None = None,
     actor_decisions: dict[str, dict[str, Any]] | None = None,
     actor_control_evidence: dict[str, str] | None = None,
+    following: bool | None = None,
+    post_encroachment_time_sec: float | None = None,
+    drac_mps2: float | None = None,
+    control_latency_ms: float | None = None,
+    control_timeout: bool | None = None,
+    control_fallback: bool | None = None,
+    actor_outcomes: dict[str, str] | None = None,
+    sensor_dropped_frames: int | None = None,
+    synchronization_error_ms: float | None = None,
 ) -> dict[str, Any]:
     """Build the minimal per-tick metric row shared by CARLA and dry-run tests."""
 
@@ -46,6 +55,35 @@ def build_tick_row(
             else None
         ),
         "jerk": float(jerk) if isinstance(jerk, (int, float)) else None,
+        "following": bool(following) if isinstance(following, bool) else None,
+        "post_encroachment_time_sec": (
+            float(post_encroachment_time_sec)
+            if isinstance(post_encroachment_time_sec, (int, float))
+            else None
+        ),
+        "drac_mps2": float(drac_mps2) if isinstance(drac_mps2, (int, float)) else None,
+        "control_latency_ms": (
+            float(control_latency_ms)
+            if isinstance(control_latency_ms, (int, float))
+            else None
+        ),
+        "control_timeout": (
+            bool(control_timeout) if isinstance(control_timeout, bool) else None
+        ),
+        "control_fallback": (
+            bool(control_fallback) if isinstance(control_fallback, bool) else None
+        ),
+        "actor_outcomes": deepcopy(actor_outcomes or {}),
+        "sensor_dropped_frames": (
+            int(sensor_dropped_frames)
+            if isinstance(sensor_dropped_frames, int) and not isinstance(sensor_dropped_frames, bool)
+            else None
+        ),
+        "synchronization_error_ms": (
+            float(synchronization_error_ms)
+            if isinstance(synchronization_error_ms, (int, float))
+            else None
+        ),
     }
 
 
@@ -71,6 +109,15 @@ class TickMetricCollector:
         longitudinal_acceleration_mps2: float | None = None,
         actor_decisions: dict[str, dict[str, Any]] | None = None,
         actor_control_evidence: dict[str, str] | None = None,
+        following: bool | None = None,
+        post_encroachment_time_sec: float | None = None,
+        drac_mps2: float | None = None,
+        control_latency_ms: float | None = None,
+        control_timeout: bool | None = None,
+        control_fallback: bool | None = None,
+        actor_outcomes: dict[str, str] | None = None,
+        sensor_dropped_frames: int | None = None,
+        synchronization_error_ms: float | None = None,
     ) -> dict[str, Any]:
         row = build_tick_row(
             t_sec=t_sec,
@@ -86,6 +133,15 @@ class TickMetricCollector:
             hard_brake=hard_brake,
             longitudinal_acceleration_mps2=longitudinal_acceleration_mps2,
             jerk=jerk,
+            following=following,
+            post_encroachment_time_sec=post_encroachment_time_sec,
+            drac_mps2=drac_mps2,
+            control_latency_ms=control_latency_ms,
+            control_timeout=control_timeout,
+            control_fallback=control_fallback,
+            actor_outcomes=actor_outcomes,
+            sensor_dropped_frames=sensor_dropped_frames,
+            synchronization_error_ms=synchronization_error_ms,
         )
         self._rows.append(row)
         return deepcopy(row)

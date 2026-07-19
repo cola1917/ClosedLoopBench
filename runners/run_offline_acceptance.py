@@ -42,6 +42,22 @@ DEFAULT_GATES = {
         "tests.test_evaluation_criteria",
         "tests.test_metric_collector",
     ),
+    "scene0061_counterfactual_evaluation": (
+        "tests.test_scene0061_counterfactual_matrix",
+        "tests.test_extended_metrics",
+        "tests.test_counterfactual_suite",
+    ),
+    "algorithm_plugin_conformance": (
+        "tests.test_algorithm_plugin_contract",
+        "tests.test_reference_pure_pursuit_plugin",
+        "tests.test_algorithm_plugin_replay",
+        "tests.test_algorithm_plugin_conformance",
+        "tests.test_model_plugin_wrappers",
+    ),
+    "render_quality_and_video": (
+        "tests.test_render_quality",
+        "tests.test_scene0061_video_manifest",
+    ),
 }
 
 

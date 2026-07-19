@@ -1,0 +1,434 @@
+{
+  "schema_version": "scene_counterfactual_matrix.v1",
+  "matrix_id": "scene0061-light-counterfactual-v1",
+  "created_at": "2026-07-19T00:00:00Z",
+  "evidence_semantics": {
+    "offline_conformance": "interface evidence only; never closes a simulator run",
+    "control_only": "physical control evidence without learned perception",
+    "perception_eligible": "requires a passing render-quality report and a perception algorithm",
+    "quality_stress": "reported separately and excluded from driving rankings",
+    "remote_validation_required": true
+  },
+  "scene_identity": {
+    "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+    "scene_name": "scene-0061",
+    "scene_version": "formal40k-v1",
+    "nurec_run_id": "9aChcizbAsm4oDQKJMdBHM",
+    "artifact_sha256": "69e2c36e31e113f9ad66968a0a0a4243c7989dae5582a91a43d150051eaf98b4",
+    "scene_package_sha256": "0d6b724b0dea9ff3f97717f893f19baf69904057511ad374cfd510c5cc9b9119",
+    "scenario_ir_sha256": "ae340b43c2ecbcf416cb89895e63ea59241b240ff83bc9dc4e6f1632a3f1ded7"
+  },
+  "immutable_inputs": [
+    {
+      "role": "nurec_usdz",
+      "logical_ref": "formal://scene-0061/9aChcizbAsm4oDQKJMdBHM/artifacts/last.usdz",
+      "sha256": "69e2c36e31e113f9ad66968a0a0a4243c7989dae5582a91a43d150051eaf98b4",
+      "immutable": true
+    },
+    {
+      "role": "runtime_validated_scene_package",
+      "logical_ref": "evidence://scene0061/runtime/scene_package.json",
+      "sha256": "0d6b724b0dea9ff3f97717f893f19baf69904057511ad374cfd510c5cc9b9119",
+      "immutable": true
+    },
+    {
+      "role": "actor_ready_scenario_ir",
+      "logical_ref": "evidence://scene0061/runtime/scenario_ir.actor-ready.json",
+      "sha256": "ae340b43c2ecbcf416cb89895e63ea59241b240ff83bc9dc4e6f1632a3f1ded7",
+      "immutable": true
+    },
+    {
+      "role": "actor_selection",
+      "logical_ref": "repo://examples/scene0061_actor_selection.v1.json",
+      "sha256": "7ae4c2bd30efca80ba1f3f8ab746364cceb9c9d530f7a955b675531f19cd3fe9",
+      "immutable": true
+    },
+    {
+      "role": "opendrive",
+      "logical_ref": "evidence://scene0061/road.nurec-route-extended-both-v7.xodr",
+      "sha256": "d3913c4d0019d4c9165ae90e2a5025703ed5e1b423d688168951428341892537",
+      "immutable": true
+    }
+  ],
+  "actors": {
+    "lead_vehicle": {
+      "track_id": "c1958768d48640948f6053d04cffd35b",
+      "type": "vehicle",
+      "control_mode": "scripted",
+      "allowed_edits": [
+        "speed",
+        "brake",
+        "longitudinal_shift",
+        "remove_quality_stress_only"
+      ],
+      "limits": {
+        "speed_scale": [
+          0.0,
+          1.25
+        ],
+        "longitudinal_shift_m": [
+          -3.0,
+          3.0
+        ]
+      }
+    },
+    "pedestrian": {
+      "track_id": "71603dd1a2ba4e9daf095535e38310ac",
+      "type": "pedestrian",
+      "control_mode": "scripted",
+      "motion_constraint": "source_reference_corridor",
+      "allowed_actions": [
+        "abort",
+        "pause",
+        "speed",
+        "yield"
+      ],
+      "free_space_path_allowed": false,
+      "skeleton_edit_allowed": false
+    }
+  },
+  "algorithms": [
+    {
+      "algorithm_id": "reference_pure_pursuit_short",
+      "plugin_algorithm_id": "reference_pure_pursuit",
+      "algorithm_version": "reference_pure_pursuit.v1",
+      "execution_class": "control_only",
+      "perception_algorithm": false,
+      "checkpoint_sha256": "not_applicable",
+      "parameters": {
+        "profile": "short",
+        "lookahead_m": 4.0,
+        "target_speed_mps": 6.0,
+        "supported_control_hz": 20.0,
+        "timeout_sec": 0.05
+      },
+      "config_sha256": "015ee8e3b50b6425fd554fb608b1193e668a62ae0ff87d8773001199ac1e4ffe",
+      "remote_validation_required": true
+    },
+    {
+      "algorithm_id": "reference_pure_pursuit_long",
+      "plugin_algorithm_id": "reference_pure_pursuit",
+      "algorithm_version": "reference_pure_pursuit.v1",
+      "execution_class": "control_only",
+      "perception_algorithm": false,
+      "checkpoint_sha256": "not_applicable",
+      "parameters": {
+        "profile": "long",
+        "lookahead_m": 9.0,
+        "target_speed_mps": 8.0,
+        "supported_control_hz": 20.0,
+        "timeout_sec": 0.05
+      },
+      "config_sha256": "a6fc6fb50fa42845948010c0c4dd1af355049455798230e34810b3971d9f2188",
+      "remote_validation_required": true
+    }
+  ],
+  "seeds": [
+    41,
+    42,
+    43
+  ],
+  "cases": [
+    {
+      "case_id": "S0_original_replay",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "c1958768d48640948f6053d04cffd35b",
+        "71603dd1a2ba4e9daf095535e38310ac"
+      ],
+      "actor_control_mode": "replay",
+      "edit": {
+        "actor": null,
+        "operation": "none",
+        "parameters": {}
+      },
+      "trajectory_delta": {},
+      "expected_behavior": "source replay baseline",
+      "kpi_gate": [
+        "collision_count==0",
+        "route_progress>=0.95",
+        "min_ttc_available"
+      ],
+      "required_actor_outcomes": [],
+      "perception_ranking_allowed": true,
+      "quality_stress_only": false,
+      "remote_validation_required": true
+    },
+    {
+      "case_id": "S1_lead_slowdown",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "c1958768d48640948f6053d04cffd35b"
+      ],
+      "actor_control_mode": "scripted",
+      "edit": {
+        "actor": "lead_vehicle",
+        "operation": "speed",
+        "parameters": {
+          "speed_scale": 0.55
+        }
+      },
+      "trajectory_delta": {
+        "speed_scale": 0.55
+      },
+      "expected_behavior": "ego follows and adapts speed",
+      "kpi_gate": [
+        "collision_count==0",
+        "route_progress>=0.95",
+        "min_ttc_available"
+      ],
+      "required_actor_outcomes": [],
+      "perception_ranking_allowed": true,
+      "quality_stress_only": false,
+      "remote_validation_required": true
+    },
+    {
+      "case_id": "S2_lead_hard_brake",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "c1958768d48640948f6053d04cffd35b"
+      ],
+      "actor_control_mode": "scripted",
+      "edit": {
+        "actor": "lead_vehicle",
+        "operation": "brake",
+        "parameters": {
+          "deceleration_mps2": 5.0,
+          "duration_sec": 1.0
+        }
+      },
+      "trajectory_delta": {
+        "deceleration_mps2": 5.0,
+        "duration_sec": 1.0
+      },
+      "expected_behavior": "ego brakes without collision",
+      "kpi_gate": [
+        "collision_count==0",
+        "route_progress>=0.95",
+        "min_ttc_available"
+      ],
+      "required_actor_outcomes": [],
+      "perception_ranking_allowed": true,
+      "quality_stress_only": false,
+      "remote_validation_required": true
+    },
+    {
+      "case_id": "S3_lead_longitudinal_shift",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "c1958768d48640948f6053d04cffd35b"
+      ],
+      "actor_control_mode": "scripted",
+      "edit": {
+        "actor": "lead_vehicle",
+        "operation": "longitudinal_shift",
+        "parameters": {
+          "longitudinal_shift_m": 2.0
+        }
+      },
+      "trajectory_delta": {
+        "longitudinal_shift_m": 2.0
+      },
+      "expected_behavior": "ego response changes with bounded lead pose",
+      "kpi_gate": [
+        "collision_count==0",
+        "route_progress>=0.95",
+        "min_ttc_available"
+      ],
+      "required_actor_outcomes": [],
+      "perception_ranking_allowed": true,
+      "quality_stress_only": false,
+      "remote_validation_required": true
+    },
+    {
+      "case_id": "S4_pedestrian_early_crossing",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "71603dd1a2ba4e9daf095535e38310ac"
+      ],
+      "actor_control_mode": "scripted",
+      "edit": {
+        "actor": "pedestrian",
+        "operation": "speed",
+        "parameters": {
+          "action": "speed",
+          "time_shift_sec": -1.0,
+          "corridor": "source_reference_corridor"
+        }
+      },
+      "trajectory_delta": {
+        "action": "speed",
+        "time_shift_sec": -1.0,
+        "corridor": "source_reference_corridor"
+      },
+      "expected_behavior": "ego yields to an earlier source-corridor crossing",
+      "kpi_gate": [
+        "collision_count==0",
+        "route_progress>=0.95",
+        "min_ttc_available",
+        "pedestrian_crossing_outcome_available"
+      ],
+      "required_actor_outcomes": [
+        "crossing"
+      ],
+      "perception_ranking_allowed": true,
+      "quality_stress_only": false,
+      "remote_validation_required": true
+    },
+    {
+      "case_id": "S5_pedestrian_yield",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "71603dd1a2ba4e9daf095535e38310ac"
+      ],
+      "actor_control_mode": "scripted",
+      "edit": {
+        "actor": "pedestrian",
+        "operation": "yield",
+        "parameters": {
+          "action": "yield",
+          "pause_sec": 1.0,
+          "corridor": "source_reference_corridor"
+        }
+      },
+      "trajectory_delta": {
+        "action": "yield",
+        "pause_sec": 1.0,
+        "corridor": "source_reference_corridor"
+      },
+      "expected_behavior": "pedestrian yields and ego proceeds safely",
+      "kpi_gate": [
+        "collision_count==0",
+        "route_progress>=0.95",
+        "min_ttc_available",
+        "pedestrian_yield_outcome_available"
+      ],
+      "required_actor_outcomes": [
+        "yield"
+      ],
+      "perception_ranking_allowed": true,
+      "quality_stress_only": false,
+      "remote_validation_required": true
+    },
+    {
+      "case_id": "S6_pedestrian_noncompliant",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "71603dd1a2ba4e9daf095535e38310ac"
+      ],
+      "actor_control_mode": "scripted",
+      "edit": {
+        "actor": "pedestrian",
+        "operation": "speed",
+        "parameters": {
+          "action": "speed",
+          "speed_scale": 1.0,
+          "yield_enabled": false,
+          "corridor": "source_reference_corridor"
+        }
+      },
+      "trajectory_delta": {
+        "action": "speed",
+        "speed_scale": 1.0,
+        "yield_enabled": false,
+        "corridor": "source_reference_corridor"
+      },
+      "expected_behavior": "non-yielding pedestrian remains on source corridor",
+      "kpi_gate": [
+        "collision_count==0",
+        "route_progress>=0.95",
+        "min_ttc_available",
+        "pedestrian_crossing_outcome_available"
+      ],
+      "required_actor_outcomes": [
+        "crossing"
+      ],
+      "perception_ranking_allowed": true,
+      "quality_stress_only": false,
+      "remote_validation_required": true
+    },
+    {
+      "case_id": "S7_lead_removed_quality_stress",
+      "scene_identity_ref": "#/scene_identity",
+      "immutable_input_roles": [
+        "nurec_usdz",
+        "runtime_validated_scene_package",
+        "actor_ready_scenario_ir",
+        "actor_selection",
+        "opendrive"
+      ],
+      "source_actor_tracks": [
+        "c1958768d48640948f6053d04cffd35b"
+      ],
+      "actor_control_mode": "scripted",
+      "edit": {
+        "actor": "lead_vehicle",
+        "operation": "remove",
+        "parameters": {
+          "background_synthesis": false
+        }
+      },
+      "trajectory_delta": {
+        "background_synthesis": false
+      },
+      "expected_behavior": "measure black-hole and perception robustness without ranking driving skill",
+      "kpi_gate": [
+        "render_quality_report_required"
+      ],
+      "required_actor_outcomes": [],
+      "perception_ranking_allowed": false,
+      "quality_stress_only": true,
+      "remote_validation_required": true
+    }
+  ],
+  "immutable_matrix_sha256": "a56e5f3bbeb29387701a071f33d7c7508889fff9b40e2fb7e77b9ab6da2e8fde"
+}

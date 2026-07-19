@@ -94,7 +94,7 @@ class EvaluationCriteriaTests(unittest.TestCase):
             for criterion in report["evaluation"]["criteria"]
         }
         self.assertEqual(report["evaluation"]["overall_result"], "unknown")
-        self.assertEqual(by_name["collision_count"]["result"], "pass")
+        self.assertEqual(by_name["collision_count"]["result"], "unknown")
         self.assertEqual(by_name["route_progress"]["result"], "unknown")
         self.assertEqual(by_name["min_ttc"]["result"], "unknown")
 

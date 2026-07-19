@@ -26,6 +26,15 @@ Native CARLA and algorithm-container orchestration:
 Environment-only remaining work:
 [`docs/environment_dependency_backlog.md`](docs/environment_dependency_backlog.md).
 
+scene-0061 local counterfactual evaluation and remote handoff:
+[`docs/scene0061_local_evaluation_handoff.md`](docs/scene0061_local_evaluation_handoff.md).
+
+Unified ego plugin contract, Pure Pursuit, and TCP/TransFuser binding boundary:
+[`docs/algorithm_plugin_contract.md`](docs/algorithm_plugin_contract.md).
+
+Offline render-quality gate and final video shot manifest:
+[`docs/scene0061_render_quality_and_video.md`](docs/scene0061_render_quality_and_video.md).
+
 Step-by-step environment coding and acceptance plan:
 [`docs/environment_integration_verification_plan.md`](docs/environment_integration_verification_plan.md).
 
