@@ -26,6 +26,17 @@ reliable mask exists, and a paired RGB/LiDAR actor-change contract. Global SSIM
 and temporal flicker are deliberately labelled with their limitations: SSIM is
 a global scalar and flicker is an unregistered whole-frame difference.
 
+The paired RGB/LiDAR contract cannot be supplied as hand-written change
+booleans. `rgb_lidar_actor_change.source_report_ref` must contain `path`,
+`sha256`, `size_bytes`, `schema_version`, and `status` for a
+`rgb_lidar_actor_change_source_report.v1` JSON file. The evaluator reads that
+file and verifies its passed status, experiment identity, target track, paired
+frame ranges, every baseline/edited RGB and LiDAR payload path/hash/size, and
+that its change flags agree with the ordered payload hashes. The formal ranking
+gate repeats those checks, so later source-report or payload mutation fails
+closed. Until that source report is captured, use `null`; it cannot grant
+`perception_eligible`.
+
 `evidence_classification` is exactly one of:
 
 - `perception_eligible`: all required mask, image, and multimodal gates pass;
@@ -39,10 +50,12 @@ cannot improve the classification above `source_evidence_classification`; when
 that source classification is missing, Harmonizer cannot establish
 `perception_eligible`.
 
-The formal40k v4 request has only one paired frame per camera and no actor mask.
+The formal40k v4 request has only one paired frame per camera, no actor mask,
+and no source report satisfying the new immutable RGB/LiDAR contract.
 Its temporal and actor ROI metrics are therefore unavailable by construction,
-and its expected classification is `control_only` even though the independent
-pose probe reports both RGB and LiDAR content changed.
+and its expected classification is `control_only`. The older independent pose
+probe remains useful debug evidence but is not accepted as a formal change
+contract.
 
 ## Video shot manifest
 

@@ -351,6 +351,27 @@ def validate_nurec_multimodal_evidence(evidence: Mapping[str, Any]) -> None:
                 )
             if int(metadata.get("point_count") or 0) < 1:
                 raise NuRecMultimodalError("NuRec LiDAR point_count must be positive")
+        materialized = metadata.get("materialized_payload")
+        if materialized is not None:
+            if not isinstance(materialized, Mapping):
+                raise NuRecMultimodalError("materialized_payload must be an object")
+            if not materialized.get("path") or not _is_sha256(
+                str(materialized.get("sha256") or "")
+            ):
+                raise NuRecMultimodalError(
+                    "materialized_payload requires a path and sha256"
+                )
+            expected_encoding = (
+                "jpeg"
+                if record.get("modality") == "rgb"
+                else "float32_xyzi_little_endian"
+            )
+            if materialized.get("encoding") != expected_encoding:
+                raise NuRecMultimodalError(
+                    f"materialized {record.get('modality')} encoding is invalid"
+                )
+            if int(materialized.get("byte_count") or 0) < 1:
+                raise NuRecMultimodalError("materialized_payload byte_count must be positive")
 
 
 def assert_nurec_multimodal_evidence(evidence: Mapping[str, Any]) -> None:

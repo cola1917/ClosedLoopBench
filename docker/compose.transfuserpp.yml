@@ -1,0 +1,35 @@
+services:
+  transfuserpp:
+    # Formal execution selects the immutable Docker image ID itself. Build the
+    # tagged image separately, inspect .Id, and export that value as
+    # TFPP_IMAGE_DIGEST; the same value is injected into the runtime manifest.
+    image: "${TFPP_IMAGE_DIGEST:?Set immutable built Docker image ID}"
+    pull_policy: never
+    network_mode: "${ALGORITHM_NETWORK_MODE:-host}"
+    gpus: all
+    environment:
+      ALGORITHM_ID: transfuserpp_v5
+      ALGORITHM_PLUGIN: agents.transfuserpp_ros2_backend:create_backend
+      ALGORITHM_REPO_PATH: /opt/algorithm/carla_garage
+      ALGORITHM_CHECKPOINT_PATH: "/opt/algorithm/checkpoints/${TFPP_CHECKPOINT_FILE:?Set TFPP_CHECKPOINT_FILE}"
+      ALGORITHM_RUNTIME_CONFIG: /sim-data/runtime/transfuserpp.runtime.json
+      ALGORITHM_READY_FILE: /sim-data/runtime/transfuserpp.ready.json
+      SIM_DATA_PATH: /sim-data
+      CARLA_AGENTS_PATH: /opt/carla-pythonapi/agents
+      TFPP_IMAGE_DIGEST: "${TFPP_IMAGE_DIGEST:?Set immutable built Docker image ID}"
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-61}"
+      FASTDDS_BUILTIN_TRANSPORTS: "${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
+      CONTROL_TOPIC: "${CONTROL_TOPIC:-/carla/ego_vehicle/vehicle_control_cmd}"
+      OBSERVATION_TOPIC: "${OBSERVATION_TOPIC:-/closed_loop/ego/observation}"
+    volumes:
+      - "${SIM_DATA_HOST_PATH:?Set SIM_DATA_HOST_PATH}:/sim-data"
+      - "${TFPP_REPO_HOST_PATH:?Set TFPP_REPO_HOST_PATH}:/opt/algorithm/carla_garage:ro"
+      - "${TFPP_CHECKPOINT_HOST_DIR:?Set TFPP_CHECKPOINT_HOST_DIR}:/opt/algorithm/checkpoints:ro"
+      - "${CARLA_PYTHONAPI_HOST_PATH:?Set CARLA_PYTHONAPI_HOST_PATH}:/opt/carla-pythonapi:ro"
+    healthcheck:
+      test: ["CMD", "python3", "-m", "runners.run_algorithm_container", "health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 120s
+    restart: "no"

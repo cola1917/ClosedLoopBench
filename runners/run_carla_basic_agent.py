@@ -5,9 +5,10 @@ import importlib
 import json
 import math
 import sys
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -91,8 +92,27 @@ def build_basic_agent_plan(
                 if run_experiment.get("seed") is not None
                 else carla_config.get("seed")
             ),
+            "scene_id": run_experiment.get("scene_id"),
+            "case_id": run_experiment.get("case_id"),
+            "identity": {
+                **dict(run_experiment.get("identity") or {}),
+                **(
+                    {
+                        "run_config_sha256": (
+                            run_config.get("config_identity") or {}
+                        ).get("canonical_sha256")
+                    }
+                    if (run_config.get("config_identity") or {}).get(
+                        "canonical_sha256"
+                    )
+                    else {}
+                ),
+            },
         },
         "actor_control": dict(run_config.get("actor_control") or {}),
+        "actor_control_contract": dict(
+            run_config.get("actor_control_contract") or {}
+        ),
         "actor_binding": dict(run_config.get("actor_binding") or {}),
         "ego": {
             "agent": "basic_agent",
@@ -107,6 +127,11 @@ def build_basic_agent_plan(
             ),
             "control_timeout_sec": float(control_timeout_sec),
             "observation_topic": observation_topic or "/closed_loop/ego/observation",
+            "algorithm_sensor_binding": dict(
+                ego.get("algorithm_sensor_binding")
+                or run_config.get("algorithm_sensor_binding")
+                or {}
+            ),
         },
         "actors": run_config.get("actors", []),
         "reconstruction_package": dict(run_config.get("reconstruction_package") or {}),
@@ -263,13 +288,17 @@ def build_dry_run_report(run_config: dict[str, Any], plan: dict[str, Any]) -> di
     return report
 
 
-def _pose(state: dict[str, Any]) -> dict[str, float]:
-    return {
+def _pose(state: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "x": float(state.get("x", 0.0)),
         "y": float(state.get("y", 0.0)),
         "z": float(state.get("z", 0.0)),
         "yaw": float(state.get("yaw", 0.0)),
     }
+    command = state.get("route_command", state.get("command"))
+    if command is not None:
+        result["route_command"] = str(command).upper()
+    return result
 
 
 def _target_speed(ego: dict[str, Any], destination: dict[str, Any]) -> float:
@@ -322,6 +351,12 @@ def _run_basic_agent_loop(
         "records": [],
         "issues": [],
     }
+    actor_control_mode_evidence: dict[str, Any] = {
+        "schema_version": "actor_control_mode_evidence.v1",
+        "status": "not_configured",
+        "records": [],
+        "issues": [],
+    }
 
     try:
         connection = plan.get("connection") or {}
@@ -342,6 +377,12 @@ def _run_basic_agent_loop(
                 "multimodal sensor evidence is required but no sensor_frame_handler was provided"
             )
         visualization_config = plan.get("visualization") or {}
+        actor_control_mode_evidence = _actor_control_mode_preflight(plan)
+        if actor_control_mode_evidence["status"] == "failed":
+            raise RuntimeError(
+                "actor control mode preflight failed: "
+                + ", ".join(actor_control_mode_evidence["issues"])
+            )
 
         client = carla_module.Client(
             connection.get("host", "127.0.0.1"),
@@ -584,6 +625,7 @@ def _run_basic_agent_loop(
                         if reference_pose is not None
                         else None
                     ),
+                    "extent_m": _actor_extent(vehicle),
                 }
                 initial = actor_initial_poses[actor_id]
                 displacement = math.hypot(
@@ -625,6 +667,11 @@ def _run_basic_agent_loop(
                 evidence = sensor_frame_handler(sensor_context)
                 _validate_sensor_frame_evidence(evidence, world_frame)
                 evidence = dict(evidence)
+                if hasattr(ego_driver, "receive_multimodal_evidence"):
+                    ego_driver.receive_multimodal_evidence(
+                        evidence,
+                        context=sensor_context,
+                    )
                 multimodal_trace.append(evidence)
                 multimodal_summary = {
                     "schema_version": evidence["schema_version"],
@@ -741,6 +788,16 @@ def _run_basic_agent_loop(
             or any(item.get("status") != "passed" for item in multimodal_trace)
         ):
             raise RuntimeError("required NuRec multimodal evidence is incomplete")
+        actor_control_mode_evidence = _actor_control_execution_evidence(
+            plan,
+            actor_execution_evidence,
+            actor_control_mode_evidence,
+        )
+        if actor_control_mode_evidence["status"] == "failed":
+            raise RuntimeError(
+                "actor control execution evidence failed: "
+                + ", ".join(actor_control_mode_evidence["issues"])
+            )
         driver_diagnostics = (
             ego_driver.diagnostics()
             if hasattr(ego_driver, "diagnostics")
@@ -774,6 +831,7 @@ def _run_basic_agent_loop(
             "route_binding": dict(ego_config.get("route_binding") or {}),
             "collision_sensor_available": collision_sensor is not None,
             "actor_control_evidence": dict(actor_execution_evidence),
+            "actor_control_mode_evidence": actor_control_mode_evidence,
             "actor_physical_response": dict(actor_physical_response),
             "actor_runtime_binding": actor_runtime_binding_evidence,
             "multimodal_sensor": _multimodal_runtime_summary(
@@ -820,6 +878,7 @@ def _run_basic_agent_loop(
             "route_binding": dict((plan.get("ego") or {}).get("route_binding") or {}),
             "collision_sensor_available": collision_sensor is not None,
             "actor_control_evidence": dict(actor_execution_evidence),
+            "actor_control_mode_evidence": actor_control_mode_evidence,
             "actor_runtime_binding": actor_runtime_binding_evidence,
             "multimodal_sensor": _multimodal_runtime_summary(
                 multimodal_trace,
@@ -1122,6 +1181,11 @@ def _build_ego_driver(
             control_topic=str(ego_config.get("control_topic")),
             observation_topic=str(ego_config.get("observation_topic")),
             timeout_sec=float(ego_config.get("control_timeout_sec", 0.5)),
+            algorithm_sensor_binding=ego_config.get("algorithm_sensor_binding") or {},
+            run_context={
+                **dict(plan.get("experiment") or {}),
+                "run_id": plan.get("run_id"),
+            },
         )
 
     raise ValueError(f"unsupported ego driver: {driver_kind}")
@@ -1665,6 +1729,21 @@ def _vehicle_speed_mps(vehicle: Any) -> float:
     return math.sqrt(vx * vx + vy * vy + vz * vz)
 
 
+def _actor_extent(vehicle: Any) -> dict[str, float] | None:
+    bounding_box = getattr(vehicle, "bounding_box", None)
+    extent = getattr(bounding_box, "extent", None)
+    if extent is None:
+        return None
+    try:
+        return {
+            "x": float(extent.x),
+            "y": float(extent.y),
+            "z": float(extent.z),
+        }
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
 def _follow_ego_spectator(
     carla_module: Any,
     world: Any,
@@ -1920,7 +1999,15 @@ def _sample_actor_state(actor: dict[str, Any], actor_vehicle: Any | None) -> dic
 
 
 def _is_interactive_actor(actor: dict[str, Any]) -> bool:
-    if actor.get("closed_loop_level") in {"scripted", "traffic_manager_reactive"}:
+    closed_loop_level = actor.get("closed_loop_level")
+    frozen_mode = actor.get("effective_control_mode") or (
+        actor.get("control_mode_contract") or {}
+    ).get("effective_mode")
+    if frozen_mode == "replay":
+        return False
+    if frozen_mode in {"scripted", "traffic_manager_reactive"}:
+        return True
+    if closed_loop_level in {"scripted", "traffic_manager_reactive"}:
         return True
     closed_loop = actor.get("closed_loop") or {}
     return bool(closed_loop.get("ego_responsive", False))
@@ -2164,6 +2251,155 @@ def _reference_speed_at_time(actor: dict[str, Any], run_time_sec: float) -> floa
     return max(0.0, float(point.get("speed_mps", 0.0)))
 
 
+def _effective_actor_control_mode(actor: Mapping[str, Any]) -> str:
+    value = str(actor.get("closed_loop_level") or "")
+    if value in {"replay", "scripted", "traffic_manager_reactive"}:
+        return value
+    return "unconfigured"
+
+
+def _expected_actor_control_evidence(actor: Mapping[str, Any], mode: str) -> str | None:
+    suffix = "walker" if _actor_kind(dict(actor)) == "pedestrian" else "vehicle"
+    if mode == "replay":
+        return f"trajectory_replay_{suffix}_control"
+    if mode == "scripted":
+        return f"scripted_{suffix}_control"
+    if mode == "traffic_manager_reactive":
+        return "traffic_manager"
+    return None
+
+
+def _actor_control_mode_preflight(plan: Mapping[str, Any]) -> dict[str, Any]:
+    contract = plan.get("actor_control_contract")
+    if not contract:
+        return {
+            "schema_version": "actor_control_mode_evidence.v1",
+            "status": "not_configured",
+            "records": [],
+            "issues": [],
+        }
+    issues: list[str] = []
+    if not isinstance(contract, Mapping):
+        return {
+            "schema_version": "actor_control_mode_evidence.v1",
+            "status": "failed",
+            "records": [],
+            "issues": ["actor_control_contract_schema_invalid"],
+        }
+    if contract.get("schema_version") != (
+        "scene0061_actor_control_contract.v1"
+    ):
+        issues.append("actor_control_contract_schema_invalid")
+        rows = []
+    else:
+        rows = contract.get("actors")
+        if not isinstance(rows, list) or not rows:
+            issues.append("actor_control_contract_records_missing")
+            rows = []
+    expected_case = (plan.get("experiment") or {}).get("case_id")
+    if contract.get("case_id") != expected_case:
+        issues.append("actor_control_contract_case_mismatch")
+    actor_by_id = {
+        str(actor.get("actor_id") or ""): actor
+        for actor in plan.get("actors") or []
+        if isinstance(actor, Mapping)
+    }
+    row_ids = [str(row.get("actor_id") or "") for row in rows if isinstance(row, Mapping)]
+    if not all(row_ids) or len(row_ids) != len(set(row_ids)):
+        issues.append("actor_control_contract_actor_ids_invalid")
+    records = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            issues.append("actor_control_contract_record_invalid")
+            continue
+        actor_id = str(row.get("actor_id") or "")
+        actor = actor_by_id.get(actor_id)
+        record_issues = []
+        if actor is None:
+            record_issues.append("configured_actor_missing")
+            actor = {}
+        source_track_id = str(row.get("source_track_id") or "")
+        actor_track_id = str(
+            actor.get("source_track_id")
+            or (actor.get("binding") or {}).get("nurec_track_id")
+            or ""
+        )
+        if not source_track_id or actor_track_id != source_track_id:
+            record_issues.append("source_track_binding_mismatch")
+        effective_mode = _effective_actor_control_mode(actor)
+        declared_mode = str(row.get("effective_mode") or "")
+        if effective_mode != declared_mode or declared_mode not in {"replay", "scripted"}:
+            record_issues.append("effective_control_mode_mismatch")
+        if actor.get("effective_control_mode") != declared_mode:
+            record_issues.append("actor_effective_control_mode_not_frozen")
+        actor_contract = actor.get("control_mode_contract") or {}
+        expected_executor = _expected_actor_control_evidence(actor, declared_mode)
+        if (
+            row.get("runner_executor") != expected_executor
+            or actor_contract.get("runner_executor") != expected_executor
+        ):
+            record_issues.append("runner_executor_mismatch")
+        binding = actor.get("binding") or {}
+        if binding.get("effective_control_mode") != declared_mode:
+            record_issues.append("binding_effective_control_mode_mismatch")
+        expected_pose_source = (
+            "scenario_ir_reference_trajectory"
+            if declared_mode == "replay"
+            else "carla_runtime_actor_pose"
+        )
+        if binding.get("sensor_pose_source") != expected_pose_source:
+            record_issues.append("binding_sensor_pose_source_mismatch")
+        if binding.get("sensor_pose_reference") != actor_contract.get(
+            "sensor_pose_reference"
+        ):
+            record_issues.append("binding_sensor_pose_reference_mismatch")
+        records.append(
+            {
+                "actor_id": actor_id,
+                "source_track_id": row.get("source_track_id"),
+                "actor_type": _actor_kind(dict(actor)),
+                "effective_mode": declared_mode,
+                "expected_execution_evidence": expected_executor,
+                "actual_execution_evidence": None,
+                "status": "passed" if not record_issues else "failed",
+                "issues": record_issues,
+            }
+        )
+        issues.extend(f"{actor_id}:{issue}" for issue in record_issues)
+    return {
+        "schema_version": "actor_control_mode_evidence.v1",
+        "status": "passed" if not issues else "failed",
+        "case_id": contract.get("case_id"),
+        "case_actor_control_mode": contract.get("case_actor_control_mode"),
+        "records": records,
+        "issues": sorted(set(issues)),
+    }
+
+
+def _actor_control_execution_evidence(
+    plan: Mapping[str, Any],
+    actual: Mapping[str, str],
+    preflight: Mapping[str, Any],
+) -> dict[str, Any]:
+    if preflight.get("status") == "not_configured":
+        return dict(preflight)
+    result = deepcopy(dict(preflight))
+    issues = list(result.get("issues") or [])
+    for record in result.get("records") or []:
+        actor_id = str(record.get("actor_id") or "")
+        observed = actual.get(actor_id)
+        record["actual_execution_evidence"] = observed
+        if observed != record.get("expected_execution_evidence"):
+            issue = "runtime_executor_evidence_mismatch"
+            record.setdefault("issues", []).append(issue)
+            issues.append(f"{actor_id}:{issue}")
+        record["status"] = "passed" if not record.get("issues") else "failed"
+    result["issues"] = sorted(set(issues))
+    result["status"] = "passed" if not result["issues"] else "failed"
+    result["actual_evidence_by_actor"] = dict(actual)
+    return result
+
+
 def _actor_runtime_binding_evidence(
     plan: dict[str, Any],
     actor_vehicles: dict[str, Any],
@@ -2238,6 +2474,19 @@ def _actor_runtime_binding_evidence(
             "scenario_ir_reference_trajectory",
         }:
             record_issues.append("sensor_pose_source_invalid")
+        effective_mode = _effective_actor_control_mode(actor or {})
+        declared_effective_mode = binding.get("effective_control_mode")
+        control_contract = (actor or {}).get("control_mode_contract") or {}
+        if control_contract:
+            if declared_effective_mode != effective_mode:
+                record_issues.append("binding_effective_control_mode_mismatch")
+            expected_pose_source = (
+                "scenario_ir_reference_trajectory"
+                if effective_mode == "replay"
+                else "carla_runtime_actor_pose"
+            )
+            if binding.get("sensor_pose_source") != expected_pose_source:
+                record_issues.append("control_mode_sensor_pose_source_mismatch")
         expected_pose_reference = (
             "source_track_frame"
             if binding.get("sensor_pose_source") == "scenario_ir_reference_trajectory"
@@ -2259,6 +2508,8 @@ def _actor_runtime_binding_evidence(
                 "runtime_actor_id": runtime_actor_id,
             },
             "nurec_track_id": binding.get("nurec_track_id"),
+            "configured_control_mode": effective_mode,
+            "binding_effective_control_mode": declared_effective_mode,
             "sensor_pose_source": binding.get("sensor_pose_source"),
             "sensor_pose_reference": binding.get("sensor_pose_reference"),
             "required_modalities": list(binding.get("required_modalities") or []),
@@ -2372,6 +2623,8 @@ def _build_sensor_frame_context(
                 "carla_runtime_actor_id"
             ),
             "nurec_track_id": binding.get("nurec_track_id"),
+            "actor_type": (actor_states.get(actor_id) or {}).get("actor_type"),
+            "extent_m": (actor_states.get(actor_id) or {}).get("extent_m"),
         }
     return {
         "schema_version": "carla_nurec_frame_context.v1",

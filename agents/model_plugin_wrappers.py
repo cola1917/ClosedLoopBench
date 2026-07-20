@@ -21,6 +21,12 @@ MODEL_SPECS = {
         "requires_lidar": True,
         "default_control_hz": 20.0,
     },
+    "transfuserpp": {
+        "algorithm_id": "transfuserpp_v5",
+        "required_rgb_cameras": ["camera_front"],
+        "requires_lidar": True,
+        "default_control_hz": 20.0,
+    },
 }
 
 
@@ -102,8 +108,8 @@ class ExternalModelPluginWrapper:
     """Stable boundary for TCP/TransFuser without importing or pretending to run them."""
 
     def __init__(self, algorithm: str) -> None:
-        self.algorithm = _spec(algorithm)["algorithm_id"]
-        spec = MODEL_SPECS[self.algorithm]
+        spec = _spec(algorithm)
+        self.algorithm = spec["algorithm_id"]
         self.capability = {
             "algorithm_id": self.algorithm,
             "uses_route": True,
@@ -225,11 +231,21 @@ def create_transfuser_plugin(config: Mapping[str, Any]) -> ExternalModelPluginWr
     return plugin
 
 
+def create_transfuserpp_boundary(config: Mapping[str, Any]) -> ExternalModelPluginWrapper:
+    """Manifest-only boundary; real TF++ inference uses transfuserpp_plugin."""
+    plugin = ExternalModelPluginWrapper("transfuserpp")
+    plugin.initialize(config)
+    return plugin
+
+
 def _spec(algorithm: str) -> dict[str, Any]:
     key = str(algorithm).strip().lower()
-    if key not in MODEL_SPECS:
-        raise ValueError(f"unsupported external model wrapper: {algorithm}")
-    return MODEL_SPECS[key]
+    if key in MODEL_SPECS:
+        return MODEL_SPECS[key]
+    matches = [spec for spec in MODEL_SPECS.values() if spec["algorithm_id"] == key]
+    if len(matches) == 1:
+        return matches[0]
+    raise ValueError(f"unsupported external model wrapper: {algorithm}")
 
 
 def _positive(value: Any, name: str) -> float:

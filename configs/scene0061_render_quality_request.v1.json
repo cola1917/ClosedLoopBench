@@ -2,6 +2,7 @@
   "schema_version": "render_quality_evaluation_request.v1",
   "scene_id": "cc8c0bf57f984915a77078b10eb33198",
   "case_id": "S3_lead_longitudinal_shift_pose_probe",
+  "target_track_id": "c1958768d48640948f6053d04cffd35b",
   "edit_kind": "light_vehicle_edit",
   "artifact": {
     "path": "/home/cwadmin/workspace/NeuralSceneBridge/outputs/nurec_scene0061_renderable_lidar_v3_6cam_40k_formal_attempt_001/9aChcizbAsm4oDQKJMdBHM/artifacts/last.usdz",
@@ -10,13 +11,7 @@
   },
   "remote_validation_required": true,
   "harmonizer_applied": false,
-  "rgb_lidar_actor_change": {
-    "rgb_actor_changed": true,
-    "lidar_actor_changed": true,
-    "evidence_paths": [
-      "diagnostics/lidar-probes/replay.formal40k_v1.vehicle_pose_probe.v2.json"
-    ]
-  },
+  "rgb_lidar_actor_change": null,
   "cameras": [
     {
       "camera_name": "camera_front_left",

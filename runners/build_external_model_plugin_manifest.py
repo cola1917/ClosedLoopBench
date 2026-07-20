@@ -15,7 +15,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Build a fail-closed TCP/TransFuser remote-binding manifest."
     )
-    parser.add_argument("--algorithm", choices=("tcp", "transfuser"), required=True)
+    parser.add_argument(
+        "--algorithm", choices=("tcp", "transfuser", "transfuserpp"), required=True
+    )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)

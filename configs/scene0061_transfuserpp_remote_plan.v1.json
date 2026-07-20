@@ -1,0 +1,104 @@
+{
+  "schema_version": "scene0061_transfuserpp_remote_plan.v1",
+  "status": "remote_validation_required",
+  "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+  "scene_name": "scene-0061",
+  "scene_version": "formal40k-v1",
+  "source_counterfactual_matrix": {
+    "path": "configs/scene0061_counterfactual_matrix.v1.json",
+    "immutable_matrix_sha256": "a56e5f3bbeb29387701a071f33d7c7508889fff9b40e2fb7e77b9ab6da2e8fde"
+  },
+  "algorithm": {
+    "algorithm_id": "transfuserpp_v5",
+    "algorithm_version": "carla_garage.leaderboard_2.transfuser_v5",
+    "upstream_repository": "https://github.com/autonomousvision/carla_garage",
+    "upstream_branch": "leaderboard_2",
+    "single_checkpoint_only": true,
+    "real_checkpoint_loaded": false,
+    "container_image_selection": "immutable_docker_image_id_directly_selected_by_compose",
+    "runtime_template": "configs/scene0061_transfuserpp_runtime.remote.template.json"
+  },
+  "input_contract": {
+    "formal_nurec_camera_count": 6,
+    "algorithm_rgb_inputs": ["camera_front"],
+    "algorithm_lidar_inputs": ["lidar_top"],
+    "speed_source": "carla_actor_velocity",
+    "compass_source": "carla_actor_transform_yaw",
+    "gps_source": "bypassed",
+    "target_point_source": "closedloopbench_route_planner_ego_frame",
+    "route_progress": "monotonic_7.5m_along_route_lookahead",
+    "control_frequency_hz": 20.0,
+    "carla_fixed_delta_seconds": 0.05,
+    "carla_pythonapi_agents_navigation": "external_read_only_hash_verified_mount",
+    "camera_adaptation": "800x450_center_crop_800x400_resize_1024x512_then_upstream_crop",
+    "camera_calibration_contract": "per_frame_hash_bound_800x450_sensor_to_ego_and_adaptation",
+    "model_ego_coordinate_frame": "carla_x_forward_y_right_z_up",
+    "official_leaderboard_sensor_equivalent": false,
+    "upstream_sensor_agent_safety_controllers": "bypassed_and_reported"
+  },
+  "cases": [
+    {
+      "case_id": "S0_original_replay",
+      "purpose": "learned perception-in-loop baseline",
+      "event_timestamp_required": false
+    },
+    {
+      "case_id": "S2_lead_hard_brake",
+      "source_track_id": "c1958768d48640948f6053d04cffd35b",
+      "purpose": "lead-vehicle perception-to-brake causal chain",
+      "event_timestamp_required": true
+    },
+    {
+      "case_id": "S4_pedestrian_early_crossing",
+      "source_track_id": "71603dd1a2ba4e9daf095535e38310ac",
+      "purpose": "pedestrian perception-to-yield causal chain",
+      "event_timestamp_required": true
+    }
+  ],
+  "seeds": [41, 42, 43],
+  "expected_bundle_count": 9,
+  "acceptance_attempts_per_bundle": 3,
+  "expected_physical_attempt_count": 27,
+  "required_intermediate_outputs": [
+    "perspective_semantic",
+    "bev_semantic",
+    "depth",
+    "bounding_boxes",
+    "waypoints",
+    "route_checkpoints",
+    "target_speed_distribution",
+    "target_speed_mps",
+    "vehicle_control"
+  ],
+  "gates": [
+    "runtime_manifest_prepared",
+    "container_image_id_matches_runtime_identity",
+    "real_checkpoint_loaded",
+    "cuda_memory_and_latency_probe_passed",
+    "six_camera_nurec_rgb_passed",
+    "live_nurec_lidar_passed",
+    "actor_mapping_passed",
+    "render_quality_perception_eligible",
+    "algorithm_sensor_frame_match_passed",
+    "intermediate_trace_valid",
+    "closed_loop_kpi_available",
+    "backend_failure_count_zero",
+    "non_initialization_fallback_count_zero",
+    "intermediate_frame_count_matches_control_count",
+    "formal_identity_match",
+    "render_quality_report_identity_match"
+  ],
+  "occupancy_semantics": {
+    "dynamic_bev_proxy": "enabled",
+    "full_3d_occupancy": "unavailable_without_matching_dense_voxel_and_free_space_ground_truth",
+    "occ3d_claim_allowed": false
+  },
+  "formal_triplicate_policy": {
+    "matrix": "one immutable bundle for every case x seed entry; run triplicate acceptance for each bundle",
+    "attempt_count": "3 cases x 3 seeds x 3 consecutive attempts = 27 physical runs",
+    "final_s0_acceptance": "the three S0 seed bundles must each pass run_carla_acceptance_triplicate",
+    "offline_or_fake_runs_allowed": false,
+    "output_layout": "transfuserpp_intermediates/{case_id}/seed_{seed}/{run_id}",
+    "sim_data_mount_scope": "matrix_or_triplicate_output_root"
+  }
+}

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -34,6 +36,10 @@ class NuRec260Client:
         stub: Any | None = None,
         channel: Any | None = None,
         camera_specs: Mapping[str, Any] | None = None,
+        payload_output_dir: str | Path | None = None,
+        payload_reference_root: str | Path | None = None,
+        lidar_response_coordinate_frame: str = "unverified",
+        lidar_axis_convention: str = "unverified",
     ) -> None:
         if not target or not runtime_scene_id:
             raise NuRecMultimodalError("NRE target and runtime_scene_id are required")
@@ -65,6 +71,18 @@ class NuRec260Client:
             stub = stub_module.SensorsimServiceStub(self._channel)
         self.stub = stub
         self._camera_specs = dict(camera_specs or self._load_camera_specs())
+        self._payload_output_dir = (
+            Path(payload_output_dir).expanduser()
+            if payload_output_dir is not None
+            else None
+        )
+        self._payload_reference_root = (
+            Path(payload_reference_root).expanduser().resolve()
+            if payload_reference_root is not None
+            else None
+        )
+        self._lidar_response_coordinate_frame = str(lidar_response_coordinate_frame)
+        self._lidar_axis_convention = str(lidar_axis_convention)
 
     def close(self) -> None:
         if self._channel is not None and hasattr(self._channel, "close"):
@@ -231,9 +249,62 @@ class NuRec260Client:
                 raise NuRecMultimodalError(
                     f"NRE RGB dimensions {(width, height)} != {(expected_width, expected_height)}"
                 )
-            return {"width": width, "height": height, "encoding": "jpeg"}
+            metadata = {"width": width, "height": height, "encoding": "jpeg"}
+            materialized = self._materialize_payload(payload, image, suffix=".jpg")
+            if materialized is not None:
+                metadata["materialized_payload"] = {
+                    **materialized,
+                    "encoding": "jpeg",
+                    "coordinate_frame": "camera_optical",
+                }
+            return metadata
 
-        return _inspect_lidar_response(response, body)
+        metadata = _inspect_lidar_response(response, body)
+        xyzi = _lidar_xyzi_bytes(response, body)
+        materialized = self._materialize_payload(payload, xyzi, suffix=".bin")
+        if materialized is not None:
+            metadata["materialized_payload"] = {
+                **materialized,
+                "encoding": "float32_xyzi_little_endian",
+                "coordinate_frame": self._lidar_response_coordinate_frame,
+                "axis_convention": self._lidar_axis_convention,
+            }
+        return metadata
+
+    def _materialize_payload(
+        self, payload: Mapping[str, Any], data: bytes, *, suffix: str
+    ) -> dict[str, Any] | None:
+        if self._payload_output_dir is None:
+            return None
+        frame_id = int(payload["frame_id"])
+        sensor_id = re.sub(
+            r"[^A-Za-z0-9_.-]+", "_", str(payload["sensor"]["sensor_id"])
+        ).strip("_")
+        if not sensor_id:
+            raise NuRecMultimodalError("cannot materialize payload with empty sensor_id")
+        directory = self._payload_output_dir / f"frame_{frame_id:08d}"
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{sensor_id}{suffix}"
+        if target.exists():
+            raise NuRecMultimodalError(
+                f"refusing to overwrite materialized NuRec payload: {target}"
+            )
+        target.write_bytes(data)
+        result = {
+            "path": str(target),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "byte_count": len(data),
+        }
+        if self._payload_reference_root is not None:
+            try:
+                result["relative_path"] = target.resolve().relative_to(
+                    self._payload_reference_root
+                ).as_posix()
+            except ValueError as exc:
+                raise NuRecMultimodalError(
+                    "materialized payload is outside payload_reference_root"
+                ) from exc
+        return result
 
     def _load_camera_specs(self) -> dict[str, Any]:
         response = self.stub.get_available_cameras(
@@ -278,7 +349,11 @@ class NuRec260Client:
         }
 
 
-def build_nurec_260_client(run_config: Mapping[str, Any]) -> NuRec260Client:
+def build_nurec_260_client(
+    run_config: Mapping[str, Any],
+    *,
+    payload_output_dir: str | Path | None = None,
+) -> NuRec260Client:
     """Build the concrete client from the shared ``nurec_runtime`` config."""
     config = run_config.get("nurec_runtime")
     if not isinstance(config, Mapping):
@@ -295,6 +370,12 @@ def build_nurec_260_client(run_config: Mapping[str, Any]) -> NuRec260Client:
         runtime_scene_id=str(config.get("runtime_scene_id") or ""),
         scene_start_us=int(config["scene_start_us"]),
         timeout_sec=float(config.get("timeout_sec") or 60.0),
+        payload_output_dir=payload_output_dir,
+        payload_reference_root=config.get("payload_reference_root"),
+        lidar_response_coordinate_frame=str(
+            config.get("lidar_response_coordinate_frame") or "unverified"
+        ),
+        lidar_axis_convention=str(config.get("lidar_axis_convention") or "unverified"),
     )
 
 
@@ -307,6 +388,11 @@ def build_nurec_260_handler(
     if not isinstance(config, Mapping):
         raise NuRecMultimodalError("run config requires nurec_runtime")
     client = build_nurec_260_client(run_config)
+    client._payload_output_dir = Path(attempt_dir) / "algorithm_sensor_payloads"
+    # The sidecar mounts the triplicate output root once at /sim-data. Keep
+    # each attempt directory in the relative path so repeated CARLA frame IDs
+    # remain unambiguous across attempt-01/02/03.
+    client._payload_reference_root = Path(attempt_dir).resolve().parent
     scene_package = _load_json(config, "scene_package")
     binding_set = _load_json(config, "actor_bindings")
     handler = make_nurec_sensor_frame_handler(
@@ -449,6 +535,54 @@ def _inspect_lidar_response(response: Any, body: bytes) -> dict[str, Any]:
     # serialized protobuf.  Keep response_metadata within the canonical Scene
     # Exchange contract shared by legacy and buffered layouts.
     return {"point_count": point_count, "encoding": "float_xyz_intensity"}
+
+
+def _lidar_xyzi_bytes(response: Any, body: bytes) -> bytes:
+    """Return a canonical little-endian float32 XYZI stream for inference."""
+
+    xyz = getattr(response, "point_xyzs", ())
+    intensities = getattr(response, "point_intensities", ())
+    if xyz or intensities:
+        if not xyz or len(xyz) % 3 or len(intensities) != len(xyz) // 3:
+            raise NuRecMultimodalError("cannot materialize malformed legacy LiDAR fields")
+        point_count = len(intensities)
+        result = bytearray(point_count * 16)
+        for index in range(point_count):
+            struct.pack_into(
+                "<ffff",
+                result,
+                index * 16,
+                float(xyz[index * 3]),
+                float(xyz[index * 3 + 1]),
+                float(xyz[index * 3 + 2]),
+                float(intensities[index]),
+            )
+        return bytes(result)
+
+    fields = _protobuf_wire_field_records(body)
+    point_counts = fields.get(3, [])
+    xyz_buffers = fields.get(4, [])
+    intensity_buffers = fields.get(5, [])
+    if (
+        len(point_counts) != 1
+        or len(xyz_buffers) != 1
+        or len(intensity_buffers) != 1
+        or not isinstance(point_counts[0][1], int)
+        or not isinstance(xyz_buffers[0][1], bytes)
+        or not isinstance(intensity_buffers[0][1], bytes)
+    ):
+        raise NuRecMultimodalError("cannot materialize malformed NRE 26.04 LiDAR buffers")
+    point_count = int(point_counts[0][1])
+    xyz_buffer = xyz_buffers[0][1]
+    intensity_buffer = intensity_buffers[0][1]
+    if len(xyz_buffer) != point_count * 12 or len(intensity_buffer) != point_count * 4:
+        raise NuRecMultimodalError("cannot materialize inconsistent NRE LiDAR buffer sizes")
+    result = bytearray(point_count * 16)
+    for index in range(point_count):
+        x, y, z = struct.unpack_from("<fff", xyz_buffer, index * 12)
+        intensity = struct.unpack_from("<f", intensity_buffer, index * 4)[0]
+        struct.pack_into("<ffff", result, index * 16, x, y, z, intensity)
+    return bytes(result)
 
 
 def _protobuf_wire_fields(data: bytes) -> dict[int, list[int | bytes]]:

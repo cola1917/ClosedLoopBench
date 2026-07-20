@@ -79,6 +79,67 @@ class Carla:
 
 
 class PedestrianActorRuntimeTests(unittest.TestCase):
+    def test_actor_control_contract_preflight_and_execution_are_fail_closed(self):
+        from runners.run_carla_basic_agent import (
+            _actor_control_execution_evidence,
+            _actor_control_mode_preflight,
+            _is_interactive_actor,
+        )
+
+        track_id = "71603dd1a2ba4e9daf095535e38310ac"
+        actor = {
+            "actor_id": "walker",
+            "type": "pedestrian",
+            "closed_loop_level": "replay",
+            "closed_loop": {"ego_responsive": True},
+            "effective_control_mode": "replay",
+            "binding": {
+                "nurec_track_id": track_id,
+                "effective_control_mode": "replay",
+                "sensor_pose_source": "scenario_ir_reference_trajectory",
+                "sensor_pose_reference": "source_track_frame",
+            },
+            "control_mode_contract": {
+                "runner_executor": "trajectory_replay_walker_control",
+                "sensor_pose_reference": "source_track_frame",
+            },
+        }
+        plan = {
+            "experiment": {"case_id": "S0_original_replay"},
+            "actors": [actor],
+            "actor_control_contract": {
+                "schema_version": "scene0061_actor_control_contract.v1",
+                "case_id": "S0_original_replay",
+                "case_actor_control_mode": "replay",
+                "actors": [
+                    {
+                        "actor_id": "walker",
+                        "source_track_id": track_id,
+                        "effective_mode": "replay",
+                        "runner_executor": "trajectory_replay_walker_control",
+                    }
+                ],
+            },
+        }
+        self.assertFalse(_is_interactive_actor(actor))
+        preflight = _actor_control_mode_preflight(plan)
+        self.assertEqual(preflight["status"], "passed")
+        executed = _actor_control_execution_evidence(
+            plan,
+            {"walker": "trajectory_replay_walker_control"},
+            preflight,
+        )
+        self.assertEqual(executed["status"], "passed")
+        mismatched = _actor_control_execution_evidence(
+            plan,
+            {"walker": "scripted_walker_control"},
+            preflight,
+        )
+        self.assertEqual(mismatched["status"], "failed")
+        self.assertIn(
+            "walker:runtime_executor_evidence_mismatch", mismatched["issues"]
+        )
+
     def test_behavior_plugin_can_change_vehicle_track_target(self):
         from runners.run_carla_basic_agent import _apply_scripted_actor_controls
 

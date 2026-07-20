@@ -14,6 +14,7 @@ from agents.algorithm_backend import (
     run_backend,
     validate_runtime_paths,
 )
+from agents.plugin_contract import strict_json_loads
 
 
 def build_runtime_config(environment: dict[str, str] | None = None) -> dict[str, Any]:
@@ -28,16 +29,63 @@ def build_runtime_config(environment: dict[str, str] | None = None) -> dict[str,
     if missing:
         raise AlgorithmBackendError("missing required environment: " + ", ".join(sorted(missing)))
     config: dict[str, Any] = {key: env[variable] for key, variable in required.items()}
+    runtime_config_path = env.get("ALGORITHM_RUNTIME_CONFIG")
+    if runtime_config_path:
+        path = Path(runtime_config_path)
+        if not path.is_file():
+            raise AlgorithmBackendError(
+                f"algorithm runtime config is not a file: {path}"
+            )
+        try:
+            runtime_values = strict_json_loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise AlgorithmBackendError(f"invalid algorithm runtime config: {exc}") from exc
+        if not isinstance(runtime_values, dict):
+            raise AlgorithmBackendError("algorithm runtime config must be a JSON object")
+        config.update(runtime_values)
+        config["runtime_config_path"] = str(path.resolve())
+        # Mount identities are authoritative and cannot be redirected by JSON.
+        config.update({key: env[variable] for key, variable in required.items()})
+    if env.get("CARLA_AGENTS_PATH"):
+        config["carla_agents_path"] = env["CARLA_AGENTS_PATH"]
+    if env.get("TFPP_IMAGE_DIGEST"):
+        if config.get("container_image_digest") and config.get(
+            "container_image_digest"
+        ) != env["TFPP_IMAGE_DIGEST"]:
+            raise AlgorithmBackendError(
+                "TFPP_IMAGE_DIGEST does not match the bound runtime config"
+            )
+        config["container_image_digest"] = env["TFPP_IMAGE_DIGEST"]
+    runtime_control_topic = config.get("control_topic")
+    runtime_observation_topic = config.get("observation_topic")
+    environment_control_topic = env.get("CONTROL_TOPIC")
+    environment_observation_topic = env.get("OBSERVATION_TOPIC")
+    if (
+        runtime_control_topic
+        and environment_control_topic
+        and runtime_control_topic != environment_control_topic
+    ):
+        raise AlgorithmBackendError(
+            "CONTROL_TOPIC does not match the bound runtime config"
+        )
+    if (
+        runtime_observation_topic
+        and environment_observation_topic
+        and runtime_observation_topic != environment_observation_topic
+    ):
+        raise AlgorithmBackendError(
+            "OBSERVATION_TOPIC does not match the bound runtime config"
+        )
     config.update(
         {
             "algorithm_id": env.get("ALGORITHM_ID", "external"),
             "ros_domain_id": env.get("ROS_DOMAIN_ID", "0"),
-            "control_topic": env.get(
-                "CONTROL_TOPIC", "/carla/ego_vehicle/vehicle_control_cmd"
-            ),
-            "observation_topic": env.get(
-                "OBSERVATION_TOPIC", "/closed_loop/ego/observation"
-            ),
+            "control_topic": environment_control_topic
+            or runtime_control_topic
+            or "/carla/ego_vehicle/vehicle_control_cmd",
+            "observation_topic": environment_observation_topic
+            or runtime_observation_topic
+            or "/closed_loop/ego/observation",
             "carla_host": env.get("CARLA_HOST", "127.0.0.1"),
             "carla_port": int(env.get("CARLA_PORT", "2000")),
         }
@@ -90,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             "shared_data_path": config["shared_data_path"],
             "carla_endpoint": f"{config['carla_host']}:{config['carla_port']}",
             "heartbeat_unix": time.time(),
+            "backend_health": backend.health_check() if hasattr(backend, "health_check") else None,
         }
         if args.command == "preflight":
             print(json.dumps(summary, indent=2))
@@ -105,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(summary), flush=True)
         run_backend(backend)
         return 0
-    except (AlgorithmBackendError, OSError, ValueError) as exc:
+    except (AlgorithmBackendError, OSError, RuntimeError, ValueError) as exc:
         if ready_file.exists():
             ready_file.unlink()
         print(json.dumps({"status": "failed", "error": str(exc)}), file=sys.stderr)

@@ -116,3 +116,20 @@ python -m runners.build_external_model_plugin_manifest `
   --config examples/algorithm_plugins/tcp.remote-binding.template.json `
   --output tcp.runtime_manifest.json
 ```
+
+## TransFuser++ v5 formal boundary
+
+`agents.transfuserpp_plugin:TransFuserPPPlugin` is the pinned CARLA Garage
+Leaderboard 2.0 adapter, not the older generic placeholder wrapper. It consumes
+one NuRec `camera_front`, live `lidar_top`, ego speed/pose, and route
+target/command while preserving the six-camera formal gate. Each control is
+bound to the same frame, dynamic-object digest, case/seed/run identity,
+repository revision, checkpoint/config hashes, and materialized input hashes.
+The matching CARLA PythonAPI navigation package is also hash-bound, and every
+run compares the full artifact/package/scenario/matrix/source/variant identity
+between host and sidecar.
+
+The adapter exposes perspective/BEV semantics, depth, boxes, waypoints,
+checkpoints, target-speed distribution, control, and latency. Dynamic BEV actor
+proxies are explicitly not full 3D occupancy. See
+`docs/transfuserpp_scene0061_integration.md` for remote binding and acceptance.

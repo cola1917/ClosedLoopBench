@@ -1,0 +1,440 @@
+from __future__ import annotations
+
+import math
+import re
+from copy import deepcopy
+from typing import Any, Mapping
+
+from agents.plugin_contract import canonical_sha256
+from agents.transfuserpp_contract import ALGORITHM_ID, ALGORITHM_VERSION, cuda_runtime_identity
+from runtime.scene0061_counterfactual import validate_scene0061_counterfactual_matrix
+from runtime.scene0061_variants import (
+    CASE_ACTOR_CONTROL_MODES,
+    SUPPORTED_CASES,
+    build_scene0061_variant,
+)
+
+
+FORMAL_CAMERAS = {
+    "camera_front",
+    "camera_front_left",
+    "camera_front_right",
+    "camera_back",
+    "camera_back_left",
+    "camera_back_right",
+}
+
+
+class Scene0061TransFuserPPRemoteError(ValueError):
+    """Raised when a remote run bundle would rely on an unverified binding."""
+
+
+def prepare_scene0061_transfuserpp_remote_run(
+    base_run_config: Mapping[str, Any],
+    runtime_template: Mapping[str, Any],
+    matrix: Mapping[str, Any],
+    *,
+    case_id: str,
+    seed: int,
+    event_timestamp_sec: float | None,
+    container_payload_root: str = "/sim-data",
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    frozen_matrix = deepcopy(dict(matrix))
+    validate_scene0061_counterfactual_matrix(frozen_matrix)
+    if case_id not in SUPPORTED_CASES:
+        raise Scene0061TransFuserPPRemoteError(f"unsupported focused case: {case_id}")
+    if not any(row.get("case_id") == case_id for row in frozen_matrix.get("cases") or []):
+        raise Scene0061TransFuserPPRemoteError("case is absent from the immutable matrix")
+    matrix_case = next(
+        row for row in frozen_matrix["cases"] if row.get("case_id") == case_id
+    )
+    expected_case_mode = "replay" if case_id == "S0_original_replay" else "scripted"
+    if matrix_case.get("actor_control_mode") != expected_case_mode:
+        raise Scene0061TransFuserPPRemoteError(
+            "counterfactual matrix actor_control_mode conflicts with the focused case"
+        )
+
+    scene = frozen_matrix["scene_identity"]
+    source = deepcopy(dict(base_run_config))
+    source_experiment = dict(source.get("experiment") or {})
+    source_experiment.update(
+        {
+            "scene_id": scene["scene_id"],
+            "scene_version": scene["scene_version"],
+        }
+    )
+    source["experiment"] = source_experiment
+    _validate_formal_nurec_sensors(source)
+    fixed_delta = (source.get("carla") or {}).get("fixed_delta_seconds")
+    if not isinstance(fixed_delta, (int, float)) or abs(float(fixed_delta) - 0.05) > 1e-9:
+        raise Scene0061TransFuserPPRemoteError(
+            "TransFuser++ formal run requires carla.fixed_delta_seconds=0.05 (20 Hz)"
+        )
+
+    variant, delta = build_scene0061_variant(
+        source,
+        case_id=case_id,
+        seed=seed,
+        event_timestamp_sec=event_timestamp_sec,
+    )
+    _validate_actor_control_contract(variant, case_id, expected_case_mode)
+    event_evidence = variant.get("counterfactual_event_evidence") or {}
+    if (
+        event_evidence.get("case_id") != case_id
+        or event_evidence.get("schema_version")
+        != "scene0061_counterfactual_event_evidence.v1"
+        or (
+            case_id != "S0_original_replay"
+            and event_evidence.get("status") != "source_trajectory_bound"
+        )
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            "counterfactual event evidence is absent or not source-trajectory-bound"
+        )
+    nurec = variant["nurec_runtime"]
+    camera_spec = next(
+        row for row in nurec["camera_specs"] if row.get("sensor_id") == "camera_front"
+    )
+    lidar_spec = next(
+        row for row in nurec["lidar_specs"] if row.get("sensor_id") == "lidar_top"
+    )
+    run_id = f"scene0061-tfpp-{case_id}-seed-{seed}"
+    variant["run_id"] = run_id
+    ego = dict(variant.get("ego") or {})
+    role_name = str(ego.get("role_name") or "ego_vehicle")
+    control_topic = str(
+        ego.get("control_topic") or f"/carla/{role_name}/vehicle_control_cmd"
+    )
+    observation_topic = str(
+        ego.get("observation_topic") or "/closed_loop/ego/observation"
+    )
+    ego.update(
+        {
+            "driver": "ros2_observation_control",
+            "algorithm_id": ALGORITHM_ID,
+            "algorithm_version": ALGORITHM_VERSION,
+            "control_topic": control_topic,
+            "observation_topic": observation_topic,
+            "algorithm_sensor_binding": {
+                "camera_sensor_id": "camera_front",
+                "camera_width": 800,
+                "camera_height": 450,
+                "camera_sensor_to_ego": deepcopy(camera_spec["sensor_to_ego"]),
+                "camera_sensor_to_ego_coordinate_frame": (
+                    "carla_x_forward_y_right_z_up"
+                ),
+                "camera_adaptation": (
+                    "center_crop_800x450_to_800x400_then_resize_to_model_config"
+                ),
+                "lidar_sensor_id": "lidar_top",
+                "lidar_sensor_to_ego": deepcopy(lidar_spec["sensor_to_ego"]),
+                "lidar_axis_convention": "carla_sensor",
+                "lidar_sensor_to_ego_coordinate_frame": (
+                    "carla_x_forward_y_right_z_up"
+                ),
+                "container_payload_root": str(container_payload_root),
+                "host_reference_scope": "triplicate_output_root",
+            },
+        }
+    )
+    variant["ego"] = ego
+
+    experiment = dict(variant.get("experiment") or {})
+    experiment.update(
+        {
+            "scene_id": scene["scene_id"],
+            "scene_version": scene["scene_version"],
+            "case_id": case_id,
+            "seed": seed,
+            "algorithm_id": ALGORITHM_ID,
+            "algorithm_version": ALGORITHM_VERSION,
+            "artifact_sha256": scene["artifact_sha256"],
+            "scene_package_sha256": scene["scene_package_sha256"],
+            "scenario_ir_sha256": scene["scenario_ir_sha256"],
+            "immutable_matrix_sha256": frozen_matrix["immutable_matrix_sha256"],
+            "source_run_config_sha256": delta["source_run_config_sha256"],
+        }
+    )
+    variant["experiment"] = experiment
+    relative_intermediate_root = f"transfuserpp_intermediates/{case_id}/seed_{seed}"
+    variant["algorithm_evidence_contract"] = {
+        "schema_version": "transfuserpp_acceptance_evidence_contract.v1",
+        "intermediate_root_relative": relative_intermediate_root,
+        "backend_failure_count": 0,
+        "non_initialization_fallback_count": 0,
+        "mismatched_control_count": 0,
+        "require_frame_complete_intermediate_trace": True,
+    }
+    variant["algorithm_runtime_identity"] = cuda_runtime_identity(runtime_template)
+    variant["algorithm_gpu_validation"] = {
+        "status": "pending",
+        "binding_required_before_acceptance": True,
+    }
+    variant_hash_payload = deepcopy(variant)
+    variant_hash_payload.pop("algorithm_gpu_validation", None)
+    variant_hash_payload["experiment"].pop("variant_config_sha256", None)
+    experiment["variant_config_sha256"] = canonical_sha256(variant_hash_payload)
+    experiment["identity"] = {
+        name: experiment[name]
+        for name in (
+            "artifact_sha256",
+            "scene_package_sha256",
+            "scenario_ir_sha256",
+            "immutable_matrix_sha256",
+            "source_run_config_sha256",
+            "variant_config_sha256",
+        )
+    }
+    variant["experiment"] = experiment
+    run_config_sha256 = canonical_sha256(
+        {
+            key: value
+            for key, value in variant.items()
+            if key not in {"config_identity", "algorithm_gpu_validation"}
+        }
+    )
+    variant["config_identity"] = {
+        "schema_version": "closedloopbench_run_config_identity.v1",
+        "canonical_sha256": run_config_sha256,
+        "hash_scope": "whole_run_config_excluding_config_identity_and_algorithm_gpu_validation",
+    }
+
+    runtime_config = deepcopy(dict(runtime_template))
+    runtime_config.update(
+        {
+            "schema_version": "transfuserpp_runtime_config.v1",
+            "algorithm_id": ALGORITHM_ID,
+            "intermediate_output_dir": (
+                f"{str(container_payload_root).rstrip('/')}/{relative_intermediate_root}"
+            ),
+            "control_topic": control_topic,
+            "observation_topic": observation_topic,
+            "scene_id": scene["scene_id"],
+            "case_id": case_id,
+            "seed": seed,
+            "experiment": {
+                name: experiment[name]
+                for name in (
+                    "scene_id",
+                    "scene_version",
+                    "case_id",
+                    "seed",
+                    "artifact_sha256",
+                    "scene_package_sha256",
+                    "scenario_ir_sha256",
+                    "immutable_matrix_sha256",
+                    "source_run_config_sha256",
+                    "variant_config_sha256",
+                )
+            }
+            | {"run_config_sha256": run_config_sha256},
+        }
+    )
+    runtime_config.pop("real_checkpoint_loaded", None)
+
+    bundle = {
+        "schema_version": "scene0061_transfuserpp_remote_run_bundle.v1",
+        "status": "remote_validation_required",
+        "run_id": run_id,
+        "case_id": case_id,
+        "seed": seed,
+        "run_config_sha256": run_config_sha256,
+        "runtime_config_sha256": canonical_sha256(runtime_config),
+        "delta": deepcopy(delta),
+        "counterfactual_event_evidence": deepcopy(event_evidence),
+        "counterfactual_event_evidence_sha256": canonical_sha256(event_evidence),
+        "container_mount_contract": {
+            "SIM_DATA_HOST_PATH": "triplicate_output_root",
+            "container_path": str(container_payload_root),
+            "payload_paths": "attempt-relative and remapped by the observation driver",
+        },
+        "transport_contract": {
+            "control_topic": control_topic,
+            "observation_topic": observation_topic,
+            "control_frequency_hz": 20.0,
+            "fixed_delta_seconds": 0.05,
+        },
+        "required_remote_gates": [
+            "transfuserpp_runtime_manifest_prepared",
+            "cuda_preflight_evidence_bound",
+            "real_checkpoint_loaded",
+            "nurec_lidar_coordinate_frame_verified",
+            "backend_failure_count_zero",
+            "intermediate_trace_valid",
+            "render_quality_report_identity_match",
+            "multimodal_closed_loop_passed",
+        ],
+    }
+    return variant, runtime_config, bundle
+
+
+def _validate_formal_nurec_sensors(config: Mapping[str, Any]) -> None:
+    nurec = config.get("nurec_runtime")
+    if not isinstance(nurec, Mapping):
+        raise Scene0061TransFuserPPRemoteError("base run config requires nurec_runtime")
+    if not str(nurec.get("runtime_scene_id") or "").strip():
+        raise Scene0061TransFuserPPRemoteError(
+            "formal run requires a non-empty NRE runtime_scene_id"
+        )
+    cameras = nurec.get("camera_specs")
+    if (
+        not isinstance(cameras, list)
+        or len(cameras) != 6
+        or any(not isinstance(row, Mapping) for row in cameras)
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            "formal run requires exactly six camera specification records"
+        )
+    camera_ids = [str(row.get("sensor_id") or "") for row in cameras]
+    if len(set(camera_ids)) != 6 or set(camera_ids) != FORMAL_CAMERAS:
+        raise Scene0061TransFuserPPRemoteError(
+            "formal run must contain six unique scene-0061 camera IDs"
+        )
+    for row in cameras:
+        width = row.get("width", row.get("resolution_w"))
+        height = row.get("height", row.get("resolution_h"))
+        if width != 800 or height != 450:
+            raise Scene0061TransFuserPPRemoteError(
+                f"formal camera {row.get('sensor_id')} must be 800x450"
+            )
+        _validated_sensor_to_ego(
+            row.get("sensor_to_ego"), f"formal camera {row.get('sensor_id')}"
+        )
+    lidars = nurec.get("lidar_specs")
+    if (
+        not isinstance(lidars, list)
+        or len(lidars) != 1
+        or not isinstance(lidars[0], Mapping)
+        or lidars[0].get("sensor_id") != "lidar_top"
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            "formal run requires exactly one LiDAR specification named lidar_top"
+        )
+    _validated_sensor_to_ego(lidars[0].get("sensor_to_ego"), "formal lidar_top")
+    if str(lidars[0].get("model") or "").upper() not in {"AT128", "PANDAR128"}:
+        raise Scene0061TransFuserPPRemoteError(
+            "formal lidar_top model must be AT128 or PANDAR128"
+        )
+    if nurec.get("lidar_response_coordinate_frame") != "sensor_local":
+        raise Scene0061TransFuserPPRemoteError(
+            "NRE LiDAR response coordinate frame must be explicitly verified as sensor_local"
+        )
+    if nurec.get("lidar_axis_convention") != "carla_sensor":
+        raise Scene0061TransFuserPPRemoteError(
+            "NRE LiDAR axis convention must be explicitly verified as carla_sensor"
+        )
+    if nurec.get("lidar_sensor_to_ego_coordinate_frame") != (
+        "carla_x_forward_y_right_z_up"
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            "lidar sensor_to_ego must be verified in CARLA x-forward/y-right/z-up"
+        )
+    evidence = nurec.get("lidar_coordinate_validation")
+    evidence_sha256 = str((evidence or {}).get("evidence_sha256") or "")
+    if (
+        not isinstance(evidence, Mapping)
+        or not evidence.get("evidence_path")
+        or re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is None
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            "NRE LiDAR coordinate validation evidence path and lowercase SHA-256 are required"
+        )
+
+
+def _validate_actor_control_contract(
+    config: Mapping[str, Any], case_id: str, expected_case_mode: str
+) -> None:
+    contract = config.get("actor_control_contract")
+    if (
+        not isinstance(contract, Mapping)
+        or contract.get("schema_version") != "scene0061_actor_control_contract.v1"
+        or contract.get("case_id") != case_id
+        or contract.get("case_actor_control_mode") != expected_case_mode
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            "scene-0061 actor control contract is absent or conflicts with the case"
+        )
+    expected_modes = CASE_ACTOR_CONTROL_MODES[case_id]
+    if contract.get("effective_modes_by_track") != expected_modes:
+        raise Scene0061TransFuserPPRemoteError(
+            "scene-0061 effective actor control modes are not frozen"
+        )
+    rows = contract.get("actors")
+    if not isinstance(rows, list) or len(rows) != 2:
+        raise Scene0061TransFuserPPRemoteError(
+            "scene-0061 actor control contract must contain both formal actors"
+        )
+    actors = config.get("actors") or []
+    for track_id, expected_mode in expected_modes.items():
+        actor_matches = [
+            actor
+            for actor in actors
+            if isinstance(actor, Mapping)
+            and track_id
+            in {
+                actor.get("source_track_id"),
+                actor.get("track_id"),
+                (actor.get("binding") or {}).get("nurec_track_id"),
+            }
+        ]
+        row_matches = [row for row in rows if row.get("source_track_id") == track_id]
+        if len(actor_matches) != 1 or len(row_matches) != 1:
+            raise Scene0061TransFuserPPRemoteError(
+                f"actor control contract does not uniquely bind track {track_id}"
+            )
+        actor = actor_matches[0]
+        row = row_matches[0]
+        if (
+            actor.get("closed_loop_level") != expected_mode
+            or actor.get("effective_control_mode") != expected_mode
+            or row.get("effective_mode") != expected_mode
+        ):
+            raise Scene0061TransFuserPPRemoteError(
+                f"actor control mode mismatch for track {track_id}"
+            )
+
+
+def _validated_sensor_to_ego(value: Any, label: str) -> list[float]:
+    if not isinstance(value, list) or len(value) != 16:
+        raise Scene0061TransFuserPPRemoteError(
+            f"{label} requires a complete 16-value sensor_to_ego matrix"
+        )
+    if any(
+        isinstance(item, bool)
+        or not isinstance(item, (int, float))
+        or not math.isfinite(float(item))
+        for item in value
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            f"{label} sensor_to_ego matrix must contain finite numeric values"
+        )
+    matrix = [float(item) for item in value]
+    if any(
+        abs(matrix[index] - expected) > 1e-6
+        for index, expected in zip((12, 13, 14, 15), (0.0, 0.0, 0.0, 1.0))
+    ):
+        raise Scene0061TransFuserPPRemoteError(
+            f"{label} sensor_to_ego must be a homogeneous rigid transform"
+        )
+    rotation = [matrix[0:3], matrix[4:7], matrix[8:11]]
+    for left_index, left in enumerate(rotation):
+        for right_index, right in enumerate(rotation):
+            dot = sum(a * b for a, b in zip(left, right))
+            expected = 1.0 if left_index == right_index else 0.0
+            if abs(dot - expected) > 1e-4:
+                raise Scene0061TransFuserPPRemoteError(
+                    f"{label} sensor_to_ego rotation is not orthonormal"
+                )
+    determinant = (
+        rotation[0][0]
+        * (rotation[1][1] * rotation[2][2] - rotation[1][2] * rotation[2][1])
+        - rotation[0][1]
+        * (rotation[1][0] * rotation[2][2] - rotation[1][2] * rotation[2][0])
+        + rotation[0][2]
+        * (rotation[1][0] * rotation[2][1] - rotation[1][1] * rotation[2][0])
+    )
+    if abs(determinant - 1.0) > 1e-4:
+        raise Scene0061TransFuserPPRemoteError(
+            f"{label} sensor_to_ego rotation determinant must be +1"
+        )
+    return matrix

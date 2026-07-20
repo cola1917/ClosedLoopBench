@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,6 +97,192 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
         validated = validate_acceptance_runs([_result(), _result(), _result()])
         self.assertEqual(len(validated), 3)
         self.assertTrue(all(item["cleanup_succeeded"] for item in validated))
+
+    def test_transfuserpp_clean_algorithm_evidence_is_mandatory(self):
+        from runners.run_carla_acceptance_triplicate import (
+            CarlaAcceptanceError,
+            validate_acceptance_runs,
+        )
+
+        valid = _result()
+        valid["algorithm_evidence_validation"] = {"status": "passed"}
+        accepted = validate_acceptance_runs(
+            [copy.deepcopy(valid), copy.deepcopy(valid), copy.deepcopy(valid)],
+            require_algorithm_clean=True,
+        )
+        self.assertEqual(
+            accepted[0]["algorithm_evidence_validation"]["status"], "passed"
+        )
+        invalid = copy.deepcopy(valid)
+        invalid["algorithm_evidence_validation"] = {
+            "status": "failed",
+            "problems": ["backend_failure_trace_nonempty"],
+        }
+        with self.assertRaisesRegex(CarlaAcceptanceError, "algorithm evidence"):
+            validate_acceptance_runs(
+                [copy.deepcopy(valid), invalid, copy.deepcopy(valid)],
+                require_algorithm_clean=True,
+            )
+
+    def test_transfuserpp_lidar_coordinate_file_hash_is_verified(self):
+        from agents.plugin_contract import canonical_sha256
+        from agents.transfuserpp_contract import cuda_runtime_identity
+        from runners.run_carla_acceptance_triplicate import (
+            CarlaAcceptanceError,
+            _validate_transfuserpp_external_evidence,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "lidar-coordinate.json"
+            matrix = [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 2.5,
+                0.0, 0.0, 0.0, 1.0,
+            ]
+            artifact_sha = "a" * 64
+            evidence = {
+                "schema_version": "scene0061_lidar_coordinate_validation.v1",
+                "status": "passed",
+                "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+                "runtime_scene_id": "scene-0061",
+                "artifact_sha256": artifact_sha,
+                "sensor_id": "lidar_top",
+                "device_type": "AT128",
+                "response_coordinate_frame": "sensor_local",
+                "axis_convention": "carla_sensor",
+                "sensor_to_ego_coordinate_frame": "carla_x_forward_y_right_z_up",
+                "sensor_to_ego": matrix,
+                "sensor_to_ego_sha256": canonical_sha256(matrix),
+                "live_render_lidar": {
+                    "status": "passed",
+                    "rpc_status": "ok",
+                    "payload_sha256_valid": True,
+                    "point_count": 1024,
+                    "timestamp_inside_artifact_range": True,
+                    "scene_start_matches_artifact": True,
+                },
+            }
+            path.write_text(json.dumps(evidence), encoding="utf-8")
+            config = {
+                "experiment": {
+                    "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+                    "scene_version": "formal40k-v1",
+                    "case_id": "S0_original_replay",
+                    "seed": 41,
+                    "artifact_sha256": artifact_sha,
+                    "scene_package_sha256": "2" * 64,
+                    "scenario_ir_sha256": "3" * 64,
+                    "immutable_matrix_sha256": "4" * 64,
+                    "source_run_config_sha256": "5" * 64,
+                    "variant_config_sha256": "6" * 64,
+                    "run_config_sha256": "7" * 64,
+                },
+                "nurec_runtime": {
+                    "runtime_scene_id": "scene-0061",
+                    "lidar_specs": [
+                        {
+                            "sensor_id": "lidar_top",
+                            "model": "AT128",
+                            "sensor_to_ego": matrix,
+                        }
+                    ],
+                    "lidar_coordinate_validation": {
+                        "evidence_path": str(path),
+                        "evidence_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    }
+                }
+            }
+            cuda_path = Path(directory) / "cuda-preflight.json"
+            runtime_config = {
+                "repo_revision": "b" * 40,
+                "repo_sha256": "c" * 64,
+                "upstream_reference": "refs/remotes/origin/leaderboard_2",
+                "checkpoint_sha256": "d" * 64,
+                "model_config_sha256": "e" * 64,
+                "carla_agents_sha256": "f" * 64,
+                "container_image_digest": "sha256:" + "1" * 64,
+                "device": "cuda:0",
+                "cuda_gate": {
+                    "warmup_iterations": 2,
+                    "measured_iterations": 3,
+                    "max_peak_memory_bytes": 2048,
+                    "max_p95_latency_ms": 100.0,
+                    "max_p99_latency_ms": 120.0,
+                },
+            }
+            runtime_identity = cuda_runtime_identity(runtime_config)
+            cuda_evidence = {
+                "schema_version": "transfuserpp_cuda_preflight.v1",
+                "status": "passed",
+                "real_checkpoint_loaded": True,
+                "tensor_warmup_completed": True,
+                "warmup_iterations": 2,
+                "measured_iterations": 3,
+                "latency_ms": {"samples": [10.0, 11.0, 12.0], "p95": 11.9, "p99": 11.98},
+                "cuda_peak_memory_allocated_bytes": 1024,
+                "gate": runtime_config["cuda_gate"],
+                "runtime_identity": runtime_identity,
+                "experiment": config["experiment"],
+            }
+            cuda_path.write_text(json.dumps(cuda_evidence), encoding="utf-8")
+            config["algorithm_runtime_identity"] = runtime_identity
+            config["algorithm_gpu_validation"] = {
+                "status": "bound",
+                "evidence_path": str(cuda_path),
+                "evidence_sha256": hashlib.sha256(cuda_path.read_bytes()).hexdigest(),
+            }
+            _validate_transfuserpp_external_evidence(config)
+            config["nurec_runtime"]["runtime_scene_id"] = "different-runtime-scene"
+            with self.assertRaisesRegex(CarlaAcceptanceError, "cannot be verified"):
+                _validate_transfuserpp_external_evidence(config)
+            config["nurec_runtime"]["runtime_scene_id"] = "scene-0061"
+            config["nurec_runtime"]["lidar_coordinate_validation"][
+                "evidence_sha256"
+            ] = "0" * 64
+            with self.assertRaisesRegex(CarlaAcceptanceError, "cannot be verified"):
+                _validate_transfuserpp_external_evidence(config)
+
+    def test_transfuserpp_lidar_evidence_rejects_runtime_scene_mismatch_and_duplicate_keys(self):
+        from runners.run_carla_acceptance_triplicate import (
+            CarlaAcceptanceError,
+            _validate_transfuserpp_external_evidence,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "lidar-coordinate.json"
+            path.write_text(
+                '{"schema_version":"scene0061_lidar_coordinate_validation.v1",'
+                '"status":"passed","status":"passed"}',
+                encoding="utf-8",
+            )
+            config = {
+                "experiment": {"scene_id": "scene", "artifact_sha256": "a" * 64},
+                "nurec_runtime": {
+                    "runtime_scene_id": "runtime-A",
+                    "lidar_specs": [
+                        {
+                            "sensor_id": "lidar_top",
+                            "model": "AT128",
+                            "sensor_to_ego": [1.0] * 16,
+                        }
+                    ],
+                    "lidar_coordinate_validation": {
+                        "evidence_path": str(path),
+                        "evidence_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    },
+                },
+            }
+            with self.assertRaisesRegex(CarlaAcceptanceError, "cannot be verified"):
+                _validate_transfuserpp_external_evidence(config)
+
+            path.write_text("{}", encoding="utf-8")
+            config["nurec_runtime"]["lidar_coordinate_validation"][
+                "evidence_sha256"
+            ] = hashlib.sha256(path.read_bytes()).hexdigest()
+            config["nurec_runtime"]["runtime_scene_id"] = ""
+            with self.assertRaisesRegex(CarlaAcceptanceError, "cannot be verified"):
+                _validate_transfuserpp_external_evidence(config)
 
     def test_rejects_control_only_actor_claim_and_unknown_collision_sensor(self):
         from runners.run_carla_acceptance_triplicate import (

@@ -90,6 +90,18 @@ class AlgorithmPluginContractTests(unittest.TestCase):
                 "47320987f9a49d5b00119b960f247a956773f57543982b8bfcb6da5bb3afd9ef",
             )
 
+    def test_strict_json_loader_rejects_duplicate_keys_recursively(self):
+        from agents.plugin_contract import strict_json_loads
+
+        with self.assertRaisesRegex(ValueError, "duplicate JSON object key: digest"):
+            strict_json_loads('{"outer":{"digest":"a","digest":"b"}}')
+
+    def test_strict_json_loader_rejects_duplicate_keys_recursively(self):
+        from agents.plugin_contract import strict_json_loads
+
+        with self.assertRaisesRegex(ValueError, "duplicate JSON object key: digest"):
+            strict_json_loads('{"outer":{"digest":"a","digest":"b"}}')
+
     def test_repo_identity_is_path_independent_when_revision_is_frozen(self):
         from agents.plugin_contract import build_plugin_identity
         from agents.reference_pure_pursuit import ReferencePurePursuitPlugin

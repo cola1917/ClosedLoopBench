@@ -38,6 +38,44 @@ class PluginContractError(RuntimeError):
     """Raised when an ego algorithm violates the fail-closed plugin contract."""
 
 
+def strict_json_loads(text: str) -> Any:
+    """Parse JSON while rejecting duplicate object keys at every nesting level.
+
+    Python's default decoder silently keeps the last duplicate key.  That is
+    unsafe for immutable runtime and evidence documents because the human- and
+    machine-visible values can otherwise disagree.
+    """
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"duplicate JSON object key: {key}")
+            value[key] = item
+        return value
+
+    return json.loads(text, object_pairs_hook=reject_duplicates)
+
+
+def strict_json_loads(text: str) -> Any:
+    """Parse JSON while rejecting duplicate object keys at every nesting level.
+
+    Python's default decoder silently keeps the last duplicate key.  That is
+    unsafe for immutable runtime and evidence documents because the human- and
+    machine-visible values can otherwise disagree.
+    """
+
+    def reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"duplicate JSON object key: {key}")
+            value[key] = item
+        return value
+
+    return json.loads(text, object_pairs_hook=reject_duplicates)
+
+
 def canonical_sha256(value: Any) -> str:
     encoded = json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False

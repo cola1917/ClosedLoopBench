@@ -132,3 +132,28 @@ ID and load a real upstream checkpoint.
 BasicAgent remains the first host-side baseline. TCP is the first external
 learned baseline; adding TransFuser later should require only another mounted
 plugin and derived dependency image, not a change to the closed-loop clock.
+
+## TransFuser++ sidecar
+
+`docker/compose.transfuserpp.yml` defines the dedicated v5 sidecar. It installs
+the official CARLA Garage Leaderboard 2.0 runtime subset and mounts the pinned
+repo/checkpoint plus the matching CARLA PythonAPI `agents/navigation` package
+read-only. The navigation source is hash-gated and explicitly added to the
+already loaded local `agents` package to avoid import shadowing.
+`SIM_DATA_HOST_PATH` must be the selected matrix or
+triplicate output root: NuRec input payloads are referenced relative to that
+root and remapped to `/sim-data`. Intermediate outputs are namespaced by case,
+seed, and run ID.
+
+Formal compose does not select a mutable tag. Build the Dockerfile separately,
+read the resulting `sha256:...` image ID with `docker image inspect`, and set
+that ID as `TFPP_IMAGE_DIGEST`. The service `image` and the injected runtime
+identity use the same variable, so the declared identity is the image Docker
+actually starts.
+
+A model exception publishes an error-tagged safe stop and writes
+`backend_failures/<run_id>.jsonl`; it is never counted as matched successful
+control. Formal triplicate acceptance checks this trace, non-initialization
+fallbacks/mismatches, and frame-complete hashed intermediate records.
+The complete procedure and the official-agent equivalence limitations are in
+`docs/transfuserpp_scene0061_integration.md`.

@@ -58,6 +58,42 @@ def create_backend(config):
             with self.assertRaisesRegex(AlgorithmBackendError, "checkpoint is not a file"):
                 build_runtime_config(environment)
 
+    def test_runtime_config_rejects_duplicate_json_keys(self):
+        from agents.algorithm_backend import AlgorithmBackendError
+        from runners.run_algorithm_container import build_runtime_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            environment = self._runtime(root, "")
+            runtime = root / "runtime.json"
+            runtime.write_text(
+                '{"container_image_digest":"sha256:a",'
+                '"container_image_digest":"sha256:b"}',
+                encoding="utf-8",
+            )
+            environment["ALGORITHM_RUNTIME_CONFIG"] = str(runtime)
+            with self.assertRaisesRegex(
+                AlgorithmBackendError, "duplicate JSON object key"
+            ):
+                build_runtime_config(environment)
+
+    def test_runtime_config_image_id_must_match_selected_compose_image(self):
+        from agents.algorithm_backend import AlgorithmBackendError
+        from runners.run_algorithm_container import build_runtime_config
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            environment = self._runtime(root, "")
+            runtime = root / "runtime.json"
+            runtime.write_text(
+                json.dumps({"container_image_digest": "sha256:" + "a" * 64}),
+                encoding="utf-8",
+            )
+            environment["ALGORITHM_RUNTIME_CONFIG"] = str(runtime)
+            environment["TFPP_IMAGE_DIGEST"] = "sha256:" + "b" * 64
+            with self.assertRaisesRegex(AlgorithmBackendError, "does not match"):
+                build_runtime_config(environment)
+
     def test_plugin_must_expose_predict_control(self):
         from agents.algorithm_backend import AlgorithmBackendError
         from runners.run_algorithm_container import preflight
