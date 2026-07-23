@@ -79,6 +79,15 @@ class FramePacket:
     camera_records: tuple[Mapping[str, Any], ...]
 
 
+@dataclass(frozen=True)
+class RoadGeometry:
+    """A local OpenDRIVE driving-lane centerline plus its display width."""
+
+    road_id: str
+    points: tuple[tuple[float, float], ...]
+    width_m: float
+
+
 def run_visualization(
     *,
     config_path: Path,
@@ -188,7 +197,13 @@ def run_visualization(
                 baseline=baseline,
             )
             packets.append(packet)
-            carla_canvas = _render_carla_window(packet, roads, cv2=cv2, np=np)
+            carla_canvas = _render_carla_window(
+                packet,
+                roads,
+                cv2=cv2,
+                np=np,
+                map_label=_map_display_label(map_validation),
+            )
             grid_canvas = _render_camera_window(
                 packet,
                 camera_names,
@@ -292,7 +307,11 @@ def run_visualization(
         "status": status,
         "window_contract": {
             "driver": "single FramePacket loop",
-            "carla_window": "OpenDRIVE top-down state explanation with actor bbox proxies",
+            "carla_window": (
+                "OpenDRIVE top-down state explanation with lane surfaces, actor bbox "
+                "proxies, controlled-actor trajectory, and compact state HUD"
+            ),
+            "carla_display": _carla_display_contract(),
             "nurec_window": "independent synchronized camera grid",
             "display_enabled": display,
             "rgb_bbox_overlay_enabled": overlay,
@@ -543,22 +562,24 @@ def _actor_state(
     )
 
 
-def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, float]]], *, cv2: Any, np: Any) -> Any:
-    canvas = np.zeros((900, 1440, 3), dtype=np.uint8)
-    canvas[:] = (24, 26, 31)
-    # Keep the explanatory view near the synchronized actors.  Fitting the
-    # complete scene-0061 XODR makes a 4.7 m vehicle only a few pixels wide and
-    # defeats the bbox/mapping purpose of this window.
+def _render_carla_window(
+    packet: FramePacket,
+    roads: list[RoadGeometry],
+    *,
+    cv2: Any,
+    np: Any,
+    map_label: str = "OpenDRIVE road.xodr",
+) -> Any:
+    """Render a compact world-state explainer, not a CARLA camera feed."""
+
+    canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+    canvas[:] = (24, 27, 32)
     actors = (packet.ego,) + packet.actors
-    actor_points = [(actor.x, actor.y) for actor in actors]
-    min_x = min(point[0] for point in actor_points) - 32.0
-    max_x = max(point[0] for point in actor_points) + 32.0
-    min_y = min(point[1] for point in actor_points) - 28.0
-    max_y = max(point[1] for point in actor_points) + 28.0
-    margin = 55
+    min_x, max_x, min_y, max_y = _state_viewport(actors, canvas.shape[1], canvas.shape[0])
+    margin = 26
     scale = min(
         (canvas.shape[1] - 2 * margin) / max(max_x - min_x, 1.0),
-        (canvas.shape[0] - 2 * margin - 90) / max(max_y - min_y, 1.0),
+        (canvas.shape[0] - 2 * margin) / max(max_y - min_y, 1.0),
     )
 
     def screen(point: tuple[float, float]) -> tuple[int, int]:
@@ -566,82 +587,231 @@ def _render_carla_window(packet: FramePacket, roads: list[list[tuple[float, floa
         y = int(canvas.shape[0] - margin - (point[1] - min_y) * scale)
         return x, y
 
+    # The XODR generated for scene-0061 carries one local driving lane per
+    # road. Render width-derived lane surfaces instead of an ambiguous grid of
+    # centerlines, while keeping this view deliberately non-photorealistic.
     for road in roads:
-        if len(road) > 1:
+        if len(road.points) < 2 or not _road_intersects_view(road, min_x, max_x, min_y, max_y):
+            continue
+        left, right = _offset_polyline(road.points, road.width_m / 2.0)
+        surface = np.asarray(
+            [screen(point) for point in (*left, *reversed(right))], dtype=np.int32
+        )
+        cv2.fillPoly(canvas, [surface], (52, 57, 64), cv2.LINE_AA)
+        for boundary in (left, right):
             cv2.polylines(
                 canvas,
-                [np.asarray([screen(point) for point in road], dtype=np.int32)],
+                [np.asarray([screen(point) for point in boundary], dtype=np.int32)],
                 False,
-                (85, 90, 98),
-                2,
+                (110, 116, 124),
+                1,
                 cv2.LINE_AA,
             )
-    actor_colors = []
-    for actor in actors:
-        color = (
-            (0, 170, 255)
-            if actor.controlled
-            else (110, 220, 110)
-            if actor.actor_type == "vehicle"
-            else (255, 170, 70)
-            if actor.actor_type == "pedestrian"
-            else (220, 220, 220)
+        _draw_dashed_polyline(
+            canvas,
+            [screen(point) for point in road.points],
+            color=(76, 82, 90),
+            thickness=1,
+            cv2=cv2,
+            np=np,
         )
-        actor_colors.append(color)
+
+    for actor in actors:
+        if actor.controlled and len(actor.trajectory) > 1:
+            _draw_dashed_polyline(
+                canvas,
+                [screen(point) for point in actor.trajectory],
+                color=_actor_color(actor),
+                thickness=3,
+                cv2=cv2,
+                np=np,
+            )
+
+    for actor in actors:
+        color = _actor_color(actor)
         corners = _bbox_corners(actor)
         pixel_corners = np.asarray([screen(point) for point in corners], dtype=np.int32)
-        cv2.polylines(canvas, [pixel_corners], True, color, 3, cv2.LINE_AA)
-        # A small vertical projection makes the top-down rectangle an explicit
-        # 3D bbox proxy while retaining legibility on the simple XODR view.
-        lift = max(6, int(actor.height * scale * 0.35))
-        raised_corners = pixel_corners.copy()
-        raised_corners[:, 1] -= lift
-        cv2.polylines(canvas, [raised_corners], True, color, 2, cv2.LINE_AA)
-        for lower, upper in zip(pixel_corners, raised_corners):
-            cv2.line(canvas, tuple(lower), tuple(upper), color, 2, cv2.LINE_AA)
-
-    # Keep the map itself clean: only road geometry and bboxes.  All identity,
-    # mapping and speed details live in one predictable top-left panel.
-    panel_right = 910
-    panel_bottom = 190 + 32 * len(actors)
-    cv2.rectangle(canvas, (12, 12), (panel_right, panel_bottom), (8, 10, 14), -1)
-    title = f"CARLA state | {packet.state_name} | frame {packet.frame_id} | timestamp_us {packet.timestamp_us}"
-    cv2.putText(canvas, title, (28, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.68, (245, 245, 245), 2, cv2.LINE_AA)
-    cv2.putText(
-        canvas,
-        f"sim_time {packet.simulation_time_sec:.6f} s | bbox-only map | orange = controlled",
-        (28, 72),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.54,
-        (190, 195, 205),
-        1,
-        cv2.LINE_AA,
-    )
-    for actor_index, (actor, color) in enumerate(zip(actors, actor_colors)):
-        carla_id = actor.carla_actor_id if actor.carla_actor_id is not None else "unmapped"
-        y = 106 + actor_index * 54
-        cv2.rectangle(canvas, (28, y - 15), (44, y + 1), color, -1)
-        cv2.putText(
+        cv2.fillPoly(canvas, [pixel_corners], tuple(max(0, value // 4) for value in color))
+        cv2.polylines(
             canvas,
-            f"CARLA {carla_id} | {actor.actor_type} | {actor.speed_mps:.2f} m/s",
-            (56, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.52,
+            [pixel_corners],
+            True,
             color,
-            2,
+            4 if actor.controlled else 2,
             cv2.LINE_AA,
         )
+        center = screen((actor.x, actor.y))
+        heading_tip = screen(
+            (
+                actor.x
+                + max(actor.length * 0.62, 0.8) * math.cos(_scene_yaw_radians(actor.yaw)),
+                actor.y
+                + max(actor.length * 0.62, 0.8) * math.sin(_scene_yaw_radians(actor.yaw)),
+            )
+        )
+        cv2.arrowedLine(canvas, center, heading_tip, color, 2, cv2.LINE_AA, tipLength=0.28)
+        tag = "CTRL" if actor.controlled else "EGO" if actor.track_id == "ego" else "ACTOR"
         cv2.putText(
             canvas,
-            f"NuRec track: {actor.track_id}",
-            (56, y + 22),
+            tag,
+            (center[0] + 8, center[1] - 9),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.43,
+            0.42,
             color,
             1,
             cv2.LINE_AA,
         )
+
+    controlled = next(actor for actor in packet.actors if actor.controlled)
+    _draw_carla_hud(
+        canvas,
+        packet,
+        controlled,
+        map_label=map_label,
+        controlled_color=_actor_color(controlled),
+        cv2=cv2,
+    )
     return canvas
+
+
+def _state_viewport(
+    actors: tuple[ActorState, ...], canvas_width: int, canvas_height: int
+) -> tuple[float, float, float, float]:
+    points = [(actor.x, actor.y) for actor in actors]
+    points.extend(point for actor in actors if actor.controlled for point in actor.trajectory)
+    center_x = sum(point[0] for point in points) / len(points)
+    center_y = sum(point[1] for point in points) / len(points)
+    span_x = max(max(point[0] for point in points) - min(point[0] for point in points) + 48.0, 64.0)
+    span_y = max(max(point[1] for point in points) - min(point[1] for point in points) + 42.0, 40.0)
+    aspect = canvas_width / canvas_height
+    if span_x / span_y < aspect:
+        span_x = span_y * aspect
+    else:
+        span_y = span_x / aspect
+    return (
+        center_x - span_x / 2.0,
+        center_x + span_x / 2.0,
+        center_y - span_y / 2.0,
+        center_y + span_y / 2.0,
+    )
+
+
+def _road_intersects_view(
+    road: RoadGeometry, min_x: float, max_x: float, min_y: float, max_y: float
+) -> bool:
+    padding = road.width_m
+    return any(
+        min_x - padding <= x <= max_x + padding and min_y - padding <= y <= max_y + padding
+        for x, y in road.points
+    )
+
+
+def _offset_polyline(
+    points: tuple[tuple[float, float], ...], offset_m: float
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    left: list[tuple[float, float]] = []
+    right: list[tuple[float, float]] = []
+    for index, point in enumerate(points):
+        previous = points[max(0, index - 1)]
+        following = points[min(len(points) - 1, index + 1)]
+        dx, dy = following[0] - previous[0], following[1] - previous[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            normal_x, normal_y = 0.0, 1.0
+        else:
+            normal_x, normal_y = -dy / length, dx / length
+        left.append((point[0] + normal_x * offset_m, point[1] + normal_y * offset_m))
+        right.append((point[0] - normal_x * offset_m, point[1] - normal_y * offset_m))
+    return left, right
+
+
+def _draw_dashed_polyline(
+    canvas: Any,
+    points: list[tuple[int, int]],
+    *,
+    color: tuple[int, int, int],
+    thickness: int,
+    cv2: Any,
+    np: Any,
+) -> None:
+    if len(points) < 2:
+        return
+    pattern_px = 14.0
+    for first, second in zip(points, points[1:]):
+        start = np.asarray(first, dtype=float)
+        end = np.asarray(second, dtype=float)
+        vector = end - start
+        length = float(np.linalg.norm(vector))
+        if length < 1e-6:
+            continue
+        direction = vector / length
+        distance = 0.0
+        while distance < length:
+            segment_end = min(distance + pattern_px * 0.55, length)
+            p0 = tuple(np.rint(start + direction * distance).astype(int))
+            p1 = tuple(np.rint(start + direction * segment_end).astype(int))
+            cv2.line(canvas, p0, p1, color, thickness, cv2.LINE_AA)
+            distance += pattern_px
+
+
+def _actor_color(actor: ActorState) -> tuple[int, int, int]:
+    if actor.controlled:
+        return (0, 178, 255)  # orange
+    if actor.track_id == "ego":
+        return (238, 238, 238)
+    if actor.actor_type == "pedestrian":
+        return (255, 190, 72)  # light blue
+    if actor.actor_type == "vehicle":
+        return (105, 210, 120)  # green
+    return (188, 188, 188)
+
+
+def _draw_carla_hud(
+    canvas: Any,
+    packet: FramePacket,
+    controlled: ActorState,
+    *,
+    map_label: str,
+    controlled_color: tuple[int, int, int],
+    cv2: Any,
+) -> None:
+    cv2.rectangle(canvas, (16, 16), (496, 174), (9, 11, 15), -1)
+    cv2.rectangle(canvas, (16, 16), (496, 174), (74, 80, 88), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "CARLA STATE / OPENDRIVE", (32, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (246, 246, 246), 2, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        f"frame {packet.frame_id:05d}    t {packet.simulation_time_sec:.6f} s    sync 0 us",
+        (32, 69),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.43,
+        (198, 204, 213),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(canvas, map_label, (32, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (164, 172, 183), 1, cv2.LINE_AA)
+    cv2.line(canvas, (32, 105), (480, 105), (65, 70, 78), 1, cv2.LINE_AA)
+    carla_id = controlled.carla_actor_id if controlled.carla_actor_id is not None else "unmapped"
+    cv2.rectangle(canvas, (32, 119), (46, 133), controlled_color, -1)
+    cv2.putText(
+        canvas,
+        f"CONTROLLED  CARLA {carla_id}  {controlled.actor_type}  {controlled.speed_mps:.2f} m/s",
+        (57, 132),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.46,
+        controlled_color,
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"NuRec track {controlled.track_id}    bbox {controlled.length:.1f} x {controlled.width:.1f} x {controlled.height:.1f} m",
+        (32, 157),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.37,
+        controlled_color,
+        1,
+        cv2.LINE_AA,
+    )
 
 
 def _render_camera_window(packet: FramePacket, camera_names: tuple[str, ...], *, cv2: Any, np: Any, overlay: bool) -> Any:
@@ -672,31 +842,52 @@ def _render_camera_window(packet: FramePacket, camera_names: tuple[str, ...], *,
     return canvas
 
 
-def _sample_xodr(path: Path) -> list[list[tuple[float, float]]]:
+def _sample_xodr(path: Path) -> list[RoadGeometry]:
     root = ET.parse(path).getroot()
     if root.tag != "OpenDRIVE":
         raise ValueError(f"not an OpenDRIVE document: {path}")
-    roads = []
-    for geometry in root.findall("./road/planView/geometry"):
-        x = float(geometry.attrib.get("x", 0.0))
-        y = float(geometry.attrib.get("y", 0.0))
-        heading = float(geometry.attrib.get("hdg", 0.0))
-        length = max(float(geometry.attrib.get("length", 0.0)), 0.0)
-        count = max(2, int(math.ceil(length / 2.0)) + 1)
-        arc = geometry.find("arc")
-        curvature = float(arc.attrib["curvature"]) if arc is not None else 0.0
-        points = []
-        for index in range(count):
-            distance = length * index / (count - 1)
-            if abs(curvature) < 1e-12:
-                px = x + distance * math.cos(heading)
-                py = y + distance * math.sin(heading)
-            else:
-                px = x + (math.sin(heading + curvature * distance) - math.sin(heading)) / curvature
-                py = y - (math.cos(heading + curvature * distance) - math.cos(heading)) / curvature
-            points.append((px, py))
-        roads.append(points)
+    roads: list[RoadGeometry] = []
+    for road in root.findall("./road"):
+        width_m = _driving_lane_width(road)
+        for geometry_index, geometry in enumerate(road.findall("./planView/geometry")):
+            x = float(geometry.attrib.get("x", 0.0))
+            y = float(geometry.attrib.get("y", 0.0))
+            heading = float(geometry.attrib.get("hdg", 0.0))
+            length = max(float(geometry.attrib.get("length", 0.0)), 0.0)
+            count = max(2, int(math.ceil(length / 2.0)) + 1)
+            arc = geometry.find("arc")
+            curvature = float(arc.attrib["curvature"]) if arc is not None else 0.0
+            points = []
+            for index in range(count):
+                distance = length * index / (count - 1)
+                if abs(curvature) < 1e-12:
+                    px = x + distance * math.cos(heading)
+                    py = y + distance * math.sin(heading)
+                else:
+                    px = x + (
+                        math.sin(heading + curvature * distance) - math.sin(heading)
+                    ) / curvature
+                    py = y - (
+                        math.cos(heading + curvature * distance) - math.cos(heading)
+                    ) / curvature
+                points.append((px, py))
+            roads.append(
+                RoadGeometry(
+                    road_id=f"{road.attrib.get('id', 'road')}:{geometry_index}",
+                    points=tuple(points),
+                    width_m=width_m,
+                )
+            )
     return roads
+
+
+def _driving_lane_width(road: ET.Element) -> float:
+    widths = []
+    for lane in road.findall("./lanes/laneSection/*/lane[@type='driving']"):
+        width = lane.find("width")
+        if width is not None and "a" in width.attrib:
+            widths.append(float(width.attrib["a"]))
+    return max(2.0, min(widths[0] if widths else 3.5, 8.0))
 
 
 def _validate_map_contract(
@@ -724,11 +915,44 @@ def _validate_map_contract(
     }
 
 
+def _map_display_label(map_validation: Mapping[str, Any]) -> str:
+    location = str(map_validation.get("location") or "OpenDRIVE map")
+    source = str(map_validation.get("map_source") or "scene package")
+    digest = str(map_validation.get("selected_sha256") or "")
+    suffix = digest[:8] if digest else "unhashed"
+    return f"{location} | {source} | road.xodr {suffix}"
+
+
+def _carla_display_contract() -> dict[str, Any]:
+    return {
+        "purpose": "world_state_explanation_not_camera_sensor_output",
+        "map": "width_derived_opendrive_local_driving_lanes",
+        "actors": "bbox_proxy_with_heading_arrow",
+        "controlled_actor": "orange_bbox_and_recent_dashed_reference_trace",
+        "annotations": {
+            "map": "ego_ctrl_actor_short_tags_only",
+            "hud": [
+                "frame_id",
+                "simulation_timestamp",
+                "shared_frame_sync_error_us",
+                "opendrive_location_source_hash_prefix",
+                "controlled_carla_actor_id",
+                "controlled_nurec_track_id",
+                "controlled_actor_type",
+                "controlled_speed_mps",
+                "controlled_bbox_dimensions_m",
+            ],
+        },
+        "canvas": {"width": 1280, "height": 720},
+    }
+
+
 def _bbox_corners(actor: ActorState) -> list[tuple[float, float]]:
     half_length = actor.length / 2.0
     half_width = actor.width / 2.0
-    cosine = math.cos(actor.yaw)
-    sine = math.sin(actor.yaw)
+    yaw_radians = _scene_yaw_radians(actor.yaw)
+    cosine = math.cos(yaw_radians)
+    sine = math.sin(yaw_radians)
     result = []
     for local_x, local_y in (
         (-half_length, -half_width),
@@ -743,6 +967,12 @@ def _bbox_corners(actor: ActorState) -> list[tuple[float, float]]:
             )
         )
     return result
+
+
+def _scene_yaw_radians(yaw: float) -> float:
+    """Convert the Scene IR's declared degree-valued yaw for OpenCV drawing."""
+
+    return math.radians(yaw)
 
 
 def _dynamic_delta(baseline: Mapping[str, Any], moved: Mapping[str, Any], track_id: str) -> tuple[float, float, float]:
