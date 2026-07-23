@@ -249,6 +249,10 @@ class Scene0061DualWindowTests(unittest.TestCase):
 
         self.assertEqual(contract["purpose"], "world_state_explanation_not_camera_sensor_output")
         self.assertEqual(contract["map"], "width_derived_opendrive_local_driving_lanes")
+        self.assertEqual(
+            contract["actors"],
+            "3d_bbox_proxy_with_height_projection_and_heading_arrow",
+        )
         self.assertEqual(contract["canvas"], {"width": 1280, "height": 720})
         self.assertIn("controlled_nurec_track_id", contract["annotations"]["hud"])
 

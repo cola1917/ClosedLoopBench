@@ -18,7 +18,8 @@ Every rendered CARLA state frame contains:
 
 - width-derived OpenDRIVE lane surfaces and boundaries near the synchronized
   ego and controlled actor;
-- ego, vehicle, and pedestrian proxy boxes with a heading arrow;
+- ego, vehicle, and pedestrian 3D bbox proxies with a height projection and
+  heading arrow;
 - a distinct orange controlled actor with its recent dashed reference trace;
 - a compact fixed upper-left HUD containing the frame ID, simulation timestamp,
   zero-error shared-frame contract, map location/source/hash prefix, CARLA

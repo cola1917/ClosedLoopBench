@@ -640,6 +640,14 @@ def _render_carla_window(
             4 if actor.controlled else 2,
             cv2.LINE_AA,
         )
+        # The view is top-down, so show the cuboid height as a subtle upward
+        # extrusion instead of pretending this is a photorealistic CARLA view.
+        lift = max(5, min(16, int(actor.height * scale * 0.20)))
+        roof_corners = pixel_corners.copy()
+        roof_corners[:, 1] -= lift
+        cv2.polylines(canvas, [roof_corners], True, color, 1, cv2.LINE_AA)
+        for base, roof in zip(pixel_corners, roof_corners):
+            cv2.line(canvas, tuple(base), tuple(roof), color, 1, cv2.LINE_AA)
         center = screen((actor.x, actor.y))
         heading_tip = screen(
             (
@@ -927,7 +935,7 @@ def _carla_display_contract() -> dict[str, Any]:
     return {
         "purpose": "world_state_explanation_not_camera_sensor_output",
         "map": "width_derived_opendrive_local_driving_lanes",
-        "actors": "bbox_proxy_with_heading_arrow",
+        "actors": "3d_bbox_proxy_with_height_projection_and_heading_arrow",
         "controlled_actor": "orange_bbox_and_recent_dashed_reference_trace",
         "annotations": {
             "map": "ego_ctrl_actor_short_tags_only",
