@@ -230,6 +230,10 @@ class Scene0061DualWindowTests(unittest.TestCase):
             self.assertIn("line", names)
             self.assertTrue(any("CARLA STATE / OPENDRIVE" in value for value in text))
             self.assertTrue(any("CONTROLLED  CARLA 29" in value for value in text))
+            self.assertTrue(any("CARLA 25 | ego | 2.00 m/s" in value for value in text))
+            self.assertTrue(
+                any("NuRec c1958768d48640948f6053d04cffd35b" in value for value in text)
+            )
 
     def test_map_display_label_carries_location_source_and_identity_prefix(self) -> None:
         label = _map_display_label(
@@ -255,6 +259,10 @@ class Scene0061DualWindowTests(unittest.TestCase):
         )
         self.assertEqual(contract["canvas"], {"width": 1280, "height": 720})
         self.assertIn("controlled_nurec_track_id", contract["annotations"]["hud"])
+        self.assertEqual(
+            contract["annotations"]["bbox_labels"],
+            ["carla_actor_id", "nurec_track_id", "actor_type", "speed_mps"],
+        )
 
 
 if __name__ == "__main__":

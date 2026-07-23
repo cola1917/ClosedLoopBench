@@ -669,6 +669,13 @@ def _render_carla_window(
             1,
             cv2.LINE_AA,
         )
+        _draw_actor_bbox_label(
+            canvas,
+            actor,
+            pixel_corners,
+            color=color,
+            cv2=cv2,
+        )
 
     controlled = next(actor for actor in packet.actors if actor.controlled)
     _draw_carla_hud(
@@ -772,6 +779,48 @@ def _actor_color(actor: ActorState) -> tuple[int, int, int]:
     if actor.actor_type == "vehicle":
         return (105, 210, 120)  # green
     return (188, 188, 188)
+
+
+def _draw_actor_bbox_label(
+    canvas: Any,
+    actor: ActorState,
+    pixel_corners: Any,
+    *,
+    color: tuple[int, int, int],
+    cv2: Any,
+) -> None:
+    """Draw a compact identity label next to a key actor's projected bbox."""
+
+    carla_id = actor.carla_actor_id if actor.carla_actor_id is not None else "unmapped"
+    lines = (
+        f"CARLA {carla_id} | {actor.actor_type} | {actor.speed_mps:.2f} m/s",
+        f"NuRec {actor.track_id}",
+    )
+    label_width, label_height = 308, 43
+    x = min(int(pixel_corners[:, 0].max()) + 10, canvas.shape[1] - label_width - 8)
+    y = max(int(pixel_corners[:, 1].min()) - label_height - 8, 8)
+    cv2.rectangle(canvas, (x, y), (x + label_width, y + label_height), (9, 11, 15), -1)
+    cv2.rectangle(canvas, (x, y), (x + label_width, y + label_height), color, 1, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        lines[0],
+        (x + 8, y + 17),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.34,
+        color,
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        lines[1],
+        (x + 8, y + 35),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.31,
+        color,
+        1,
+        cv2.LINE_AA,
+    )
 
 
 def _draw_carla_hud(
@@ -939,6 +988,12 @@ def _carla_display_contract() -> dict[str, Any]:
         "controlled_actor": "orange_bbox_and_recent_dashed_reference_trace",
         "annotations": {
             "map": "ego_ctrl_actor_short_tags_only",
+            "bbox_labels": [
+                "carla_actor_id",
+                "nurec_track_id",
+                "actor_type",
+                "speed_mps",
+            ],
             "hud": [
                 "frame_id",
                 "simulation_timestamp",
