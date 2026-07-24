@@ -174,7 +174,7 @@ def build_basic_agent_plan(
             "multimodal_sensor_required": bool(multimodal_sensor_required),
             "actor_vertical_alignment_max_error_m": float(
                 (run_config.get("runtime") or {}).get(
-                    "actor_vertical_alignment_max_error_m", 2.0
+                    "actor_vertical_alignment_max_error_m", 0.25
                 )
             ),
         },

@@ -380,6 +380,13 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertTrue(events[-2].startswith("world.apply_settings.sync=False"))
         self.assertEqual(events[-1], "vehicle.destroy")
 
+    def test_plan_uses_strict_default_vertical_alignment_threshold(self):
+        plan = self._plan()
+
+        self.assertEqual(
+            plan["runtime"]["actor_vertical_alignment_max_error_m"], 0.25
+        )
+
     def test_source_initial_velocity_is_applied_in_carla_coordinates(self):
         from runners.run_carla_basic_agent import _set_initial_vehicle_velocity
 
