@@ -860,6 +860,58 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertAlmostEqual(spawn_attempts[1].rotation.yaw, 45.0)
         self.assertEqual(plan["ego"]["spawn"]["x"], 1.0)
 
+    def test_bound_vehicle_bbox_center_spawn_is_converted_to_actor_origin(self):
+        from runners.run_carla_basic_agent import _spawn_actor_vehicle
+
+        class CenterReferenceVehicle(FakeVehicle):
+            def __init__(self, events):
+                super().__init__(events, label="actor.center-bound")
+                self.set_transforms = []
+
+            def set_transform(self, transform):
+                self.events.append("actor.center-bound.set_transform")
+                self.set_transforms.append(transform)
+                self.transforms = [transform]
+                self.transform_reads = 0
+
+        class CenterReferenceWorld(FakeWorld):
+            def __init__(self, events):
+                super().__init__(events)
+                self.center_vehicle = CenterReferenceVehicle(events)
+
+            def try_spawn_actor(self, _blueprint, transform):
+                self.center_vehicle.transforms = [transform]
+                self.center_vehicle.transform_reads = 0
+                return self.center_vehicle
+
+        events = []
+        actor = {
+            "actor_id": "center-bound",
+            "type": "vehicle",
+            "initial_state": {
+                "x": 3.0,
+                "y": 4.0,
+                "z": 1.0,
+                "yaw": 0.0,
+                "speed_mps": 0.0,
+            },
+            "binding": {"sensor_pose_reference": "carla_bounding_box_center"},
+        }
+        world = CenterReferenceWorld(events)
+        vehicle = _spawn_actor_vehicle(
+            FakeCarlaModule(events), world, actor, "center-bound"
+        )
+
+        self.assertIs(vehicle, world.center_vehicle)
+        self.assertEqual(len(vehicle.set_transforms), 1)
+        corrected = vehicle.set_transforms[0]
+        self.assertAlmostEqual(corrected.location.x, 2.5)
+        self.assertAlmostEqual(corrected.location.y, -4.0)
+        self.assertAlmostEqual(corrected.location.z, 0.25)
+        evidence = actor["_runtime_spawn_evidence"]
+        self.assertEqual(evidence["strategy"], "source_bbox_center_to_actor_origin")
+        self.assertAlmostEqual(evidence["reference_origin_adjustment_m"]["z"], -0.75)
+
 
 if __name__ == "__main__":
     unittest.main()

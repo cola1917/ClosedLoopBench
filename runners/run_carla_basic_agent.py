@@ -1501,11 +1501,16 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
     transform = _carla_transform(carla_module, actor.get("initial_state") or {})
     vehicle = _try_spawn(world, blueprint, transform)
     if vehicle is not None:
-        actor["_runtime_spawn_evidence"] = {
+        spawn_evidence = {
             "strategy": "source_transform",
             "source_xy_yaw_preserved": True,
             "vertical_adjustment_m": 0.0,
         }
+        if actor_kind == "vehicle":
+            spawn_evidence = _align_bound_vehicle_spawn_reference(
+                carla_module, actor, vehicle, spawn_evidence
+            )
+        actor["_runtime_spawn_evidence"] = spawn_evidence
         if actor_kind == "vehicle":
             initial_state = actor.get("initial_state") or {}
             _set_initial_vehicle_velocity(
@@ -1545,6 +1550,63 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
                 return vehicle
 
     raise RuntimeError(f"failed to spawn interactive {actor_kind} actor {actor_id}")
+
+
+def _align_bound_vehicle_spawn_reference(
+    carla_module: Any,
+    actor: Mapping[str, Any],
+    vehicle: Any,
+    evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Align a bound vehicle's CARLA origin to its source bbox-centre pose.
+
+    NuRec vehicle tracks are expressed at the cuboid centre, while CARLA
+    vehicle transforms are expressed at the blueprint actor origin.  Spawning a
+    bound vehicle directly at a source centre therefore double-counts the
+    blueprint's bounding-box offset.  The initial high spawn remains useful for
+    CARLA collision admission; after admission, move only the actor origin by
+    the measured world-space delta so its declared render reference equals the
+    source initial pose.
+    """
+
+    binding = actor.get("binding") or {}
+    reference = str(binding.get("sensor_pose_reference") or "")
+    if reference != "carla_bounding_box_center":
+        return dict(evidence)
+    if not hasattr(vehicle, "set_transform"):
+        return {
+            **dict(evidence),
+            "reference_origin_alignment": "unavailable_no_set_transform",
+        }
+
+    initial_state = _pose(dict(actor.get("initial_state") or {}))
+    transform, actor_origin_pose = _vehicle_transform_and_pose(vehicle)
+    render_pose, render_reference = _bound_actor_render_pose(
+        dict(actor),
+        vehicle,
+        transform=transform,
+        actor_pose=actor_origin_pose,
+    )
+    if render_reference != "carla_bounding_box_center":
+        raise RuntimeError(
+            f"bound vehicle {actor.get('actor_id', 'actor')} render reference changed unexpectedly"
+        )
+    correction = {
+        axis: float(initial_state[axis]) - float(render_pose[axis])
+        for axis in ("x", "y", "z")
+    }
+    if any(abs(value) > 1e-9 for value in correction.values()):
+        corrected_origin = dict(actor_origin_pose)
+        for axis, value in correction.items():
+            corrected_origin[axis] = float(corrected_origin[axis]) + value
+        vehicle.set_transform(_carla_transform(carla_module, corrected_origin))
+    return {
+        **dict(evidence),
+        "strategy": "source_bbox_center_to_actor_origin",
+        "render_reference_preserved": True,
+        "reference_origin_adjustment_m": correction,
+        "vertical_adjustment_m": correction["z"],
+    }
 
 
 def _sidewalk_walker_retry_transform(
