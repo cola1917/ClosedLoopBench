@@ -12,8 +12,13 @@ environment, then run:
 python runners/run_carla_acceptance_triplicate.py `
   --run-config outputs/scene-1077/carla_run_config.json `
   --output-root E:/sim-data/runs/basic-agent-triplicate `
+  --carla-python-api C:/CARLA/PythonAPI/carla `
   --host 127.0.0.1 --port 2000 --max-ticks 600
 ```
+
+The BasicAgent import is preflighted before any attempt directory is created.
+The explicit path must contain `agents/navigation/basic_agent.py`; a module
+loaded from another CARLA tree is rejected.
 
 The output root must not already contain any of the three attempt directories.
 Every attempt fails closed unless all of the following are present:

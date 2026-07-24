@@ -17,7 +17,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from runners.run_carla_basic_agent import build_basic_agent_plan, run_basic_agent
+from runners.run_carla_basic_agent import (
+    _import_basic_agent_cls,
+    build_basic_agent_plan,
+    run_basic_agent,
+)
 from runners.validate_multimodal_closed_loop import (
     MultimodalClosedLoopError,
     validate_multimodal_closed_loop_result,
@@ -38,6 +42,7 @@ def run_acceptance_triplicate(
     require_multimodal: bool = False,
     opendrive_path: str | None = None,
     ego_driver: str = "basic_agent",
+    carla_python_api_path: str | Path | None = None,
     sensor_frame_handler_factory: Callable[
         [dict[str, Any], Path], Callable[[dict[str, Any]], dict[str, Any]]
     ]
@@ -48,6 +53,13 @@ def run_acceptance_triplicate(
         raise CarlaAcceptanceError(
             "--require-multimodal needs a real sensor frame handler factory"
         )
+    if ego_driver == "basic_agent" and execute is run_basic_agent:
+        try:
+            _import_basic_agent_cls(carla_python_api_path)
+        except Exception as exc:
+            raise CarlaAcceptanceError(
+                f"CARLA BasicAgent preflight failed before attempt creation: {exc}"
+            ) from exc
     output_root = Path(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
     transfuserpp_required = _is_transfuserpp_run(run_config)
@@ -495,6 +507,11 @@ def main(argv=None) -> int:
     parser.add_argument("--opendrive", type=Path)
     parser.add_argument("--ego-driver", default="basic_agent")
     parser.add_argument(
+        "--carla-python-api",
+        type=Path,
+        help="CARLA PythonAPI/carla directory containing agents/navigation/basic_agent.py.",
+    )
+    parser.add_argument(
         "--sensor-handler-factory",
         help="Python module:callable returning handler(run_config, attempt_dir).",
     )
@@ -520,6 +537,7 @@ def main(argv=None) -> int:
             require_multimodal=args.require_multimodal,
             opendrive_path=str(args.opendrive) if args.opendrive else None,
             ego_driver=args.ego_driver,
+            carla_python_api_path=args.carla_python_api,
             sensor_frame_handler_factory=handler_factory,
         )
     except (CarlaAcceptanceError, FileExistsError, ImportError, OSError, ValueError) as exc:

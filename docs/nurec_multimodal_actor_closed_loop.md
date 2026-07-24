@@ -202,9 +202,15 @@ python -m runners.run_carla_acceptance_triplicate \
   --run-config /path/to/run_config.json \
   --output-root /path/to/acceptance \
   --opendrive /path/to/scene.xodr \
+  --carla-python-api /path/to/CARLA/PythonAPI/carla \
   --sensor-handler-factory adapters.nurec_260_client:build_nurec_260_handler \
   --require-multimodal
 ```
+
+For `--ego-driver basic_agent`, the runner validates that the requested CARLA
+tree provides `agents/navigation/basic_agent.py` and imports it before creating
+the first attempt directory. This avoids three repeated runtime failures when
+ClosedLoopBench's own `agents` package shadows CARLA's package.
 
 The following items still require the NVIDIA/CARLA server and cannot be claimed
 from local tests:

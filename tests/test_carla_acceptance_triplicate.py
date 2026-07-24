@@ -1,9 +1,12 @@
 import copy
 import hashlib
+import importlib
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 def _result(status="interactive_closed_loop"):
@@ -24,6 +27,79 @@ def _result(status="interactive_closed_loop"):
 
 
 class CarlaAcceptanceTriplicateTests(unittest.TestCase):
+    def test_import_basic_agent_from_explicit_carla_python_api(self):
+        from runners.run_carla_basic_agent import _import_basic_agent_cls
+
+        agents_package = importlib.import_module("agents")
+        original_navigation = sys.modules.get("agents.navigation")
+        original_basic_agent = sys.modules.get("agents.navigation.basic_agent")
+        with tempfile.TemporaryDirectory() as directory:
+            python_api = Path(directory) / "CARLA" / "PythonAPI" / "carla"
+            navigation = python_api / "agents" / "navigation"
+            navigation.mkdir(parents=True)
+            (navigation / "__init__.py").write_text("", encoding="utf-8")
+            (navigation / "basic_agent.py").write_text(
+                "class BasicAgent:\n    pass\n",
+                encoding="utf-8",
+            )
+            appended_path = str((python_api / "agents").resolve())
+            try:
+                basic_agent_cls = _import_basic_agent_cls(python_api)
+                self.assertEqual(basic_agent_cls.__name__, "BasicAgent")
+                module_path = Path(sys.modules[basic_agent_cls.__module__].__file__).resolve()
+                self.assertIn((python_api / "agents").resolve(), module_path.parents)
+            finally:
+                sys.modules.pop("agents.navigation.basic_agent", None)
+                sys.modules.pop("agents.navigation", None)
+                while appended_path in agents_package.__path__:
+                    agents_package.__path__.remove(appended_path)
+                if original_navigation is not None:
+                    sys.modules["agents.navigation"] = original_navigation
+                if original_basic_agent is not None:
+                    sys.modules["agents.navigation.basic_agent"] = original_basic_agent
+                importlib.invalidate_caches()
+
+    def test_import_basic_agent_rejects_missing_explicit_path(self):
+        from runners.run_carla_basic_agent import _import_basic_agent_cls
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ImportError, "agents.navigation.basic_agent.py"):
+                _import_basic_agent_cls(Path(directory))
+
+    def test_basic_agent_preflight_fails_before_output_creation(self):
+        from runners.run_carla_acceptance_triplicate import (
+            CarlaAcceptanceError,
+            run_acceptance_triplicate,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            output_root = Path(directory) / "new-output"
+            with mock.patch(
+                "runners.run_carla_acceptance_triplicate._import_basic_agent_cls",
+                side_effect=ImportError("missing CARLA agents"),
+            ):
+                with self.assertRaisesRegex(CarlaAcceptanceError, "before attempt creation"):
+                    run_acceptance_triplicate(
+                        {"scenario_id": "scene-triplicate"},
+                        output_root,
+                    )
+            self.assertFalse(output_root.exists())
+
+    def test_custom_execute_skips_basic_agent_preflight(self):
+        from runners.run_carla_acceptance_triplicate import run_acceptance_triplicate
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch(
+                "runners.run_carla_acceptance_triplicate._import_basic_agent_cls",
+                side_effect=AssertionError("preflight should be skipped"),
+            ):
+                result = run_acceptance_triplicate(
+                    {"scenario_id": "scene-triplicate"},
+                    Path(directory),
+                    execute=lambda _plan: _result(),
+                )
+        self.assertEqual(result["status"], "passed")
+
     def test_triplicate_carries_formal_map_driver_and_injected_handler(self):
         from runners.run_carla_acceptance_triplicate import run_acceptance_triplicate
 

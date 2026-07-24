@@ -1007,7 +1007,54 @@ def _run_basic_agent_loop(
         )
 
 
-def _import_basic_agent_cls() -> Any:
+def _import_basic_agent_cls(
+    carla_python_api_path: str | Path | None = None,
+) -> Any:
+    if carla_python_api_path is not None:
+        python_api_path = Path(carla_python_api_path).expanduser().resolve()
+        basic_agent_path = python_api_path / "agents" / "navigation" / "basic_agent.py"
+        if not basic_agent_path.is_file():
+            raise ImportError(
+                "CARLA BasicAgent module does not exist at "
+                f"{basic_agent_path}; expected --carla-python-api to point to "
+                "CARLA/PythonAPI/carla"
+            )
+
+        agents_path = (python_api_path / "agents").resolve()
+        agents_package = importlib.import_module("agents")
+        package_path = getattr(agents_package, "__path__", None)
+        if package_path is None:
+            raise ImportError("loaded agents package has no package search path")
+        if str(agents_path) not in package_path:
+            package_path.append(str(agents_path))
+        importlib.invalidate_caches()
+
+        for module_name in (
+            "agents.navigation",
+            "agents.navigation.basic_agent",
+        ):
+            cached = sys.modules.get(module_name)
+            if cached is None:
+                continue
+            cached_path = Path(str(getattr(cached, "__file__", ""))).resolve()
+            if agents_path not in cached_path.parents:
+                raise ImportError(
+                    f"{module_name} is already loaded from {cached_path}, outside "
+                    f"the requested CARLA agents tree {agents_path}"
+                )
+
+        module = importlib.import_module("agents.navigation.basic_agent")
+        module_path = Path(str(getattr(module, "__file__", ""))).resolve()
+        if agents_path not in module_path.parents:
+            raise ImportError(
+                f"CARLA BasicAgent resolved to {module_path}, outside the requested "
+                f"agents tree {agents_path}"
+            )
+        basic_agent_cls = getattr(module, "BasicAgent", None)
+        if basic_agent_cls is None or not callable(basic_agent_cls):
+            raise ImportError(f"{module_path} does not export a callable BasicAgent")
+        return basic_agent_cls
+
     # ClosedLoopBench has a local agents package, which can shadow CARLA's
     # PythonAPI agents.navigation package. Try the normal import first, then
     # retry with the project root temporarily removed from sys.path.
