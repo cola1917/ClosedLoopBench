@@ -205,6 +205,7 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
         )
         self.assertTrue(all(plan["ego"]["driver"] == "topology_follower" for plan, _ in plans))
         self.assertTrue(all(plan["limits"]["max_ticks"] == 1200 for plan, _ in plans))
+        self.assertTrue(all(plan["runtime"]["snap_to_map"] for plan, _ in plans))
 
     def test_real_multimodal_triplicate_requires_handler_factory(self):
         from runners.run_carla_acceptance_triplicate import (

@@ -136,7 +136,7 @@ def _wire_fixed64(field_number, value):
 
 
 class NuRec260ClientTests(unittest.TestCase):
-    def _client(self, stub=None):
+    def _client(self, stub=None, **kwargs):
         from adapters.nurec_260_client import NuRec260Client
 
         return NuRec260Client(
@@ -153,6 +153,7 @@ class NuRec260ClientTests(unittest.TestCase):
                     resolution_h=900,
                 )
             },
+            **kwargs,
         )
 
     def test_dispatches_real_260_shapes_with_one_time_window_and_actor_pose(self):
@@ -199,6 +200,54 @@ class NuRec260ClientTests(unittest.TestCase):
             ),
             (3_000_000, 3_000_001),
         )
+
+    def test_hashed_native_scan_alignment_is_shared_by_rgb_and_lidar(self):
+        stub = _Stub()
+        client = self._client(
+            stub,
+            native_scan_manifest={
+                "schema_version": "nurec_native_lidar_scan_manifest.v1",
+                "runtime_scene_id": "scene-0061",
+                "scene_start_us": 1_000_000,
+                "artifact_sha256": "a" * 64,
+                "scan_windows_us": [
+                    [3_040_000, 3_090_000],
+                    [3_090_100, 3_140_100],
+                ],
+            },
+            native_scan_manifest_sha256="b" * 64,
+            native_scan_max_midpoint_error_us=25_000,
+        )
+
+        evidence = client.dispatch_frame(_frame())
+
+        self.assertEqual(evidence["status"], "passed")
+        alignment = evidence["dispatch"]["temporal_alignment"]
+        self.assertEqual(alignment["native_scan_index"], 0)
+        self.assertEqual(alignment["midpoint_error_us"], 10_000)
+        self.assertTrue(
+            all(
+                (request.frame_start_us, request.frame_end_us)
+                == (3_040_000, 3_090_000)
+                for _, request, _ in stub.calls
+            )
+        )
+
+    def test_native_scan_alignment_fails_closed_above_threshold(self):
+        client = self._client(
+            native_scan_manifest={
+                "schema_version": "nurec_native_lidar_scan_manifest.v1",
+                "runtime_scene_id": "scene-0061",
+                "scene_start_us": 1_000_000,
+                "artifact_sha256": "a" * 64,
+                "scan_windows_us": [[3_040_000, 3_090_000]],
+            },
+            native_scan_manifest_sha256="b" * 64,
+            native_scan_max_midpoint_error_us=9_999,
+        )
+
+        with self.assertRaisesRegex(Exception, "exceeds midpoint threshold"):
+            client.dispatch_frame(_frame())
 
     def test_wrong_rgb_dimensions_fail_the_frame_closed(self):
         evidence = self._client(_Stub(rgb_width=800, rgb_height=450)).dispatch_frame(

@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from adapters.nurec_grpc_dispatch import dispatch_nurec_multimodal_frame
-from adapters.nurec_multimodal import NuRecMultimodalError
+from adapters.nurec_multimodal import (
+    NuRecMultimodalError,
+    validate_nurec_multimodal_evidence,
+)
 from adapters.nurec_runtime_handler import make_nurec_sensor_frame_handler
 
 
@@ -40,6 +43,9 @@ class NuRec260Client:
         payload_reference_root: str | Path | None = None,
         lidar_response_coordinate_frame: str = "unverified",
         lidar_axis_convention: str = "unverified",
+        native_scan_manifest: Mapping[str, Any] | None = None,
+        native_scan_manifest_sha256: str | None = None,
+        native_scan_max_midpoint_error_us: int = 25_000,
     ) -> None:
         if not target or not runtime_scene_id:
             raise NuRecMultimodalError("NRE target and runtime_scene_id are required")
@@ -83,25 +89,87 @@ class NuRec260Client:
         )
         self._lidar_response_coordinate_frame = str(lidar_response_coordinate_frame)
         self._lidar_axis_convention = str(lidar_axis_convention)
+        self._native_scan_alignment = _validate_native_scan_manifest(
+            native_scan_manifest,
+            manifest_sha256=native_scan_manifest_sha256,
+            runtime_scene_id=self.runtime_scene_id,
+            scene_start_us=self.scene_start_us,
+            max_midpoint_error_us=native_scan_max_midpoint_error_us,
+        )
+        self._active_temporal_alignment: dict[str, Any] | None = None
 
     def close(self) -> None:
         if self._channel is not None and hasattr(self._channel, "close"):
             self._channel.close()
 
     def dispatch_frame(self, frame: Mapping[str, Any]) -> dict[str, Any]:
-        evidence = dispatch_nurec_multimodal_frame(
-            frame,
-            encode_rgb=self.encode_rgb,
-            encode_lidar=self.encode_lidar,
-            render_rgb=self.render_rgb,
-            render_lidar=self.render_lidar,
-            response_bytes=self.response_bytes,
-            response_inspector=self.inspect_response,
-        )
+        if self._active_temporal_alignment is not None:
+            raise NuRecMultimodalError("NuRec client does not support concurrent dispatch")
+        alignment = self._select_native_scan_alignment(frame)
+        self._active_temporal_alignment = alignment
+        try:
+            evidence = dispatch_nurec_multimodal_frame(
+                frame,
+                encode_rgb=self.encode_rgb,
+                encode_lidar=self.encode_lidar,
+                render_rgb=self.render_rgb,
+                render_lidar=self.render_lidar,
+                response_bytes=self.response_bytes,
+                response_inspector=self.inspect_response,
+            )
+        finally:
+            self._active_temporal_alignment = None
         evidence["dispatch"]["runtime_scene_id"] = self.runtime_scene_id
         evidence["dispatch"]["canonical_scene_id"] = frame.get("scene_id")
         evidence["dispatch"]["nre_api"] = "SensorsimService/26.04"
+        if alignment is not None:
+            evidence["dispatch"]["temporal_alignment"] = alignment
+        validate_nurec_multimodal_evidence(evidence)
         return evidence
+
+    def _select_native_scan_alignment(
+        self, frame: Mapping[str, Any]
+    ) -> dict[str, Any] | None:
+        config = self._native_scan_alignment
+        if config is None:
+            return None
+        interval = frame.get("pose_interval_sec")
+        if not isinstance(interval, Mapping):
+            raise NuRecMultimodalError("NuRec frame requires pose_interval_sec")
+        logical_start = self.scene_start_us + int(
+            round(float(interval["start"]) * 1_000_000)
+        )
+        logical_end = self.scene_start_us + int(
+            round(float(interval["end"]) * 1_000_000)
+        )
+        if logical_start >= logical_end:
+            raise NuRecMultimodalError("NuRec logical frame window is not positive")
+        logical_midpoint = (logical_start + logical_end) // 2
+        index, window = min(
+            enumerate(config["scan_windows_us"]),
+            key=lambda item: abs((item[1][0] + item[1][1]) // 2 - logical_midpoint),
+        )
+        wire_start, wire_end = window
+        midpoint_error = abs((wire_start + wire_end) // 2 - logical_midpoint)
+        max_error = config["max_midpoint_error_us"]
+        if midpoint_error > max_error:
+            raise NuRecMultimodalError(
+                "nearest native LiDAR scan exceeds midpoint threshold: "
+                f"error_us={midpoint_error}, max_us={max_error}"
+            )
+        return {
+            "policy": "nearest_native_lidar_scan_midpoint",
+            "source": "hashed_native_scan_manifest",
+            "manifest_sha256": config["manifest_sha256"],
+            "artifact_sha256": config["artifact_sha256"],
+            "native_scan_index": index,
+            "logical_start_us": logical_start,
+            "logical_end_us": logical_end,
+            "wire_start_us": wire_start,
+            "wire_end_us": wire_end,
+            "midpoint_error_us": midpoint_error,
+            "max_midpoint_error_us": max_error,
+        }
 
     def query_runtime_inventory(self) -> dict[str, Any]:
         """Query the live service before accepting any render evidence."""
@@ -322,6 +390,16 @@ class NuRec260Client:
         end = self.scene_start_us + int(round(float(interval["end"]) * 1_000_000))
         if start < self.scene_start_us:
             raise NuRecMultimodalError("NRE pose interval starts before scene_start_us")
+        alignment = self._active_temporal_alignment
+        if alignment is not None:
+            if (start, end) != (
+                alignment["logical_start_us"],
+                alignment["logical_end_us"],
+            ):
+                raise NuRecMultimodalError(
+                    "NuRec frame sensors do not share one logical time window"
+                )
+            return alignment["wire_start_us"], alignment["wire_end_us"]
         return start, max(start + 1, end)
 
     def _pose_pair(self, pair: Mapping[str, Any]) -> Any:
@@ -365,6 +443,9 @@ def build_nurec_260_client(
         resolved = str(Path(str(runtime_path)).resolve())
         if resolved not in sys.path:
             sys.path.insert(0, resolved)
+    manifest, manifest_sha256, max_midpoint_error_us = _load_native_scan_reference(
+        config.get("native_scan_manifest")
+    )
     return NuRec260Client(
         target=str(config.get("target") or "127.0.0.1:46435"),
         runtime_scene_id=str(config.get("runtime_scene_id") or ""),
@@ -376,6 +457,9 @@ def build_nurec_260_client(
             config.get("lidar_response_coordinate_frame") or "unverified"
         ),
         lidar_axis_convention=str(config.get("lidar_axis_convention") or "unverified"),
+        native_scan_manifest=manifest,
+        native_scan_manifest_sha256=manifest_sha256,
+        native_scan_max_midpoint_error_us=max_midpoint_error_us,
     )
 
 
@@ -415,6 +499,78 @@ def _load_json(config: Mapping[str, Any], name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise NuRecMultimodalError(f"nurec_runtime.{name} must contain a JSON object")
     return value
+
+
+def _load_native_scan_reference(
+    reference: Any,
+) -> tuple[dict[str, Any] | None, str | None, int]:
+    if reference is None:
+        return None, None, 25_000
+    if not isinstance(reference, Mapping):
+        raise NuRecMultimodalError("nurec_runtime.native_scan_manifest must be an object")
+    path = Path(str(reference.get("path") or ""))
+    expected_sha256 = str(reference.get("sha256") or "")
+    if not path.is_file() or not _is_sha256(expected_sha256):
+        raise NuRecMultimodalError(
+            "native_scan_manifest requires an existing path and lowercase SHA-256"
+        )
+    body = path.read_bytes()
+    if hashlib.sha256(body).hexdigest() != expected_sha256:
+        raise NuRecMultimodalError("native_scan_manifest SHA-256 mismatch")
+    try:
+        value = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise NuRecMultimodalError("native_scan_manifest is not strict JSON") from exc
+    if not isinstance(value, dict):
+        raise NuRecMultimodalError("native_scan_manifest must contain a JSON object")
+    max_error = int(reference.get("max_midpoint_error_us", 25_000))
+    return value, expected_sha256, max_error
+
+
+def _validate_native_scan_manifest(
+    manifest: Mapping[str, Any] | None,
+    *,
+    manifest_sha256: str | None,
+    runtime_scene_id: str,
+    scene_start_us: int,
+    max_midpoint_error_us: int,
+) -> dict[str, Any] | None:
+    if manifest is None:
+        return None
+    if manifest.get("schema_version") != "nurec_native_lidar_scan_manifest.v1":
+        raise NuRecMultimodalError("unsupported native LiDAR scan manifest")
+    if manifest.get("runtime_scene_id") != runtime_scene_id:
+        raise NuRecMultimodalError("native scan manifest runtime_scene_id mismatch")
+    if int(manifest.get("scene_start_us", -1)) != scene_start_us:
+        raise NuRecMultimodalError("native scan manifest scene_start_us mismatch")
+    artifact_sha256 = str(manifest.get("artifact_sha256") or "")
+    if not _is_sha256(str(manifest_sha256 or "")) or not _is_sha256(artifact_sha256):
+        raise NuRecMultimodalError("native scan manifest identities are invalid")
+    if max_midpoint_error_us < 0:
+        raise NuRecMultimodalError("native scan midpoint threshold must be non-negative")
+    raw_windows = manifest.get("scan_windows_us")
+    if not isinstance(raw_windows, list) or not raw_windows:
+        raise NuRecMultimodalError("native scan manifest has no scan windows")
+    windows: list[tuple[int, int]] = []
+    previous_start = -1
+    for raw in raw_windows:
+        if not isinstance(raw, list) or len(raw) != 2:
+            raise NuRecMultimodalError("native scan window must contain start/end")
+        start, end = int(raw[0]), int(raw[1])
+        if start < scene_start_us or start >= end or start <= previous_start:
+            raise NuRecMultimodalError("native scan windows are invalid or unsorted")
+        windows.append((start, end))
+        previous_start = start
+    return {
+        "manifest_sha256": str(manifest_sha256),
+        "artifact_sha256": artifact_sha256,
+        "scan_windows_us": windows,
+        "max_midpoint_error_us": max_midpoint_error_us,
+    }
+
+
+def _is_sha256(value: str) -> bool:
+    return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
 
 
 def _pose_mapping(pose: Mapping[str, Any]) -> dict[str, Any]:

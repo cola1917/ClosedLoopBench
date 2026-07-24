@@ -89,6 +89,7 @@ def run_acceptance_triplicate(
             multimodal_sensor_required=require_multimodal,
             opendrive_path=opendrive_path,
             ego_driver=ego_driver,
+            snap_to_map=bool(opendrive_path),
         )
         (run_dir / "basic_agent_plan.json").write_text(
             json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
