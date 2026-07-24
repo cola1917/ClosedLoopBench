@@ -1080,8 +1080,9 @@ def _import_basic_agent_cls(
 
 
 class _BasicAgentDriver:
-    def __init__(self, agent: Any) -> None:
+    def __init__(self, agent: Any, route_binding: Mapping[str, Any] | None = None) -> None:
         self.agent = agent
+        self._route_binding = dict(route_binding or {})
 
     def done(self) -> bool:
         return bool(hasattr(self.agent, "done") and self.agent.done())
@@ -1092,6 +1093,12 @@ class _BasicAgentDriver:
     def close(self) -> None:
         if hasattr(self.agent, "destroy"):
             self.agent.destroy()
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {
+            "driver": "basic_agent",
+            "route_binding": dict(self._route_binding),
+        }
 
 
 class _TopologyFollowerDriver:
@@ -1196,8 +1203,17 @@ def _build_ego_driver(
             ego_vehicle,
             target_speed=_mps_to_kmh(float(ego_config.get("target_speed_mps", 8.0))),
         )
-        _set_agent_destination(agent, carla_module, ego_config.get("destination") or {})
-        return _BasicAgentDriver(agent)
+        route = list(ego_config.get("route") or [])
+        if route and hasattr(agent, "set_global_plan"):
+            route_binding = _set_agent_global_plan(agent, carla_module, route)
+        else:
+            _set_agent_destination(
+                agent,
+                carla_module,
+                ego_config.get("destination") or {},
+            )
+            route_binding = {"mode": "global_route_planner_destination"}
+        return _BasicAgentDriver(agent, route_binding)
 
     if driver_kind == "topology_follower":
         return _TopologyFollowerDriver(
@@ -1670,10 +1686,54 @@ def _carla_transform(carla_module: Any, pose: dict[str, Any]) -> Any:
 
 def _set_agent_destination(agent: Any, carla_module: Any, destination: dict[str, Any]) -> None:
     location = _carla_location(carla_module, destination)
-    try:
-        agent.set_destination(location)
-    except TypeError:
-        agent.set_destination(location, location)
+    agent.set_destination(location)
+
+
+def _set_agent_global_plan(
+    agent: Any,
+    carla_module: Any,
+    route: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not hasattr(agent, "set_global_plan"):
+        raise RuntimeError("BasicAgent does not expose set_global_plan")
+    carla_map = getattr(agent, "_map", None)
+    if carla_map is None or not hasattr(carla_map, "get_waypoint"):
+        raise RuntimeError("BasicAgent does not expose a usable CARLA map")
+    local_planner_module = importlib.import_module("agents.navigation.local_planner")
+    road_option_type = getattr(local_planner_module, "RoadOption", None)
+    if road_option_type is None or not hasattr(road_option_type, "LANEFOLLOW"):
+        raise RuntimeError("CARLA LocalPlanner does not expose RoadOption.LANEFOLLOW")
+
+    global_plan = []
+    waypoint_ids = []
+    for index, pose in enumerate(route):
+        waypoint = carla_map.get_waypoint(
+            _carla_location(carla_module, pose),
+            project_to_road=True,
+        )
+        if waypoint is None:
+            raise RuntimeError(
+                f"BasicAgent route point {index} cannot be projected to OpenDRIVE"
+            )
+        waypoint_id = getattr(waypoint, "id", None)
+        if waypoint_ids and waypoint_id is not None and waypoint_id == waypoint_ids[-1]:
+            continue
+        global_plan.append((waypoint, road_option_type.LANEFOLLOW))
+        waypoint_ids.append(waypoint_id)
+    if len(global_plan) < 2:
+        raise RuntimeError(
+            "BasicAgent explicit route must project to at least two distinct waypoints"
+        )
+    agent.set_global_plan(
+        global_plan,
+        stop_waypoint_creation=True,
+        clean_queue=True,
+    )
+    return {
+        "mode": "explicit_run_config_route",
+        "source_route_point_count": len(route),
+        "projected_waypoint_count": len(global_plan),
+    }
 
 
 def _vehicle_pose(vehicle: Any) -> dict[str, float]:

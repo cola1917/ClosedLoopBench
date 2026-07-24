@@ -66,6 +66,59 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
             with self.assertRaisesRegex(ImportError, "agents.navigation.basic_agent.py"):
                 _import_basic_agent_cls(Path(directory))
 
+    def test_basic_agent_binds_explicit_route_without_global_route_search(self):
+        import types
+
+        from runners import run_carla_basic_agent as runner
+
+        class Waypoint:
+            def __init__(self, waypoint_id):
+                self.id = waypoint_id
+
+        class Map:
+            def get_waypoint(self, location, *, project_to_road):
+                self.assert_project_to_road = project_to_road
+                return Waypoint(int(location.x))
+
+        class Agent:
+            def __init__(self):
+                self._map = Map()
+                self.plan = None
+
+            def set_global_plan(self, plan, **options):
+                self.plan = plan
+                self.options = options
+
+            def set_destination(self, _destination):
+                raise AssertionError("global route search must not be used")
+
+        fake_local_planner = types.SimpleNamespace(
+            RoadOption=types.SimpleNamespace(LANEFOLLOW="lane-follow")
+        )
+        carla = types.SimpleNamespace(
+            Location=lambda x, y, z: types.SimpleNamespace(x=x, y=y, z=z)
+        )
+        agent = Agent()
+        route = [
+            {"x": 0.0, "y": 0.0, "z": 0.0},
+            {"x": 0.0, "y": 0.0, "z": 0.0},
+            {"x": 10.0, "y": 0.0, "z": 0.0},
+        ]
+        with mock.patch(
+            "runners.run_carla_basic_agent.importlib.import_module",
+            return_value=fake_local_planner,
+        ):
+            evidence = runner._set_agent_global_plan(agent, carla, route)
+
+        self.assertEqual([item[0].id for item in agent.plan], [0, 10])
+        self.assertTrue(all(item[1] == "lane-follow" for item in agent.plan))
+        self.assertEqual(
+            agent.options,
+            {"stop_waypoint_creation": True, "clean_queue": True},
+        )
+        self.assertEqual(evidence["source_route_point_count"], 3)
+        self.assertEqual(evidence["projected_waypoint_count"], 2)
+
     def test_basic_agent_preflight_fails_before_output_creation(self):
         from runners.run_carla_acceptance_triplicate import (
             CarlaAcceptanceError,
