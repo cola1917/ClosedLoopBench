@@ -119,6 +119,9 @@ def build_basic_agent_plan(
             "driver": str(ego_driver),
             "role_name": ego.get("role_name", "ego_vehicle"),
             "spawn": _pose(initial_state),
+            "initial_speed_mps": max(
+                0.0, float(initial_state.get("speed_mps", 0.0))
+            ),
             "destination": _pose(destination),
             "route": [_pose(state) for state in ([initial_state] + reference)],
             "target_speed_mps": _target_speed(ego, destination),
@@ -169,6 +172,11 @@ def build_basic_agent_plan(
             "acceptance_evidence": bool(acceptance_evidence),
             "physics_smoke": bool(physics_smoke),
             "multimodal_sensor_required": bool(multimodal_sensor_required),
+            "actor_vertical_alignment_max_error_m": float(
+                (run_config.get("runtime") or {}).get(
+                    "actor_vertical_alignment_max_error_m", 2.0
+                )
+            ),
         },
         "visualization": {
             "follow_ego": bool(follow_ego),
@@ -631,6 +639,11 @@ def _run_basic_agent_loop(
                         if reference_pose is not None
                         else None
                     ),
+                    "reference_vertical_error_m": (
+                        abs(float(pose["z"]) - float(reference_pose["z"]))
+                        if reference_pose is not None
+                        else None
+                    ),
                     "extent_m": _actor_extent(vehicle),
                 }
                 initial = actor_initial_poses[actor_id]
@@ -645,6 +658,19 @@ def _run_basic_agent_loop(
                     }
             multimodal_summary = None
             if sensor_frame_handler is not None:
+                vertical_alignment_issues = _actor_vertical_alignment_issues(
+                    actor_states,
+                    max_error_m=float(
+                        runtime_options.get(
+                            "actor_vertical_alignment_max_error_m", 2.0
+                        )
+                    ),
+                )
+                if multimodal_sensor_required and vertical_alignment_issues:
+                    raise RuntimeError(
+                        "actor vertical alignment failed before NuRec rendering: "
+                        + ", ".join(vertical_alignment_issues)
+                    )
                 if not isinstance(world_frame, int):
                     raise RuntimeError(
                         "multimodal sensor handler requires an integer CARLA frame identity"
@@ -1351,6 +1377,12 @@ def _spawn_ego_vehicle(carla_module: Any, world: Any, ego_config: dict[str, Any]
     transform = _carla_transform(carla_module, spawn)
     vehicle = _try_spawn(world, blueprint, transform)
     if vehicle is not None:
+        _set_initial_vehicle_velocity(
+            carla_module,
+            vehicle,
+            spawn,
+            speed_mps=float(ego_config.get("initial_speed_mps", 0.0)),
+        )
         return vehicle
 
     fallback_transforms = []
@@ -1362,6 +1394,12 @@ def _spawn_ego_vehicle(carla_module: Any, world: Any, ego_config: dict[str, Any]
     for fallback_transform in fallback_transforms:
         vehicle = _try_spawn(world, blueprint, fallback_transform)
         if vehicle is not None:
+            _set_initial_vehicle_velocity(
+                carla_module,
+                vehicle,
+                spawn,
+                speed_mps=float(ego_config.get("initial_speed_mps", 0.0)),
+            )
             return vehicle
 
     raise RuntimeError("failed to spawn ego vehicle at planned pose or map fallback spawn points")
@@ -1409,6 +1447,14 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
     transform = _carla_transform(carla_module, actor.get("initial_state") or {})
     vehicle = _try_spawn(world, blueprint, transform)
     if vehicle is not None:
+        if actor_kind == "vehicle":
+            initial_state = actor.get("initial_state") or {}
+            _set_initial_vehicle_velocity(
+                carla_module,
+                vehicle,
+                initial_state,
+                speed_mps=float(initial_state.get("speed_mps", 0.0)),
+            )
         return vehicle
 
     if actor_kind == "vehicle" and isinstance(actor.get("binding"), dict):
@@ -1421,9 +1467,60 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
         for fallback_transform in _map_spawn_points(world):
             vehicle = _try_spawn(world, blueprint, fallback_transform)
             if vehicle is not None:
+                initial_state = actor.get("initial_state") or {}
+                _set_initial_vehicle_velocity(
+                    carla_module,
+                    vehicle,
+                    initial_state,
+                    speed_mps=float(initial_state.get("speed_mps", 0.0)),
+                )
                 return vehicle
 
     raise RuntimeError(f"failed to spawn interactive {actor_kind} actor {actor_id}")
+
+
+def _set_initial_vehicle_velocity(
+    carla_module: Any,
+    vehicle: Any,
+    scene_pose: Mapping[str, Any],
+    *,
+    speed_mps: float,
+) -> bool:
+    speed_mps = max(0.0, float(speed_mps))
+    if speed_mps <= 0.0 or not hasattr(vehicle, "set_target_velocity"):
+        return False
+    yaw_rad = math.radians(float(scene_pose.get("yaw", 0.0)))
+    values = {
+        "x": speed_mps * math.cos(yaw_rad),
+        "y": -speed_mps * math.sin(yaw_rad),
+        "z": 0.0,
+    }
+    vector_type = getattr(carla_module, "Vector3D", None)
+    velocity = (
+        vector_type(**values)
+        if vector_type is not None
+        else SimpleNamespace(**values)
+    )
+    vehicle.set_target_velocity(velocity)
+    return True
+
+
+def _actor_vertical_alignment_issues(
+    actor_states: Mapping[str, Mapping[str, Any]],
+    *,
+    max_error_m: float,
+) -> list[str]:
+    if max_error_m < 0.0 or not math.isfinite(max_error_m):
+        raise ValueError("actor vertical alignment threshold must be finite and non-negative")
+    issues = []
+    for actor_id, state in sorted(actor_states.items()):
+        error = state.get("reference_vertical_error_m")
+        if error is not None and float(error) > max_error_m:
+            issues.append(
+                f"{actor_id}:reference_vertical_error_m={float(error):.6f}"
+                f">{max_error_m:.6f}"
+            )
+    return issues
 
 
 def _snap_plan_to_map(carla_module: Any, world: Any, plan: dict[str, Any]) -> None:

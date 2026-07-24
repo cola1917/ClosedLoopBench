@@ -66,6 +66,7 @@ class FakeVehicle:
         ]
         self.transform_reads = 0
         self.velocity = velocity or FakeVelocity()
+        self.target_velocity = None
         self.bounding_box = type(
             "FakeBoundingBox",
             (),
@@ -86,6 +87,10 @@ class FakeVehicle:
 
     def set_autopilot(self, enabled, tm_port=None):
         self.events.append("{}.set_autopilot.{}.{}".format(self.label, enabled, tm_port))
+
+    def set_target_velocity(self, velocity):
+        self.events.append("{}.set_target_velocity".format(self.label))
+        self.target_velocity = velocity
 
     def destroy(self):
         self.events.append("{}.destroy".format(self.label))
@@ -249,6 +254,7 @@ class FakeCarlaModule:
         self.Location = FakeLocation
         self.Rotation = FakeRotation
         self.Transform = FakeTransform
+        self.Vector3D = FakeVelocity
         self.LaneType = type("LaneType", (), {"Driving": "Driving"})
 
     def Client(self, host, port):
@@ -366,12 +372,30 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(len(result["report"]["metrics"]), 2)
         self.assertIn("world.apply_settings.sync=True.dt=0.05", events)
         self.assertIn("world.try_spawn_actor.x=1.0", events)
+        self.assertIn("vehicle.set_target_velocity", events)
         self.assertIn("agent.set_destination", events)
         self.assertEqual(events.count("world.tick"), 2)
         self.assertEqual(events.count("agent.run_step"), 2)
         self.assertEqual(events.count("vehicle.apply_control"), 2)
         self.assertTrue(events[-2].startswith("world.apply_settings.sync=False"))
         self.assertEqual(events[-1], "vehicle.destroy")
+
+    def test_source_initial_velocity_is_applied_in_carla_coordinates(self):
+        from runners.run_carla_basic_agent import _set_initial_vehicle_velocity
+
+        events = []
+        vehicle = FakeVehicle(events)
+        applied = _set_initial_vehicle_velocity(
+            FakeCarlaModule(events),
+            vehicle,
+            {"yaw": 30.0},
+            speed_mps=4.0,
+        )
+
+        self.assertTrue(applied)
+        self.assertAlmostEqual(vehicle.target_velocity.x, 4.0 * (3.0 ** 0.5) / 2.0)
+        self.assertAlmostEqual(vehicle.target_velocity.y, -2.0)
+        self.assertEqual(vehicle.target_velocity.z, 0.0)
 
     def test_acceptance_mode_fails_closed_without_real_collision_sensor(self):
         from runners.run_carla_basic_agent import run_basic_agent

@@ -219,6 +219,51 @@ class NuRecRunnerIntegrationTests(unittest.TestCase):
             "failed",
         )
 
+    def test_required_mode_rejects_fallen_actor_before_rendering(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class FallenActorWorld(BoundWorld):
+            def _vehicle_for_blueprint(self, blueprint):
+                entity = super()._vehicle_for_blueprint(blueprint)
+                if blueprint.attributes.get("role_name") != "ego_vehicle":
+                    transform_type = type(entity.transforms[0])
+                    location_type = type(entity.transforms[0].location)
+                    rotation_type = type(entity.transforms[0].rotation)
+                    entity.transforms = [
+                        transform_type(
+                            location_type(6.0, 2.0, -3.0),
+                            rotation_type(yaw=0.0),
+                        )
+                    ]
+                    entity.transform_reads = 0
+                return entity
+
+        class FallenActorClient(BoundClient):
+            def __init__(self, events, host, port):
+                super().__init__(events, host, port)
+                self.world = FallenActorWorld(events)
+
+        class FallenActorCarla(BoundCarla):
+            def Client(self, host, port):
+                return FallenActorClient(self.events, host, port)
+
+        plan = _plan()
+        plan["actors"][0]["reference_trajectory"] = [
+            {"t_sec": 0.05, "x": 6.0, "y": -2.0, "z": 0.0, "yaw": 0.0}
+        ]
+        calls = []
+        result = run_basic_agent(
+            plan,
+            carla_module=FallenActorCarla([]),
+            agent_module=FakeBasicAgent,
+            sensor_frame_handler=lambda context: calls.append(context) or _evidence(context),
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("actor vertical alignment failed", result["detail"])
+        self.assertIn("reference_vertical_error_m=3.000000", result["detail"])
+        self.assertEqual(calls, [])
+
     def test_frame_identity_must_be_strictly_increasing(self):
         from runners.run_carla_basic_agent import run_basic_agent
 
