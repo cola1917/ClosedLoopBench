@@ -809,6 +809,57 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertIn("world.try_spawn_actor.x=1.0", events)
         self.assertIn("world.try_spawn_actor.x=50.0", events)
 
+    def test_ego_spawn_uses_projected_lane_when_opendrive_has_no_spawn_points(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        spawn_attempts = []
+
+        class ProjectionFallbackWorld(FakeWorld):
+            def __init__(self, events):
+                super().__init__(events)
+                self.spawn_points = []
+                self.try_count = 0
+
+            def try_spawn_actor(self, blueprint, transform):
+                self.try_count += 1
+                spawn_attempts.append(transform)
+                self.events.append(
+                    "world.try_spawn_actor.x={}".format(
+                        getattr(transform.location, "x", None)
+                    )
+                )
+                if self.try_count == 1:
+                    return None
+                return self.vehicle
+
+        class ProjectionFallbackClient(FakeClient):
+            def __init__(self, events, host, port):
+                self.events = events
+                self.host = host
+                self.port = port
+                self.world = ProjectionFallbackWorld(events)
+                events.append("client.init")
+
+        class ProjectionFallbackCarla(FakeCarlaModule):
+            def Client(self, host, port):
+                return ProjectionFallbackClient(self.events, host, port)
+
+        plan = self._plan()
+        events = []
+        result = run_basic_agent(
+            plan,
+            carla_module=ProjectionFallbackCarla(events),
+            agent_module=FakeBasicAgent,
+        )
+
+        self.assertEqual(result["status"], "ego_closed_loop")
+        self.assertIn("world.try_spawn_actor.x=1.0", events)
+        self.assertIn("world.try_spawn_actor.x=101.0", events)
+        self.assertEqual(len(spawn_attempts), 2)
+        self.assertAlmostEqual(spawn_attempts[1].location.z, 0.3)
+        self.assertAlmostEqual(spawn_attempts[1].rotation.yaw, 45.0)
+        self.assertEqual(plan["ego"]["spawn"]["x"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1413,7 +1413,50 @@ def _spawn_ego_vehicle(carla_module: Any, world: Any, ego_config: dict[str, Any]
             )
             return vehicle
 
+    projected_transform = _projected_ego_spawn_transform(
+        carla_module, world, spawn
+    )
+    if projected_transform is not None:
+        vehicle = _try_spawn(world, blueprint, projected_transform)
+        if vehicle is not None:
+            _set_initial_vehicle_velocity(
+                carla_module,
+                vehicle,
+                spawn,
+                speed_mps=float(ego_config.get("initial_speed_mps", 0.0)),
+            )
+            return vehicle
+
     raise RuntimeError("failed to spawn ego vehicle at planned pose or map fallback spawn points")
+
+
+def _projected_ego_spawn_transform(
+    carla_module: Any, world: Any, spawn: Mapping[str, Any]
+) -> Any | None:
+    """Return a drive-lane projection for a failed planned ego spawn.
+
+    Generated OpenDRIVE maps can have no ``get_spawn_points()`` entries.  A
+    planned pose on the road surface is then also rejected by CARLA because a
+    vehicle would initially overlap the road.  This fallback is deliberately
+    limited to the ego vehicle after its exact planned pose was rejected: it
+    projects the same source location to a driving waypoint and uses the same
+    0.3 m clearance applied by explicit ``snap_to_map``.  It uses an
+    ephemeral spawn transform and does not relocate bound interactive actors.
+    """
+
+    if not hasattr(world, "get_map"):
+        return None
+    world_map = world.get_map()
+    if not hasattr(world_map, "get_waypoint"):
+        return None
+    waypoint = _get_projected_waypoint(
+        carla_module, world_map, _carla_location(carla_module, dict(spawn))
+    )
+    if waypoint is None or not hasattr(waypoint, "transform"):
+        return None
+    projected_pose = _pose_from_transform(waypoint.transform)
+    projected_pose["z"] = projected_pose.get("z", 0.0) + 0.3
+    return _carla_transform(carla_module, projected_pose)
 
 
 def _spawn_interactive_actor_vehicles(
