@@ -53,7 +53,7 @@ def validate_multimodal_closed_loop_result(result: Mapping[str, Any]) -> dict[st
                 f"actor {record.get('actor_id')} source/NuRec identity changed"
             )
         expected_reference = (
-            "carla_actor_origin"
+            "carla_bounding_box_bottom"
             if record.get("actor_type") == "pedestrian"
             else "carla_bounding_box_center"
         )

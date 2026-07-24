@@ -101,6 +101,40 @@ class BoundCarla(FakeCarlaModule):
 
 
 class NuRecRunnerIntegrationTests(unittest.TestCase):
+    def test_pedestrian_bottom_render_pose_is_forwarded_to_nurec_context(self):
+        from runners.run_carla_basic_agent import _build_sensor_frame_context
+
+        plan = _plan()
+        actor = plan["actors"][0]
+        actor["type"] = "pedestrian"
+        actor["binding"]["sensor_pose_reference"] = "carla_bounding_box_bottom"
+        render_pose = {"x": 6.0, "y": -2.0, "z": 1.02, "roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+        context = _build_sensor_frame_context(
+            plan,
+            frame_id=1,
+            tick_index=0,
+            simulation_time_sec=0.05,
+            scenario_time_sec=0.05,
+            interval_start_sec=0.0,
+            ego_pose={"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+            previous_ego_pose={"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+            actor_states={
+                "trigger": {
+                    "pose": {**render_pose, "z": 1.95},
+                    "render_pose": render_pose,
+                    "render_pose_reference": "carla_bounding_box_bottom",
+                    "actor_type": "pedestrian",
+                    "carla_runtime_actor_id": 101,
+                }
+            },
+            previous_actor_poses={"trigger": render_pose},
+        )
+
+        sample = context["actor_samples"]["trigger"]
+        self.assertEqual(sample["pose_reference"], "carla_bounding_box_bottom")
+        self.assertAlmostEqual(sample["pose_pair"]["start"]["z"], 1.02)
+        self.assertAlmostEqual(sample["pose_pair"]["end"]["z"], 1.02)
+
     def test_sensor_handler_is_closed_and_audited(self):
         from runners.run_carla_basic_agent import run_basic_agent
 
@@ -261,7 +295,7 @@ class NuRecRunnerIntegrationTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "failed")
         self.assertIn("actor vertical alignment failed", result["detail"])
-        self.assertIn("reference_vertical_error_m=3.000000", result["detail"])
+        self.assertIn("reference_vertical_error_m=2.250000", result["detail"])
         self.assertEqual(calls, [])
 
     def test_frame_identity_must_be_strictly_increasing(self):

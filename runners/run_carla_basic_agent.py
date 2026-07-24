@@ -635,11 +635,19 @@ def _run_basic_agent_loop(
                     "speed_mps": speed,
                     "reference_pose": reference_pose,
                     "reference_error_m": (
-                        _xy_distance(pose, reference_pose)
+                        _xy_distance(render_pose or pose, reference_pose)
                         if reference_pose is not None
                         else None
                     ),
                     "reference_vertical_error_m": (
+                        abs(
+                            float((render_pose or pose)["z"])
+                            - float(reference_pose["z"])
+                        )
+                        if reference_pose is not None
+                        else None
+                    ),
+                    "actor_origin_reference_vertical_error_m": (
                         abs(float(pose["z"]) - float(reference_pose["z"]))
                         if reference_pose is not None
                         else None
@@ -665,7 +673,7 @@ def _run_basic_agent_loop(
                     actor_states,
                     max_error_m=float(
                         runtime_options.get(
-                            "actor_vertical_alignment_max_error_m", 2.0
+                            "actor_vertical_alignment_max_error_m", 0.25
                         )
                     ),
                 )
@@ -1961,8 +1969,9 @@ def _bound_actor_render_pose(
 
     NuRec vehicle/two-wheeler tracks are cuboid-centred. CARLA vehicle transforms
     use the blueprint actor origin, so NVIDIA composes ``bounding_box.location``
-    before sending a controllable dynamic object to gRPC. Pedestrian tracks keep
-    the CARLA actor origin in the upstream adapter.
+    before sending a controllable dynamic object to gRPC. Pedestrian source poses
+    refer to the ground-contact point, while CARLA walker origins are capsule
+    centres; pedestrian tracks therefore use the bottom of the CARLA bounding box.
     """
 
     reference = str((actor.get("binding") or {}).get("sensor_pose_reference") or "")
@@ -1970,7 +1979,10 @@ def _bound_actor_render_pose(
         transform, actor_pose = _vehicle_transform_and_pose(entity)
     if reference == "carla_actor_origin":
         return dict(actor_pose), reference
-    if reference != "carla_bounding_box_center":
+    if reference not in {
+        "carla_bounding_box_center",
+        "carla_bounding_box_bottom",
+    }:
         raise RuntimeError(
             f"bound actor {actor.get('actor_id', 'actor')} has unsupported render pose reference: {reference}"
         )
@@ -1978,8 +1990,28 @@ def _bound_actor_render_pose(
     offset = getattr(bounding_box, "location", None)
     if offset is None:
         raise RuntimeError(
-            f"bound vehicle actor {actor.get('actor_id', 'actor')} has no CARLA bounding-box offset"
+            f"bound actor {actor.get('actor_id', 'actor')} has no CARLA bounding-box offset"
         )
+    if reference == "carla_bounding_box_bottom":
+        extent = getattr(bounding_box, "extent", None)
+        if extent is None:
+            raise RuntimeError(
+                f"bound pedestrian actor {actor.get('actor_id', 'actor')} has no CARLA bounding-box extent"
+            )
+        try:
+            offset = type(offset)(
+                x=float(getattr(offset, "x", 0.0)),
+                y=float(getattr(offset, "y", 0.0)),
+                z=float(getattr(offset, "z", 0.0))
+                - float(getattr(extent, "z", 0.0)),
+            )
+        except (TypeError, ValueError):
+            offset = SimpleNamespace(
+                x=float(getattr(offset, "x", 0.0)),
+                y=float(getattr(offset, "y", 0.0)),
+                z=float(getattr(offset, "z", 0.0))
+                - float(getattr(extent, "z", 0.0)),
+            )
     pose = dict(actor_pose)
     if transform is not None and hasattr(transform, "transform"):
         world_location = transform.transform(offset)
@@ -2779,7 +2811,7 @@ def _actor_runtime_binding_evidence(
             "source_track_frame"
             if binding.get("sensor_pose_source") == "scenario_ir_reference_trajectory"
             else (
-                "carla_actor_origin"
+                "carla_bounding_box_bottom"
                 if _actor_kind(actor or {}) == "pedestrian"
                 else "carla_bounding_box_center"
             )
@@ -2899,13 +2931,21 @@ def _build_sensor_frame_context(
         previous = previous_actor_poses.get(actor_id)
         if current is None or previous is None:
             raise RuntimeError(f"bound actor has no render pose pair: {actor_id}")
+        declared_reference = binding.get("sensor_pose_reference")
+        runtime_reference = (
+            declared_reference
+            if binding.get("sensor_pose_source")
+            == "scenario_ir_reference_trajectory"
+            else (actor_states.get(actor_id) or {}).get("render_pose_reference")
+        )
+        if runtime_reference != declared_reference:
+            raise RuntimeError(
+                f"bound actor render pose reference mismatch: {actor_id}: "
+                f"declared={declared_reference}, runtime={runtime_reference}"
+            )
         samples[actor_id] = {
             "source": binding.get("sensor_pose_source"),
-            "pose_reference": (
-                binding.get("sensor_pose_reference")
-                if binding.get("sensor_pose_source") == "scenario_ir_reference_trajectory"
-                else (actor_states.get(actor_id) or {}).get("render_pose_reference")
-            ),
+            "pose_reference": runtime_reference,
             "pose_pair": {"start": dict(previous), "end": dict(current)},
             "carla_runtime_actor_id": (actor_states.get(actor_id) or {}).get(
                 "carla_runtime_actor_id"

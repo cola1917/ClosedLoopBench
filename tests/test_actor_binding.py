@@ -87,7 +87,7 @@ class ActorBindingTests(unittest.TestCase):
         self.assertEqual(binding["control"]["corridor_constraint"], "source_reference")
         self.assertEqual(binding["control"]["capabilities"], ["speed", "pause", "yield", "abort"])
         self.assertEqual(binding["carla"]["blueprint"], "walker.pedestrian.*")
-        self.assertEqual(binding["sensor_sync"]["pose_reference"], "carla_actor_origin")
+        self.assertEqual(binding["sensor_sync"]["pose_reference"], "carla_bounding_box_bottom")
 
     def test_pedestrian_traffic_manager_and_unknown_actor_fail_closed(self):
         from adapters.actor_binding import ActorBindingError, build_actor_binding_set

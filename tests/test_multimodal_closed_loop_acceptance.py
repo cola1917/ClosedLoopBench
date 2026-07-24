@@ -68,7 +68,7 @@ def _result(actor_type="vehicle"):
                         "nurec_track_id": "source-track",
                         "sensor_pose_source": "carla_runtime_actor_pose",
                         "sensor_pose_reference": (
-                            "carla_actor_origin"
+                            "carla_bounding_box_bottom"
                             if actor_type == "pedestrian"
                             else "carla_bounding_box_center"
                         ),

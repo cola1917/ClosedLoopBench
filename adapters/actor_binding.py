@@ -279,7 +279,7 @@ def _build_binding(
                 "source_track_frame"
                 if not interactive
                 else (
-                    "carla_actor_origin"
+                    "carla_bounding_box_bottom"
                     if actor_type == "pedestrian"
                     else "carla_bounding_box_center"
                 )
