@@ -644,6 +644,9 @@ def _run_basic_agent_loop(
                         if reference_pose is not None
                         else None
                     ),
+                    "spawn_evidence": dict(
+                        actor.get("_runtime_spawn_evidence") or {}
+                    ),
                     "extent_m": _actor_extent(vehicle),
                 }
                 initial = actor_initial_poses[actor_id]
@@ -1447,6 +1450,11 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
     transform = _carla_transform(carla_module, actor.get("initial_state") or {})
     vehicle = _try_spawn(world, blueprint, transform)
     if vehicle is not None:
+        actor["_runtime_spawn_evidence"] = {
+            "strategy": "source_transform",
+            "source_xy_yaw_preserved": True,
+            "vertical_adjustment_m": 0.0,
+        }
         if actor_kind == "vehicle":
             initial_state = actor.get("initial_state") or {}
             _set_initial_vehicle_velocity(
@@ -1456,6 +1464,15 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
                 speed_mps=float(initial_state.get("speed_mps", 0.0)),
             )
         return vehicle
+
+    if actor_kind == "pedestrian":
+        retry = _sidewalk_walker_retry_transform(carla_module, world, actor)
+        if retry is not None:
+            retry_transform, spawn_evidence = retry
+            vehicle = _try_spawn(world, blueprint, retry_transform)
+            if vehicle is not None:
+                actor["_runtime_spawn_evidence"] = spawn_evidence
+                return vehicle
 
     if actor_kind == "vehicle" and isinstance(actor.get("binding"), dict):
         raise RuntimeError(
@@ -1477,6 +1494,55 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
                 return vehicle
 
     raise RuntimeError(f"failed to spawn interactive {actor_kind} actor {actor_id}")
+
+
+def _sidewalk_walker_retry_transform(
+    carla_module: Any, world: Any, actor: Mapping[str, Any]
+) -> tuple[Any, dict[str, Any]] | None:
+    """Return one source-XY-preserving walker retry above a sidewalk surface."""
+    if not hasattr(world, "get_map"):
+        return None
+    initial_state = dict(actor.get("initial_state") or {})
+    world_map = world.get_map()
+    if not hasattr(world_map, "get_waypoint"):
+        return None
+    lane_type = getattr(carla_module, "LaneType", None)
+    lane_any = getattr(lane_type, "Any", None)
+    try:
+        waypoint = world_map.get_waypoint(
+            _carla_location(carla_module, initial_state),
+            project_to_road=True,
+            lane_type=lane_any,
+        )
+    except (RuntimeError, TypeError, ValueError):
+        return None
+    if waypoint is None or not hasattr(waypoint, "transform"):
+        return None
+    sidewalk_type = getattr(lane_type, "Sidewalk", None)
+    actual_lane_type = getattr(waypoint, "lane_type", None)
+    if sidewalk_type is not None and actual_lane_type != sidewalk_type:
+        return None
+    surface = getattr(getattr(waypoint.transform, "location", None), "z", None)
+    if surface is None:
+        return None
+    minimum_clearance_m = 0.20
+    source_z = float(initial_state.get("z", 0.0))
+    retry_z = max(source_z, float(surface) + minimum_clearance_m)
+    if retry_z <= source_z + 1e-6:
+        return None
+    retry_state = dict(initial_state)
+    retry_state["z"] = retry_z
+    return _carla_transform(carla_module, retry_state), {
+        "strategy": "sidewalk_vertical_clearance_retry",
+        "source_xy_yaw_preserved": True,
+        "source_z_m": source_z,
+        "road_surface_z_m": float(surface),
+        "requested_spawn_z_m": retry_z,
+        "vertical_adjustment_m": retry_z - source_z,
+        "minimum_clearance_m": minimum_clearance_m,
+        "lane_id": getattr(waypoint, "lane_id", None),
+        "lane_type": str(actual_lane_type),
+    }
 
 
 def _set_initial_vehicle_velocity(

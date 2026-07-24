@@ -66,11 +66,47 @@ class World:
         return self.walker
 
 
+class SidewalkMap:
+    def __init__(self, *, lane_type, surface_z):
+        self.lane_type = lane_type
+        self.surface_z = surface_z
+
+    def get_waypoint(self, location, project_to_road=True, lane_type=None):
+        del project_to_road, lane_type
+        return type(
+            "Waypoint",
+            (),
+            {
+                "lane_id": -2,
+                "lane_type": self.lane_type,
+                "transform": Transform(
+                    Vector(location.x, location.y, self.surface_z), Rotation()
+                ),
+            },
+        )()
+
+
+class SidewalkRetryWorld(World):
+    def __init__(self, *, lane_type, surface_z):
+        super().__init__()
+        self.map = SidewalkMap(lane_type=lane_type, surface_z=surface_z)
+        self.spawn_transforms = []
+
+    def get_map(self):
+        return self.map
+
+    def try_spawn_actor(self, _blueprint, transform):
+        self.spawn_transform = transform
+        self.spawn_transforms.append(transform)
+        return self.walker if transform.location.z >= 1.0 else None
+
+
 class Carla:
     Location = Vector
     Vector3D = Vector
     Rotation = Rotation
     Transform = Transform
+    LaneType = type("LaneType", (), {"Any": "any", "Sidewalk": "sidewalk"})
 
     class WalkerControl:
         def __init__(self, **kwargs):
@@ -309,6 +345,51 @@ class PedestrianActorRuntimeTests(unittest.TestCase):
         self.assertEqual(world.spawn_transform.location.x, 4.0)
         self.assertEqual(world.spawn_transform.location.y, -5.0)
         self.assertEqual(world.spawn_transform.rotation.yaw, -90.0)
+
+    def test_pedestrian_retries_only_above_sidewalk_with_source_xy_and_yaw(self):
+        from runners.run_carla_basic_agent import _spawn_actor_vehicle
+
+        world = SidewalkRetryWorld(lane_type=Carla.LaneType.Sidewalk, surface_z=0.855)
+        actor = {
+            "actor_id": "ped-1",
+            "type": "pedestrian",
+            "closed_loop_level": "scripted",
+            "initial_state": {
+                "x": 64.91,
+                "y": 5.20,
+                "z": 0.928,
+                "yaw": 4.28,
+            },
+        }
+
+        spawned = _spawn_actor_vehicle(Carla, world, actor, "ped-1")
+
+        self.assertIs(spawned, world.walker)
+        self.assertEqual(len(world.spawn_transforms), 2)
+        retry = world.spawn_transforms[-1]
+        self.assertAlmostEqual(retry.location.x, 64.91)
+        self.assertAlmostEqual(retry.location.y, -5.20)
+        self.assertAlmostEqual(retry.rotation.yaw, -4.28)
+        self.assertAlmostEqual(retry.location.z, 1.055)
+        evidence = actor["_runtime_spawn_evidence"]
+        self.assertEqual(evidence["strategy"], "sidewalk_vertical_clearance_retry")
+        self.assertTrue(evidence["source_xy_yaw_preserved"])
+        self.assertAlmostEqual(evidence["vertical_adjustment_m"], 0.127)
+
+    def test_pedestrian_does_not_retry_above_non_sidewalk(self):
+        from runners.run_carla_basic_agent import _spawn_actor_vehicle
+
+        world = SidewalkRetryWorld(lane_type="driving", surface_z=0.855)
+        actor = {
+            "actor_id": "ped-1",
+            "type": "pedestrian",
+            "closed_loop_level": "scripted",
+            "initial_state": {"x": 64.91, "y": 5.20, "z": 0.928},
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "failed to spawn interactive pedestrian"):
+            _spawn_actor_vehicle(Carla, world, actor, "ped-1")
+        self.assertEqual(len(world.spawn_transforms), 1)
 
     def test_scripted_walker_follows_reference_and_emits_evidence(self):
         from runners.run_carla_basic_agent import _apply_scripted_actor_controls
