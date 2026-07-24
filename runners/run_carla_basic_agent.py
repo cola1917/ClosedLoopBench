@@ -618,6 +618,9 @@ def _run_basic_agent_loop(
                         transform=transform,
                         actor_pose=pose,
                     )
+                    render_pose = _apply_bound_actor_render_pose_offset(
+                        actor, render_pose
+                    )
                 reference_pose = _reference_pose_at_time(
                     actor, run_time_sec
                 )
@@ -1507,8 +1510,8 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
             "vertical_adjustment_m": 0.0,
         }
         if actor_kind == "vehicle":
-            spawn_evidence = _align_bound_vehicle_spawn_reference(
-                carla_module, actor, vehicle, spawn_evidence
+            spawn_evidence = _capture_bound_vehicle_render_pose_offset(
+                actor, vehicle, spawn_evidence
             )
         actor["_runtime_spawn_evidence"] = spawn_evidence
         if actor_kind == "vehicle":
@@ -1552,32 +1555,25 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
     raise RuntimeError(f"failed to spawn interactive {actor_kind} actor {actor_id}")
 
 
-def _align_bound_vehicle_spawn_reference(
-    carla_module: Any,
+def _capture_bound_vehicle_render_pose_offset(
     actor: Mapping[str, Any],
     vehicle: Any,
     evidence: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Align a bound vehicle's CARLA origin to its source bbox-centre pose.
+    """Capture the immutable source-frame offset for a bound vehicle.
 
     NuRec vehicle tracks are expressed at the cuboid centre, while CARLA
-    vehicle transforms are expressed at the blueprint actor origin.  Spawning a
-    bound vehicle directly at a source centre therefore double-counts the
-    blueprint's bounding-box offset.  The initial high spawn remains useful for
-    CARLA collision admission; after admission, move only the actor origin by
-    the measured world-space delta so its declared render reference equals the
-    source initial pose.
+    uses the generated OpenDRIVE frame and blueprint actor origins.  On sloped
+    roads, physically moving the origin to force the two absolute Z datums to
+    match can place it inside the road.  Capture the measured initial delta
+    instead; each frame applies that fixed offset to the CARLA runtime bbox
+    centre, preserving real CARLA motion deltas in the source/NuRec frame.
     """
 
     binding = actor.get("binding") or {}
     reference = str(binding.get("sensor_pose_reference") or "")
     if reference != "carla_bounding_box_center":
         return dict(evidence)
-    if not hasattr(vehicle, "set_transform"):
-        return {
-            **dict(evidence),
-            "reference_origin_alignment": "unavailable_no_set_transform",
-        }
 
     initial_state = _pose(dict(actor.get("initial_state") or {}))
     transform, actor_origin_pose = _vehicle_transform_and_pose(vehicle)
@@ -1595,17 +1591,32 @@ def _align_bound_vehicle_spawn_reference(
         axis: float(initial_state[axis]) - float(render_pose[axis])
         for axis in ("x", "y", "z")
     }
-    if any(abs(value) > 1e-9 for value in correction.values()):
-        corrected_origin = dict(actor_origin_pose)
-        for axis, value in correction.items():
-            corrected_origin[axis] = float(corrected_origin[axis]) + value
-        vehicle.set_transform(_carla_transform(carla_module, corrected_origin))
+    if abs(correction["z"]) > 1.0:
+        return {
+            **dict(evidence),
+            "render_reference_source_frame_mapped": False,
+            "render_pose_offset_rejected_m": correction,
+            "vertical_adjustment_m": 0.0,
+        }
+    if isinstance(actor, dict):
+        actor["_runtime_render_pose_offset"] = dict(correction)
     return {
         **dict(evidence),
-        "strategy": "source_bbox_center_to_actor_origin",
-        "render_reference_preserved": True,
-        "reference_origin_adjustment_m": correction,
-        "vertical_adjustment_m": correction["z"],
+        "strategy": "source_bbox_center_runtime_frame_offset",
+        "render_reference_source_frame_mapped": True,
+        "render_pose_offset_m": correction,
+        "vertical_adjustment_m": 0.0,
+    }
+
+
+def _apply_bound_actor_render_pose_offset(
+    actor: Mapping[str, Any], render_pose: Mapping[str, Any]
+) -> dict[str, float]:
+    offset = actor.get("_runtime_render_pose_offset") or {}
+    return {
+        axis: float(render_pose.get(axis, 0.0))
+        + float(offset.get(axis, 0.0))
+        for axis in ("x", "y", "z", "roll", "pitch", "yaw")
     }
 
 
