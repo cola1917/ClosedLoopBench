@@ -861,10 +861,7 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(plan["ego"]["spawn"]["x"], 1.0)
 
     def test_bound_vehicle_bbox_center_spawn_maps_runtime_pose_to_source_frame(self):
-        from runners.run_carla_basic_agent import (
-            _apply_bound_actor_render_pose_offset,
-            _spawn_actor_vehicle,
-        )
+        from runners.run_carla_basic_agent import _spawn_actor_vehicle
 
         class CenterReferenceVehicle(FakeVehicle):
             def __init__(self, events):
@@ -909,16 +906,14 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(vehicle.set_transforms, [])
         evidence = actor["_runtime_spawn_evidence"]
         self.assertEqual(
-            evidence["strategy"], "source_bbox_center_runtime_frame_offset"
+            evidence["strategy"],
+            "source_bbox_center_runtime_frame_offset_deferred",
         )
-        self.assertAlmostEqual(evidence["render_pose_offset_m"]["x"], -0.5)
-        self.assertAlmostEqual(evidence["render_pose_offset_m"]["z"], -0.75)
-        mapped = _apply_bound_actor_render_pose_offset(
-            actor, {"x": 3.5, "y": 4.0, "z": 1.75, "yaw": 0.0}
+        self.assertEqual(
+            evidence["render_reference_source_frame_mapped"],
+            "deferred_until_first_runtime_frame",
         )
-        self.assertAlmostEqual(mapped["x"], 3.0)
-        self.assertAlmostEqual(mapped["y"], 4.0)
-        self.assertAlmostEqual(mapped["z"], 1.0)
+        self.assertNotIn("_runtime_render_pose_offset", actor)
 
 
 if __name__ == "__main__":

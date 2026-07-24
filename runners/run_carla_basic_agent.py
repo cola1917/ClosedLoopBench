@@ -618,12 +618,28 @@ def _run_basic_agent_loop(
                         transform=transform,
                         actor_pose=pose,
                     )
-                    render_pose = _apply_bound_actor_render_pose_offset(
-                        actor, render_pose
-                    )
                 reference_pose = _reference_pose_at_time(
                     actor, run_time_sec
                 )
+                if (
+                    render_pose is not None
+                    and reference_pose is not None
+                    and render_pose_reference == "carla_bounding_box_center"
+                    and not actor.get("_runtime_render_pose_offset")
+                ):
+                    offset = {
+                        axis: float(reference_pose[axis]) - float(render_pose[axis])
+                        for axis in ("x", "y", "z")
+                    }
+                    if abs(offset["z"]) <= 1.0:
+                        actor["_runtime_render_pose_offset"] = offset
+                        evidence = dict(actor.get("_runtime_spawn_evidence") or {})
+                        evidence["runtime_frame_offset_m"] = offset
+                        actor["_runtime_spawn_evidence"] = evidence
+                if render_pose is not None:
+                    render_pose = _apply_bound_actor_render_pose_offset(
+                        actor, render_pose
+                    )
                 actor_states[actor_id] = {
                     "actor_type": _actor_kind(actor),
                     "carla_runtime_actor_id": getattr(vehicle, "id", None),
@@ -1575,36 +1591,10 @@ def _capture_bound_vehicle_render_pose_offset(
     if reference != "carla_bounding_box_center":
         return dict(evidence)
 
-    initial_state = _pose(dict(actor.get("initial_state") or {}))
-    transform, actor_origin_pose = _vehicle_transform_and_pose(vehicle)
-    render_pose, render_reference = _bound_actor_render_pose(
-        dict(actor),
-        vehicle,
-        transform=transform,
-        actor_pose=actor_origin_pose,
-    )
-    if render_reference != "carla_bounding_box_center":
-        raise RuntimeError(
-            f"bound vehicle {actor.get('actor_id', 'actor')} render reference changed unexpectedly"
-        )
-    correction = {
-        axis: float(initial_state[axis]) - float(render_pose[axis])
-        for axis in ("x", "y", "z")
-    }
-    if abs(correction["z"]) > 1.0:
-        return {
-            **dict(evidence),
-            "render_reference_source_frame_mapped": False,
-            "render_pose_offset_rejected_m": correction,
-            "vertical_adjustment_m": 0.0,
-        }
-    if isinstance(actor, dict):
-        actor["_runtime_render_pose_offset"] = dict(correction)
     return {
         **dict(evidence),
-        "strategy": "source_bbox_center_runtime_frame_offset",
-        "render_reference_source_frame_mapped": True,
-        "render_pose_offset_m": correction,
+        "strategy": "source_bbox_center_runtime_frame_offset_deferred",
+        "render_reference_source_frame_mapped": "deferred_until_first_runtime_frame",
         "vertical_adjustment_m": 0.0,
     }
 
