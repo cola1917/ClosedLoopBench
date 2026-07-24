@@ -159,10 +159,10 @@ class NuRecRunnerIntegrationTests(unittest.TestCase):
         )
 
         self.assertEqual(result["status"], "interactive_closed_loop")
-        self.assertAlmostEqual(contexts[0]["simulation_time_sec"], 100.0)
-        self.assertAlmostEqual(contexts[0]["interval_start_sec"], 99.95)
+        self.assertAlmostEqual(contexts[0]["simulation_time_sec"], 0.05)
+        self.assertAlmostEqual(contexts[0]["interval_start_sec"], 0.0)
         self.assertAlmostEqual(contexts[0]["scenario_time_sec"], 0.05)
-        self.assertAlmostEqual(contexts[1]["interval_start_sec"], 100.0)
+        self.assertAlmostEqual(contexts[1]["interval_start_sec"], 0.05)
 
     def test_required_handler_receives_physical_pose_pairs_and_proves_both_modalities(self):
         from runners.run_carla_basic_agent import run_basic_agent

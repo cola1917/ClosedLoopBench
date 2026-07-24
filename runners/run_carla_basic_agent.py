@@ -510,6 +510,7 @@ def _run_basic_agent_loop(
 
         max_ticks = int(limits.get("max_ticks", 600))
         dt_sec = float(world_config.get("fixed_delta_seconds", 0.05))
+        scenario_clock_origin_sec = _snapshot_elapsed_seconds(world)
         previous_speed_mps: float | None = None
         previous_acceleration_mps2: float | None = None
         route = list(ego_config.get("route") or [ego_config.get("spawn") or {}, ego_config.get("destination") or {}])
@@ -538,8 +539,13 @@ def _run_basic_agent_loop(
                 snapshot = world.get_snapshot()
                 snapshot_frame = getattr(snapshot, "frame", None)
                 timestamp = getattr(snapshot, "timestamp", None)
-                simulation_time_sec = float(
+                snapshot_elapsed_sec = float(
                     getattr(timestamp, "elapsed_seconds", simulation_time_sec)
+                )
+                if scenario_clock_origin_sec is None:
+                    scenario_clock_origin_sec = snapshot_elapsed_sec - run_time_sec
+                simulation_time_sec = max(
+                    0.0, snapshot_elapsed_sec - scenario_clock_origin_sec
                 )
                 snapshot_delta_sec = float(
                     getattr(timestamp, "delta_seconds", snapshot_delta_sec)
@@ -1740,6 +1746,18 @@ def _vehicle_pose(vehicle: Any) -> dict[str, float]:
     """Return a CARLA actor pose in the canonical scene-local right-handed frame."""
 
     return _vehicle_transform_and_pose(vehicle)[1]
+
+
+def _snapshot_elapsed_seconds(world: Any) -> float | None:
+    if not hasattr(world, "get_snapshot"):
+        return None
+    snapshot = world.get_snapshot()
+    timestamp = getattr(snapshot, "timestamp", None)
+    elapsed = getattr(timestamp, "elapsed_seconds", None)
+    if elapsed is None:
+        return None
+    value = float(elapsed)
+    return value if math.isfinite(value) else None
 
 
 def _vehicle_transform_and_pose(vehicle: Any) -> tuple[Any | None, dict[str, float]]:
