@@ -143,6 +143,39 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
                     native_capture_path=values[3], native_scan_manifest_path=values[4],
                 )
 
+    def test_inherits_payload_frame_from_verified_nurec_trace_when_not_repeated(self):
+        from runtime.scene0061_lidar_axis_collector import collect_lidar_axis_evidence
+
+        with tempfile.TemporaryDirectory() as directory:
+            values = self._inputs(Path(directory))
+            payload = values[1]["records"][0]["response_metadata"]["materialized_payload"]
+            payload.pop("carla_frame_id")
+            evidence = collect_lidar_axis_evidence(
+                run_config=values[0], nurec_evidence=values[1], frame_trace=values[2],
+                native_capture_path=values[3], native_scan_manifest_path=values[4],
+            )
+            self.assertEqual(
+                evidence["axis_validation"]["payload_ref"]["carla_frame_id"],
+                values[1]["frame_id"],
+            )
+
+    def test_rejects_explicit_payload_frame_that_conflicts_with_verified_trace(self):
+        from runtime.scene0061_lidar_axis_collector import (
+            LiDARAxisCollectionError,
+            collect_lidar_axis_evidence,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            values = self._inputs(Path(directory))
+            values[1]["records"][0]["response_metadata"]["materialized_payload"][
+                "carla_frame_id"
+            ] = values[1]["frame_id"] + 1
+            with self.assertRaisesRegex(LiDARAxisCollectionError, "wrong frame or encoding"):
+                collect_lidar_axis_evidence(
+                    run_config=values[0], nurec_evidence=values[1], frame_trace=values[2],
+                    native_capture_path=values[3], native_scan_manifest_path=values[4],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

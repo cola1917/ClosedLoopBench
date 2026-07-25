@@ -205,7 +205,18 @@ def _materialized_lidar_ref(record: Mapping[str, Any], frame_id: int) -> dict[st
     value = metadata.get("materialized_payload") if isinstance(metadata, Mapping) else None
     if not isinstance(value, Mapping):
         raise LiDARAxisCollectionError("NuRec LiDAR record has no materialized payload")
-    result = _verified_ref(value, frame_id=frame_id, encoding=XYZI_ENCODING)
+    # A materialized payload is a child of the already frame-bound NuRec
+    # response record.  The production response schema intentionally keeps
+    # file provenance separate from transport/frame metadata, so it need not
+    # repeat ``carla_frame_id`` here.  Inherit that identity only from the
+    # verified parent trace; an explicitly present, conflicting child value is
+    # still a hard failure.
+    result = _verified_ref(
+        value,
+        frame_id=frame_id,
+        encoding=XYZI_ENCODING,
+        require_declared_frame=False,
+    )
     if value.get("coordinate_frame") not in {"unverified", "sensor_local"}:
         raise LiDARAxisCollectionError("NuRec LiDAR payload declares an unexpected coordinate frame")
     return result
@@ -232,7 +243,13 @@ def _capture_points_ref(capture: Mapping[str, Any], frame_id: int) -> dict[str, 
     return _verified_ref(value, frame_id=frame_id, encoding=XYZI_ENCODING)
 
 
-def _verified_ref(value: Mapping[str, Any], *, frame_id: int, encoding: str) -> dict[str, Any]:
+def _verified_ref(
+    value: Mapping[str, Any],
+    *,
+    frame_id: int,
+    encoding: str,
+    require_declared_frame: bool = True,
+) -> dict[str, Any]:
     path = Path(str(value.get("path") or "")).expanduser().resolve()
     expected = str(value.get("sha256") or "")
     byte_count = value.get("byte_count")
@@ -240,7 +257,12 @@ def _verified_ref(value: Mapping[str, Any], *, frame_id: int, encoding: str) -> 
         raise LiDARAxisCollectionError("physical LiDAR file reference is invalid")
     if not isinstance(byte_count, int) or isinstance(byte_count, bool) or byte_count < 1:
         raise LiDARAxisCollectionError("physical LiDAR file reference has invalid byte count")
-    if value.get("carla_frame_id") != frame_id or value.get("encoding") != encoding:
+    declared_frame = value.get("carla_frame_id")
+    if (
+        (require_declared_frame and declared_frame != frame_id)
+        or (not require_declared_frame and declared_frame is not None and declared_frame != frame_id)
+        or value.get("encoding") != encoding
+    ):
         raise LiDARAxisCollectionError("physical LiDAR file reference has wrong frame or encoding")
     if path.stat().st_size != byte_count or _sha256(path) != expected:
         raise LiDARAxisCollectionError("physical LiDAR file reference does not match bytes")
