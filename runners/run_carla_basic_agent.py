@@ -641,6 +641,17 @@ def _run_basic_agent_loop(
                 snapshot_delta_sec = float(
                     getattr(timestamp, "delta_seconds", snapshot_delta_sec)
                 )
+            if physical_frame_probe is not None and (
+                isinstance(tick_frame, int)
+                and not isinstance(tick_frame, bool)
+                and isinstance(snapshot_frame, int)
+                and not isinstance(snapshot_frame, bool)
+                and tick_frame != snapshot_frame
+            ):
+                raise RuntimeError(
+                    "physical frame probe requires matching CARLA tick and snapshot frames: "
+                    f"tick={tick_frame}, snapshot={snapshot_frame}"
+                )
             world_frame = snapshot_frame if isinstance(snapshot_frame, int) else tick_frame
             native_lidar_capture = None
             if physical_frame_probe is not None:

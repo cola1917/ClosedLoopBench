@@ -176,6 +176,34 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
                     native_capture_path=values[3], native_scan_manifest_path=values[4],
                 )
 
+    def test_anchor_selection_handles_large_irrelevant_cloud_deterministically(self):
+        from runtime.scene0061_lidar_axis_collector import _select_anchors
+
+        # A real CARLA callback can be much larger than a unit-test fixture.
+        # The matching anchors are deliberately placed after thousands of
+        # distractors to exercise the spatial lookup without changing the
+        # deterministic source/capture-index bindings.
+        identity = IDENTITY
+        distractors = [(100.0 + index, 100.0, 100.0, 1.0) for index in range(10_000)]
+        anchors = [
+            (1.0, 0.0, 0.0, 0.5),
+            (0.0, 2.0, 0.0, 0.5),
+            (0.0, 0.0, 3.0, 0.5),
+            (2.0, 2.0, 2.0, 0.5),
+        ]
+        selected = _select_anchors(
+            nurec_points=anchors,
+            nurec_to_ego=identity,
+            capture_points=distractors + anchors,
+            capture_to_ego=identity,
+            tolerance_m=0.05,
+        )
+        self.assertEqual([row["source_point_index"] for row in selected], [0, 1, 2, 3])
+        self.assertEqual(
+            [row["independent_capture_point_index"] for row in selected],
+            [10_000, 10_001, 10_002, 10_003],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

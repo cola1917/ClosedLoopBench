@@ -223,6 +223,29 @@ class FakeWorld:
         return self.actor_vehicles[role_name]
 
 
+class MismatchedSnapshotWorld(FakeWorld):
+    def get_snapshot(self):
+        timestamp = type("Timestamp", (), {"elapsed_seconds": 0.05, "delta_seconds": 0.05})()
+        return type("Snapshot", (), {"frame": 2, "timestamp": timestamp})()
+
+
+class _PhysicalFrameProbe:
+    def __init__(self):
+        self.started = False
+        self.persisted_frames = []
+        self.closed = False
+
+    def start(self):
+        self.started = True
+
+    def persist_frame(self, frame_id):
+        self.persisted_frames.append(frame_id)
+        return Path(f"native-{frame_id}.json")
+
+    def close(self):
+        self.closed = True
+
+
 class FakeClient:
     def __init__(self, events, host, port):
         self.events = events
@@ -379,6 +402,35 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         self.assertEqual(events.count("vehicle.apply_control"), 2)
         self.assertTrue(events[-2].startswith("world.apply_settings.sync=False"))
         self.assertEqual(events[-1], "vehicle.destroy")
+
+    def test_physical_probe_fails_closed_when_tick_and_snapshot_frames_diverge(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class MismatchedSnapshotClient(FakeClient):
+            def __init__(self, events, host, port):
+                self.events = events
+                self.host = host
+                self.port = port
+                self.world = MismatchedSnapshotWorld(events)
+                events.append("client.init")
+
+        class MismatchedSnapshotCarla(FakeCarlaModule):
+            def Client(self, host, port):
+                return MismatchedSnapshotClient(self.events, host, port)
+
+        probe = _PhysicalFrameProbe()
+        result = run_basic_agent(
+            self._plan(),
+            carla_module=MismatchedSnapshotCarla([]),
+            agent_module=FakeBasicAgent,
+            physical_frame_probe_factory=lambda **_kwargs: probe,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("matching CARLA tick and snapshot frames", result["detail"])
+        self.assertTrue(probe.started)
+        self.assertEqual(probe.persisted_frames, [])
+        self.assertTrue(probe.closed)
 
     def test_plan_uses_strict_default_vertical_alignment_threshold(self):
         plan = self._plan()

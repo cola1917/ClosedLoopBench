@@ -66,7 +66,11 @@ def collect_lidar_axis_evidence(
     lidar_spec = _lidar_spec(run_config)
     matrix = _validated_rigid_matrix(lidar_spec.get("sensor_to_ego"))
     frame_id = _frame_id(nurec_evidence, "NuRec evidence")
-    trace_frame = frame_trace.get("world_tick_frame") or frame_trace.get("snapshot_frame")
+    # Frame zero is a valid CARLA frame and must not be discarded by a truthy
+    # fallback.  Prefer the post-tick frame when it is explicitly present.
+    trace_frame = frame_trace.get("world_tick_frame")
+    if not isinstance(trace_frame, int) or isinstance(trace_frame, bool):
+        trace_frame = frame_trace.get("snapshot_frame")
     if trace_frame != frame_id:
         raise LiDARAxisCollectionError("CARLA frame trace does not match NuRec LiDAR frame")
 
@@ -152,18 +156,36 @@ def collect_lidar_axis_evidence(
 
 
 def _select_anchors(*, nurec_points: list[tuple[float, float, float, float]], nurec_to_ego: list[float], capture_points: list[tuple[float, float, float, float]], capture_to_ego: list[float], tolerance_m: float) -> list[dict[str, Any]]:
-    """Choose deterministic distinct nearest-neighbour matches below tolerance."""
+    """Choose deterministic distinct matches using a bounded spatial index.
+
+    The two physical streams can each contain tens or hundreds of thousands of
+    points.  Scanning the entire native cloud for every NRE point makes the
+    evidence collector quadratic and turns a one-tick diagnostic into an
+    unbounded runtime risk.  A grid with cell width equal to the acceptance
+    tolerance only needs the 27 cells surrounding each candidate point; it
+    retains the previous nearest-distance, then lowest-index tie break.
+    """
 
     capture_ego = [_transform_point(capture_to_ego, point[:3]) for point in capture_points]
+    spatial_index: dict[tuple[int, int, int], list[int]] = {}
+    for index, point in enumerate(capture_ego):
+        spatial_index.setdefault(_spatial_cell(point, tolerance_m), []).append(index)
     selected: list[dict[str, Any]] = []
     used_capture: set[int] = set()
     for source_index, point in enumerate(nurec_points):
         expected = _transform_point(nurec_to_ego, point[:3])
+        cell = _spatial_cell(expected, tolerance_m)
         nearest_index, distance = min(
             (
                 (index, math.dist(expected, observed))
-                for index, observed in enumerate(capture_ego)
+                for offset_x in (-1, 0, 1)
+                for offset_y in (-1, 0, 1)
+                for offset_z in (-1, 0, 1)
+                for index in spatial_index.get(
+                    (cell[0] + offset_x, cell[1] + offset_y, cell[2] + offset_z), []
+                )
                 if index not in used_capture
+                for observed in (capture_ego[index],)
             ),
             key=lambda row: (row[1], row[0]),
             default=(-1, math.inf),
@@ -183,6 +205,10 @@ def _select_anchors(*, nurec_points: list[tuple[float, float, float, float]], nu
         if len(selected) >= 16:
             break
     return selected
+
+
+def _spatial_cell(point: tuple[float, float, float], width: float) -> tuple[int, int, int]:
+    return tuple(math.floor(value / width) for value in point)  # type: ignore[return-value]
 
 
 def _lidar_spec(run_config: Mapping[str, Any]) -> Mapping[str, Any]:
