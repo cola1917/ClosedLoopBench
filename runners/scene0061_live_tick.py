@@ -23,7 +23,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from runners.run_carla_basic_agent import build_basic_agent_plan, run_basic_agent
+from runners.run_carla_basic_agent import (
+    _import_basic_agent_cls,
+    build_basic_agent_plan,
+    run_basic_agent,
+)
 from runners.validate_multimodal_closed_loop import (
     MultimodalClosedLoopError,
     validate_multimodal_closed_loop_result,
@@ -100,6 +104,44 @@ def _python_runtime_identity() -> dict[str, Any]:
         "version": sys.version.split()[0],
         "protobuf": protobuf,
     }
+
+
+def _carla_basic_agent_identity(carla_python_api_path: Path) -> dict[str, Any]:
+    """Identify the explicit CARLA PythonAPI tree used for BasicAgent.
+
+    The separately-installed ``carla`` wheel does not contain CARLA's
+    ``agents.navigation`` package.  Recording the PythonAPI tree and the exact
+    BasicAgent source file makes that otherwise implicit dependency auditable.
+    """
+
+    python_api = carla_python_api_path.expanduser().resolve()
+    basic_agent = python_api / "agents" / "navigation" / "basic_agent.py"
+    identity = _file_identity(basic_agent, required=True)
+    assert identity is not None
+    return {
+        "python_api_path": str(python_api),
+        "basic_agent": identity,
+    }
+
+
+def _preflight_carla_basic_agent(carla_python_api_path: Path) -> dict[str, Any]:
+    """Load the explicit CARLA BasicAgent without connecting to CARLA."""
+
+    identity = _carla_basic_agent_identity(carla_python_api_path)
+    try:
+        basic_agent_cls = _import_basic_agent_cls(identity["python_api_path"])
+        module = sys.modules.get(str(getattr(basic_agent_cls, "__module__", "")))
+        module_path = Path(str(getattr(module, "__file__", ""))).resolve()
+        expected_path = Path(str(identity["basic_agent"]["path"])).resolve()
+        if module_path != expected_path:
+            raise Scene0061LiveTickError(
+                f"BasicAgent resolved to {module_path}, expected {expected_path}"
+            )
+    except Exception as exc:
+        raise Scene0061LiveTickError(
+            f"CARLA BasicAgent preflight failed under {Path(sys.executable).resolve()}: {exc}"
+        ) from exc
+    return {"status": "passed", **identity}
 
 
 def _file_identity(path: Path | None, *, required: bool = False) -> dict[str, Any] | None:
@@ -284,6 +326,7 @@ def prepare_live_tick(
     timeout_sec: float = 60.0,
     ego_driver: str = "basic_agent",
     require_multimodal: bool = True,
+    carla_python_api_path: Path | None = None,
 ) -> dict[str, Any]:
     """Snapshot explicit inputs and create a plan for exactly one CARLA tick.
 
@@ -304,6 +347,11 @@ def prepare_live_tick(
     sidecar_identity = _actor_binding_identity(config, source_config)
     native_scan_manifest = _native_scan_manifest_identity(config, source_config)
     _validate_static_actor_binding(config, sidecar_identity)
+    carla_basic_agent = (
+        _preflight_carla_basic_agent(carla_python_api_path)
+        if ego_driver == "basic_agent" and carla_python_api_path is not None
+        else None
+    )
 
     output_dir.mkdir(parents=True, exist_ok=False)
     runtime_config_path = output_dir / "runtime_run_config.json"
@@ -331,6 +379,10 @@ def prepare_live_tick(
     # an execution identity, not an unrecorded mutation of user configuration.
     plan["run_id"] = str(run_id)
     plan.setdefault("experiment", {})["run_id"] = str(run_id)
+    if carla_basic_agent is not None:
+        plan.setdefault("runtime", {})["carla_python_api_path"] = carla_basic_agent[
+            "python_api_path"
+        ]
     environment_path = output_dir / "runtime_environment.json"
     plan.setdefault("artifacts", {})["runtime_environment"] = str(environment_path)
     plan.setdefault("runtime", {})["provenance"] = {
@@ -340,6 +392,11 @@ def prepare_live_tick(
         "selected_config_sha256": config_identity["sha256"],
         "runtime_config_path": runtime_config_identity["path"],
         "runtime_config_sha256": runtime_config_identity["sha256"],
+        **(
+            {"carla_basic_agent": carla_basic_agent}
+            if carla_basic_agent is not None
+            else {}
+        ),
     }
     plan_path = output_dir / "basic_agent_plan.json"
     _write_json(plan_path, plan)
@@ -356,6 +413,7 @@ def prepare_live_tick(
         "opendrive": xodr_identity,
         "actor_bindings": sidecar_identity,
         "native_scan_manifest": native_scan_manifest,
+        "carla_basic_agent": carla_basic_agent,
         "artifacts": {
             "basic_agent_plan": str(plan_path.resolve()),
             "runtime_environment": str(environment_path.resolve()),
@@ -392,6 +450,25 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
         expected = str(identity.get("sha256") or "")
         if not path.is_file() or _sha256_file(path) != expected:
             raise Scene0061LiveTickError(f"recorded {name} path/SHA-256 no longer matches")
+    carla_basic_agent = environment.get("carla_basic_agent")
+    if carla_basic_agent is not None:
+        if not isinstance(carla_basic_agent, Mapping) or carla_basic_agent.get("status") != "passed":
+            raise Scene0061LiveTickError("prepared environment has no successful CARLA BasicAgent preflight")
+        try:
+            current_basic_agent = _carla_basic_agent_identity(
+                Path(str(carla_basic_agent.get("python_api_path") or ""))
+            )
+        except Scene0061LiveTickError as exc:
+            raise Scene0061LiveTickError(
+                "recorded CARLA BasicAgent path/SHA-256 no longer matches"
+            ) from exc
+        if (
+            current_basic_agent.get("python_api_path") != carla_basic_agent.get("python_api_path")
+            or current_basic_agent.get("basic_agent") != carla_basic_agent.get("basic_agent")
+        ):
+            raise Scene0061LiveTickError(
+                "recorded CARLA BasicAgent path/SHA-256 no longer matches"
+            )
     runtime_config = environment.get("runtime_config") or {}
     plan_path = Path(str((environment.get("artifacts") or {}).get("basic_agent_plan") or ""))
     plan = _load_object(plan_path)
@@ -589,6 +666,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=2000)
     parser.add_argument("--timeout-sec", type=float, default=60.0)
     parser.add_argument("--ego-driver", default="basic_agent")
+    parser.add_argument(
+        "--carla-python-api",
+        type=Path,
+        help="Explicit CARLA/PythonAPI/carla directory containing agents/navigation/basic_agent.py.",
+    )
     parser.add_argument("--sensor-handler-factory", default="adapters.nurec_260_client:build_nurec_260_handler")
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--execute-prepared", action="store_true")
@@ -596,12 +678,20 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.prepare_only and args.execute_prepared:
             raise Scene0061LiveTickError("--prepare-only and --execute-prepared are mutually exclusive")
+        if args.ego_driver == "basic_agent" and args.carla_python_api is None:
+            raise Scene0061LiveTickError(
+                "--carla-python-api is required for a BasicAgent live-tick diagnostic"
+            )
         if args.execute_prepared:
             environment = verify_prepared_live_tick(args.output_dir)
             if (
                 environment.get("run_id") != args.run_id
                 or (environment.get("config") or {}).get("path") != str(args.config.expanduser().resolve())
                 or (environment.get("opendrive") or {}).get("path") != str(args.opendrive.expanduser().resolve())
+                or (
+                    (environment.get("carla_basic_agent") or {}).get("python_api_path")
+                    != str(args.carla_python_api.expanduser().resolve())
+                )
             ):
                 raise Scene0061LiveTickError("explicit execute-prepared inputs do not match the prepared environment")
         else:
@@ -614,6 +704,7 @@ def main(argv: list[str] | None = None) -> int:
                 port=args.port,
                 timeout_sec=args.timeout_sec,
                 ego_driver=args.ego_driver,
+                carla_python_api_path=args.carla_python_api,
             )
         if args.prepare_only:
             config = _load_object(args.config.expanduser().resolve())

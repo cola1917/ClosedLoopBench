@@ -333,7 +333,9 @@ def run_basic_agent(
     driver_kind = str((plan.get("ego") or {}).get("driver", "basic_agent"))
     if driver_kind == "basic_agent" and agent_module is None:
         try:
-            agent_module = _import_basic_agent_cls()
+            agent_module = _import_basic_agent_cls(
+                (plan.get("runtime") or {}).get("carla_python_api_path")
+            )
         except Exception as exc:
             return _failed_result(plan, "missing_basic_agent", str(exc))
 

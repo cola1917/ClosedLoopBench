@@ -138,6 +138,36 @@ class Scene0061LiveTickTests(unittest.TestCase):
                     output, sensor_handler_factory=lambda _config, _output: lambda _context: {}
                 )
 
+    def test_verify_rejects_a_drifted_recorded_basic_agent_file(self):
+        from runners.scene0061_live_tick import (
+            Scene0061LiveTickError,
+            _carla_basic_agent_identity,
+            prepare_live_tick,
+            verify_prepared_live_tick,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, xodr, _ = self._inputs(root)
+            output = root / "diagnostic"
+            prepare_live_tick(
+                config_path=config, output_dir=output, run_id="r11-fixed", opendrive_path=xodr
+            )
+            python_api = root / "PythonAPI" / "carla"
+            basic_agent = python_api / "agents" / "navigation" / "basic_agent.py"
+            basic_agent.parent.mkdir(parents=True)
+            basic_agent.write_text("class BasicAgent: pass\n", encoding="utf-8")
+            environment_path = output / "runtime_environment.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["carla_basic_agent"] = {
+                "status": "passed",
+                **_carla_basic_agent_identity(python_api),
+            }
+            environment_path.write_text(json.dumps(environment), encoding="utf-8")
+            basic_agent.write_text("class BasicAgent: changed = True\n", encoding="utf-8")
+            with self.assertRaisesRegex(Scene0061LiveTickError, "CARLA BasicAgent path/SHA-256"):
+                verify_prepared_live_tick(output)
+
     def test_sidecar_hash_mismatch_is_rejected_before_output_creation(self):
         from runners.scene0061_live_tick import Scene0061LiveTickError, prepare_live_tick
 

@@ -27,6 +27,7 @@ explicit inputs must remain identical for the execution command.
   --output-dir /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/diagnostics/scene0061_live_tick_r12 \
   --run-id scene0061-live-tick-r12 \
   --opendrive /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/runtime/road.nurec-route-extended-both-v7.sidewalks8m.bfe8fe6.xodr \
+  --carla-python-api /home/cwadmin/sim-env/data/CARLA_0.9.16/PythonAPI/carla \
   --prepare-only
 
 /home/cwadmin/sim-env/miniconda3/envs/autodrive/bin/python runners/scene0061_live_tick.py \
@@ -34,13 +35,14 @@ explicit inputs must remain identical for the execution command.
   --output-dir /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/diagnostics/scene0061_live_tick_r12 \
   --run-id scene0061-live-tick-r12 \
   --opendrive /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/runtime/road.nurec-route-extended-both-v7.sidewalks8m.bfe8fe6.xodr \
+  --carla-python-api /home/cwadmin/sim-env/data/CARLA_0.9.16/PythonAPI/carla \
   --execute-prepared
 ```
 
 `runtime_environment.json` must record the intended commit, absolute source
 config path and SHA-256, sidecar SHA-256, native scan manifest SHA-256, and
 OpenDRIVE SHA-256, plus the exact Python executable and protobuf version. The
-prepare-only sensor-handler preflight must pass. A hash/path/interpreter mismatch
+prepare-only sensor-handler and explicit CARLA BasicAgent preflights must pass. A hash/path/interpreter mismatch
 is a hard stop. Do not use the host `/usr/bin/python3`: its protobuf 3.12.4 is
 incompatible with the installed NuRec generated modules.
 
