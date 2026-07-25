@@ -207,3 +207,134 @@ class Scene0061LiveTickTests(unittest.TestCase):
             self.assertEqual(validation["status"], "failed")
             self.assertIn("persisted cleanup audit did not succeed", validation["problems"])
             self.assertIn("persisted cleanup audit has no actions", validation["problems"])
+
+    def _write_g0_evidence(self, root: Path) -> tuple[dict, Path]:
+        import hashlib
+
+        payload_root = root / "algorithm_sensor_payloads" / "frame_00000042"
+        payload_root.mkdir(parents=True)
+        records = []
+        for modality, sensor_ids in (
+            ("rgb", [f"camera_{index}" for index in range(6)]),
+            ("lidar", ["lidar_top"]),
+        ):
+            for sensor_id in sensor_ids:
+                suffix = ".jpg" if modality == "rgb" else ".bin"
+                data = f"{modality}:{sensor_id}".encode("ascii")
+                payload = payload_root / f"{sensor_id}{suffix}"
+                payload.write_bytes(data)
+                materialized = {
+                    "path": str(payload.resolve()),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "byte_count": len(data),
+                    "encoding": (
+                        "jpeg" if modality == "rgb" else "float32_xyzi_little_endian"
+                    ),
+                    "coordinate_frame": (
+                        "camera_optical" if modality == "rgb" else "carla_sensor"
+                    ),
+                }
+                if modality == "lidar":
+                    materialized["axis_convention"] = "x_forward_y_right_z_up"
+                metadata = (
+                    {"width": 1600, "height": 900, "encoding": "jpeg"}
+                    if modality == "rgb"
+                    else {"point_count": 1, "encoding": "float_xyz_intensity"}
+                )
+                metadata["materialized_payload"] = materialized
+                records.append(
+                    {
+                        "request_id": f"{modality}-{sensor_id}",
+                        "modality": modality,
+                        "sensor_id": sensor_id,
+                        "status": "passed",
+                        "latency_ms": 1.0,
+                        "payload_sha256": "a" * 64,
+                        "response_metadata": metadata,
+                        "issues": [],
+                    }
+                )
+        evidence = {
+            "schema_version": "nurec_multimodal_evidence.v1",
+            "scene_id": "0" * 32,
+            "frame_id": 42,
+            "simulation_time_sec": 2.1,
+            "dynamic_object_sha256": "b" * 64,
+            "dynamic_object_count": 1,
+            "records": records,
+            "modalities": {
+                "rgb": {"requested_count": 6, "passed_count": 6},
+                "lidar": {"requested_count": 1, "passed_count": 1},
+            },
+            "max_latency_ms": None,
+            "issues": [],
+            "status": "passed",
+            "dispatch": {
+                "sdk_boundary": "injected_version_specific_encoder",
+                "dynamic_object_verification": "encoder_echo_checked_before_rpc",
+                "response_digest": "sha256_of_serialized_rpc_response",
+                "response_validation": "injected_modality_specific_inspector",
+                "runtime_scene_id": "scene-0061",
+                "canonical_scene_id": "0" * 32,
+                "nre_api": "SensorsimService/26.04",
+            },
+        }
+        (root / "frame_trace.jsonl").write_text(
+            json.dumps(
+                {
+                    "world_tick_frame": 42,
+                    "ego_control": {"throttle": 0.2, "steer": 0.0, "brake": 0.0},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        (root / "nurec_multimodal_trace.jsonl").write_text(
+            json.dumps(evidence) + "\n", encoding="utf-8"
+        )
+        (root / "cleanup_audit.json").write_text(
+            json.dumps({"succeeded": True, "actions": [{"action": "ego.destroy", "status": "succeeded"}]}),
+            encoding="utf-8",
+        )
+        result = {
+            "status": "ego_closed_loop",
+            "cleanup_succeeded": True,
+            "report": {"runtime": {"frame_trace_count": 1}},
+            "nurec_multimodal_trace": [evidence],
+        }
+        return result, payload_root / "camera_0.jpg"
+
+    def test_result_validation_requires_rehashable_6rgb_1lidar_nre_evidence(self):
+        from runners.scene0061_live_tick import validate_live_tick_result
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result, first_payload = self._write_g0_evidence(root)
+            self.assertEqual(validate_live_tick_result(result, root)["status"], "passed")
+
+            first_payload.write_bytes(b"tampered")
+            validation = validate_live_tick_result(result, root)
+            self.assertEqual(validation["status"], "failed")
+            self.assertIn(
+                "rgb:camera_0 materialized payload SHA-256 does not match",
+                validation["problems"],
+            )
+
+    def test_result_validation_rejects_non_physical_nurec_coverage(self):
+        from runners.scene0061_live_tick import validate_live_tick_result
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            result, _ = self._write_g0_evidence(root)
+            evidence = result["nurec_multimodal_trace"][0]
+            evidence["records"].pop(0)
+            evidence["modalities"]["rgb"] = {"requested_count": 5, "passed_count": 5}
+            (root / "nurec_multimodal_trace.jsonl").write_text(
+                json.dumps(evidence) + "\n", encoding="utf-8"
+            )
+            validation = validate_live_tick_result(result, root)
+            self.assertEqual(validation["status"], "failed")
+            self.assertIn(
+                "persisted NuRec frame does not contain exactly six RGB responses",
+                validation["problems"],
+            )
