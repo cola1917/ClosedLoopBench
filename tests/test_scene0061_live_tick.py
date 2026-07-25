@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -112,6 +113,99 @@ class Scene0061LiveTickTests(unittest.TestCase):
             (output / "runtime_environment.json").write_text(json.dumps(environment), encoding="utf-8")
             with self.assertRaisesRegex(Scene0061LiveTickError, "native LiDAR probe request"):
                 verify_prepared_live_tick(output)
+
+    def test_physical_axis_collection_requires_production_gate_replay(self):
+        """A collector candidate is not a passed physical axis proof by itself."""
+        from runners.scene0061_live_tick import _collect_lidar_axis_evidence
+
+        candidate = {
+            "schema_version": "scene0061_lidar_coordinate_validation.v1",
+            "status": "passed",
+            "sensor_to_ego": [
+                1.0, 0.0, 0.0, 0.0,
+                0.0, 1.0, 0.0, 0.0,
+                0.0, 0.0, 1.0, 0.0,
+                0.0, 0.0, 0.0, 1.0,
+            ],
+            "live_render_lidar": {"carla_frame_id": 42, "point_count": 4},
+            "axis_validation": {"status": "passed"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = root / "native-capture.json"
+            capture.write_text("{}\n", encoding="utf-8")
+            native_scan = root / "native-scan.json"
+            native_scan.write_text("{}\n", encoding="utf-8")
+            (root / "frame_trace.jsonl").write_text(
+                json.dumps({"native_lidar_capture": {"capture_path": str(capture)}}) + "\n",
+                encoding="utf-8",
+            )
+            (root / "nurec_multimodal_trace.jsonl").write_text(
+                json.dumps({"frame_id": 42}) + "\n", encoding="utf-8"
+            )
+            with mock.patch(
+                "runners.scene0061_live_tick.collect_lidar_axis_evidence",
+                return_value=candidate,
+            ) as collect, mock.patch(
+                "runners.scene0061_live_tick.validate_lidar_axis_evidence",
+                return_value={"status": "passed"},
+            ) as replay:
+                evidence = _collect_lidar_axis_evidence(
+                    output_dir=root,
+                    config={},
+                    environment={"native_scan_manifest": {"path": str(native_scan)}},
+                    capture_native_lidar=True,
+                )
+
+            self.assertEqual(evidence["status"], "passed")
+            self.assertEqual(evidence["gate_replay"]["status"], "passed")
+            collect.assert_called_once()
+            replay.assert_called_once_with(
+                candidate,
+                sensor_to_ego=candidate["sensor_to_ego"],
+                live_render_lidar=candidate["live_render_lidar"],
+            )
+
+    def test_physical_axis_gate_replay_failure_cannot_remain_passed(self):
+        from runners.scene0061_live_tick import _collect_lidar_axis_evidence
+        from runtime.scene0061_lidar_axis_gate import LiDARAxisEvidenceError
+
+        candidate = {
+            "status": "passed",
+            "sensor_to_ego": [1.0] * 16,
+            "live_render_lidar": {"carla_frame_id": 42, "point_count": 4},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            capture = root / "native-capture.json"
+            capture.write_text("{}\n", encoding="utf-8")
+            native_scan = root / "native-scan.json"
+            native_scan.write_text("{}\n", encoding="utf-8")
+            (root / "frame_trace.jsonl").write_text(
+                json.dumps({"native_lidar_capture": {"capture_path": str(capture)}}) + "\n",
+                encoding="utf-8",
+            )
+            (root / "nurec_multimodal_trace.jsonl").write_text(
+                json.dumps({"frame_id": 42}) + "\n", encoding="utf-8"
+            )
+            with mock.patch(
+                "runners.scene0061_live_tick.collect_lidar_axis_evidence",
+                return_value=candidate,
+            ), mock.patch(
+                "runners.scene0061_live_tick.validate_lidar_axis_evidence",
+                side_effect=LiDARAxisEvidenceError("tampered anchor"),
+            ):
+                evidence = _collect_lidar_axis_evidence(
+                    output_dir=root,
+                    config={},
+                    environment={"native_scan_manifest": {"path": str(native_scan)}},
+                    capture_native_lidar=True,
+                )
+
+            self.assertEqual(evidence["status"], "failed")
+            self.assertEqual(evidence["reason"], "physical_axis_gate_replay_failed")
+            self.assertIn("tampered anchor", evidence["detail"])
+            self.assertEqual(evidence["unverified_collection"], candidate)
 
     def test_execute_rejects_a_different_interpreter_before_callback(self):
         from runners.scene0061_live_tick import (

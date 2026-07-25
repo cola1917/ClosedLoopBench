@@ -31,18 +31,48 @@ python tools/scene0061_sync.py status `
 
 The remote checkout must also be clean except for the known untracked `.runtime/` and `incoming/` directories. Synchronize a reviewed commit before proceeding; never infer equality from a bundle filename.
 
-## 2. Select immutable inputs and a fresh run identity
+## 2. Derive the r19 axis-bound config, then select immutable inputs
 
-Run the rest on the remote checkout. The following paths identify the validated scene inputs. Choose a previously unused numeric suffix (shown as `r15`); the commit prefix must come from the checkout that will execute.
+Do not edit `smoke_currentbound.json` or any historical runtime snapshot.
+For r19, derive a new config from exactly the r18 source config. The derivation
+tool records the absolute source path, SHA-256, byte count and the canonical
+NRE-response-to-CARLA-sensor matrix; it rejects an existing output as well as
+an already-derived/axis-bound source. The matrix is a candidate from r18
+analysis, **not** coordinate proof: r19 must still satisfy the raw-to-normalized
+payload replay and independent CARLA same-frame anchor gate.
 
 ```bash
 set -euo pipefail
 REPO=/home/cwadmin/workspace/ClosedLoopBench
 PY=/home/cwadmin/sim-env/miniconda3/envs/autodrive/bin/python
-CONFIG=$REPO/outputs/scene-0061-final-closure-v2/diagnostics/native_scan_original_v7_sidewalks8m_bbox_bottom_1tick_ee3760d_v12_r11/smoke_currentbound.json
+SOURCE_CONFIG=$REPO/outputs/scene-0061-final-closure-v2/diagnostics/native_scan_original_v7_sidewalks8m_bbox_bottom_1tick_ee3760d_v12_r11/smoke_currentbound.json
+DERIVED_CONFIG=$REPO/outputs/scene-0061-final-closure-v2/runtime/scene0061_r19_nre_lidar_axis_bound.json
+test -f "$SOURCE_CONFIG"
+test ! -e "$DERIVED_CONFIG"
+"$PY" runners/derive_scene0061_lidar_axis_config.py \
+  --source-config "$SOURCE_CONFIG" \
+  --output "$DERIVED_CONFIG"
+"$PY" -m json.tool "$DERIVED_CONFIG"
+```
+
+The result must contain `config_derivation.source_config.sha256` for the
+selected source and `nurec_runtime.lidar_axis_normalization` with direction
+`NRE response -> CARLA sensor`. The latter has `response_to_sensor`
+`[0,0,-1,0,0,-1,0,0,-1,0,0,0,0,0,0,1]`. Do not change this document after
+the `prepare-only` phase; create a new derived config/run instead.
+
+Then select a fresh run identity.
+
+Run the rest on the remote checkout. The following paths identify the validated scene inputs. Choose a previously unused numeric suffix (shown as `r19`); the commit prefix must come from the checkout that will execute.
+
+```bash
+set -euo pipefail
+REPO=/home/cwadmin/workspace/ClosedLoopBench
+PY=/home/cwadmin/sim-env/miniconda3/envs/autodrive/bin/python
+CONFIG=$DERIVED_CONFIG
 XODR=$REPO/outputs/scene-0061-final-closure-v2/runtime/road.nurec-route-extended-both-v7.sidewalks8m.bfe8fe6.xodr
 CARLA_PYTHON_API=/home/cwadmin/sim-env/data/CARLA_0.9.16/PythonAPI/carla
-RUN_LABEL="$(git -C "$REPO" rev-parse --short=7 HEAD)-r15"
+RUN_LABEL="$(git -C "$REPO" rev-parse --short=7 HEAD)-r19"
 OUT=$REPO/outputs/scene-0061-final-closure-v2/diagnostics/scene0061_live_tick_${RUN_LABEL}
 RUN_ID=scene0061-live-tick-${RUN_LABEL}
 test -x "$PY"

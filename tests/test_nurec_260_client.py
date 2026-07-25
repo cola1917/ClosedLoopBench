@@ -326,6 +326,55 @@ class NuRec260ClientTests(unittest.TestCase):
 
             validate_nurec_multimodal_evidence(evidence)
 
+    def test_dispatch_materializes_replayable_raw_and_normalized_lidar_payloads(self):
+        """The client binds renderer bytes and CARLA-sensor bytes in one response."""
+        from adapters.nurec_multimodal import validate_nurec_multimodal_evidence
+
+        transform = [
+            0.0, 0.0, -1.0, 0.0,
+            0.0, -1.0, 0.0, 0.0,
+            -1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ]
+        normalization = {
+            "schema_version": "nre_lidar_axis_normalization.v1",
+            "source_coordinate_frame": "nre_26_04_lidar_sensor",
+            "source_axis_convention": "nre_26_04_render_axes",
+            "target_coordinate_frame": "sensor_local",
+            "target_axis_convention": "carla_sensor",
+            "response_to_sensor": transform,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = self._client(
+                payload_output_dir=root / "payloads",
+                payload_reference_root=root,
+                lidar_axis_normalization=normalization,
+            ).dispatch_frame(_frame())
+
+            self.assertEqual(evidence["status"], "passed")
+            lidar = next(row for row in evidence["records"] if row["modality"] == "lidar")
+            metadata = lidar["response_metadata"]
+            raw = metadata["raw_response_payload"]
+            normalized = metadata["materialized_payload"]
+            raw_bytes = struct.pack(
+                "<8f", 1.0, 2.0, 3.0, 0.25, 4.0, 5.0, 6.0, 0.75
+            )
+            normalized_bytes = struct.pack(
+                "<8f", -3.0, -2.0, -1.0, 0.25, -6.0, -5.0, -4.0, 0.75
+            )
+            self.assertEqual(Path(raw["path"]).read_bytes(), raw_bytes)
+            self.assertEqual(Path(normalized["path"]).read_bytes(), normalized_bytes)
+            self.assertEqual(raw["relative_path"], "payloads/frame_00000042/lidar_top.nre.bin")
+            self.assertEqual(normalized["relative_path"], "payloads/frame_00000042/lidar_top.bin")
+            self.assertEqual(raw["sha256"], hashlib.sha256(raw_bytes).hexdigest())
+            self.assertEqual(normalized["sha256"], hashlib.sha256(normalized_bytes).hexdigest())
+            self.assertEqual(raw["coordinate_frame"], "nre_26_04_lidar_sensor")
+            self.assertEqual(normalized["coordinate_frame"], "sensor_local")
+            self.assertEqual(metadata["axis_normalization"]["response_to_sensor"], transform)
+            self.assertIn("response_to_sensor_sha256", metadata["axis_normalization"])
+            validate_nurec_multimodal_evidence(evidence)
+
     def test_rejects_malformed_nre_260_buffered_lidar_response(self):
         evidence = self._client(
             _BufferedLidarStub(point_count=2, xyz_bytes=struct.pack("<3f", 1, 2, 3))

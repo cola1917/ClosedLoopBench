@@ -42,6 +42,10 @@ from runtime.scene0061_lidar_axis_collector import (
     LiDARAxisCollectionError,
     collect_lidar_axis_evidence,
 )
+from runtime.scene0061_lidar_axis_gate import (
+    LiDARAxisEvidenceError,
+    validate_lidar_axis_evidence,
+)
 
 
 class Scene0061LiveTickError(RuntimeError):
@@ -877,7 +881,6 @@ def _collect_lidar_axis_evidence(
             native_scan_manifest_path=Path(str(native_scan["path"])),
         )
         evidence["collection_source"] = base["collection_source"]
-        return evidence
     except (LiDARAxisCollectionError, OSError, ValueError) as exc:
         return {
             **base,
@@ -885,6 +888,37 @@ def _collect_lidar_axis_evidence(
             "reason": "physical_axis_collection_failed",
             "detail": str(exc),
         }
+
+    # A collector result is only a candidate claim.  Replay the payload-bound
+    # evidence through the production gate before this run can describe its
+    # LiDAR coordinate proof as passed.  Keep a rejected candidate for audit,
+    # but never surface its inner "passed" status as the run outcome.
+    try:
+        sensor_to_ego = evidence.get("sensor_to_ego")
+        live_render_lidar = evidence.get("live_render_lidar")
+        if not isinstance(live_render_lidar, Mapping):
+            raise LiDARAxisEvidenceError(
+                "collected LiDAR axis evidence has no live render payload"
+            )
+        replay = validate_lidar_axis_evidence(
+            evidence,
+            sensor_to_ego=sensor_to_ego,
+            live_render_lidar=live_render_lidar,
+        )
+    except (LiDARAxisEvidenceError, ValueError) as exc:
+        return {
+            **base,
+            "status": "failed",
+            "reason": "physical_axis_gate_replay_failed",
+            "detail": str(exc),
+            "unverified_collection": evidence,
+        }
+    evidence["gate_replay"] = {
+        "status": "passed",
+        "validator": "runtime.scene0061_lidar_axis_gate:validate_lidar_axis_evidence",
+        "result": replay,
+    }
+    return evidence
 
 
 def execute_live_tick(
