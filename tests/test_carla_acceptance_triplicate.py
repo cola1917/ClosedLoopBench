@@ -266,6 +266,8 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "lidar-coordinate.json"
             payload_path = Path(directory) / "live-lidar.xyzi"
+            native_capture_points_path = Path(directory) / "carla-native-lidar.xyzi"
+            native_capture_path = Path(directory) / "carla-native-lidar.json"
             native_scan_path = Path(directory) / "native-scan-manifest.json"
             points = [
                 (1.0, 0.0, 0.0, 0.5),
@@ -276,6 +278,12 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
             payload_path.write_bytes(
                 b"".join(struct.pack("<4f", *point) for point in points)
             )
+            # This is a separately materialized CARLA-native capture from the
+            # same simulated sensor/frame, not a claim derived from the NRE
+            # response metadata.  It supplies independent anchor ground truth.
+            native_capture_points_path.write_bytes(
+                b"".join(struct.pack("<4f", *point) for point in points)
+            )
             native_scan_path.write_text("{\"scan\":0}", encoding="utf-8")
             matrix = [
                 1.0, 0.0, 0.0, 0.0,
@@ -284,6 +292,21 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                 0.0, 0.0, 0.0, 1.0,
             ]
             artifact_sha = "a" * 64
+            native_capture = {
+                "schema_version": "scene0061_carla_native_lidar_capture.v1",
+                "status": "passed",
+                "carla_frame_id": 491,
+                "coordinate_frame": "carla_sensor",
+                "sensor_to_ego": matrix,
+                "raw_xyzi_ref": {
+                    "path": str(native_capture_points_path),
+                    "sha256": hashlib.sha256(native_capture_points_path.read_bytes()).hexdigest(),
+                    "byte_count": native_capture_points_path.stat().st_size,
+                    "encoding": "float32_xyzi_little_endian",
+                    "carla_frame_id": 491,
+                },
+            }
+            native_capture_path.write_text(json.dumps(native_capture), encoding="utf-8")
             evidence = {
                 "schema_version": "scene0061_lidar_coordinate_validation.v1",
                 "status": "passed",
@@ -309,6 +332,7 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                 "axis_validation": {
                     "schema_version": "scene0061_lidar_axis_alignment.v1",
                     "status": "passed",
+                    "evidence_source": "scene0061_carla_native_lidar_capture.v1",
                     "carla_frame_id": 491,
                     "tolerance_m": 0.01,
                     "measured_max_abs_error_m": 0.0,
@@ -327,11 +351,20 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                         "carla_frame_id": 491,
                         "scan_index": 0,
                     },
+                    "independent_carla_capture_ref": {
+                        "path": str(native_capture_path),
+                        "sha256": hashlib.sha256(native_capture_path.read_bytes()).hexdigest(),
+                        "byte_count": native_capture_path.stat().st_size,
+                        "carla_frame_id": 491,
+                    },
+                    "independent_carla_points_ref": native_capture["raw_xyzi_ref"],
                     "anchors": [
                         {
                             "source_point_index": index,
                             "sensor_local_point_m": list(point[:3]),
                             "carla_ego_point_m": [point[0], point[1], point[2] + 2.5],
+                            "independent_capture_point_index": index,
+                            "ground_truth_source": "same_frame_carla_native_lidar",
                         }
                         for index, point in enumerate(points)
                     ],

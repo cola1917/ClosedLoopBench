@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
 import math
 import re
 import struct
@@ -19,6 +20,7 @@ from typing import Any, Mapping
 
 AXIS_EVIDENCE_SCHEMA = "scene0061_lidar_axis_alignment.v1"
 XYZI_ENCODING = "float32_xyzi_little_endian"
+NATIVE_CAPTURE_SCHEMA = "scene0061_carla_native_lidar_capture.v1"
 
 
 class LiDARAxisEvidenceError(ValueError):
@@ -67,6 +69,9 @@ def validate_lidar_axis_evidence(
     if not isinstance(native_scan_ref, Mapping):  # Narrow type for static readers.
         raise LiDARAxisEvidenceError("native LiDAR scan manifest reference is required")
     _nonnegative_int(native_scan_ref.get("scan_index"), "native scan index")
+    capture_points, capture_matrix = _validate_independent_carla_capture(
+        axis, carla_frame_id
+    )
 
     points = _read_xyzi(payload_path)
     if not points:
@@ -102,6 +107,23 @@ def validate_lidar_axis_evidence(
             raise LiDARAxisEvidenceError("axis sensor-local anchor differs from immutable XYZI payload")
         expected_carla = _transform_point(matrix, observed_sensor)
         observed_carla = _vector3(anchor.get("carla_ego_point_m"), "CARLA-ego anchor")
+        capture_index = _nonnegative_int(
+            anchor.get("independent_capture_point_index"),
+            "independent CARLA capture point index",
+        )
+        if capture_index >= len(capture_points):
+            raise LiDARAxisEvidenceError(
+                "axis independent CARLA capture point index lies outside XYZI payload"
+            )
+        independently_observed = _transform_point(capture_matrix, capture_points[capture_index][:3])
+        if max(abs(left - right) for left, right in zip(independently_observed, observed_carla)) > 1e-5:
+            raise LiDARAxisEvidenceError(
+                "axis CARLA-ego anchor differs from independent CARLA LiDAR capture"
+            )
+        if anchor.get("ground_truth_source") != "same_frame_carla_native_lidar":
+            raise LiDARAxisEvidenceError(
+                "axis anchor must identify same-frame native CARLA LiDAR ground truth"
+            )
         deltas = [left - right for left, right in zip(expected_carla, observed_carla)]
         residual = math.sqrt(sum(value * value for value in deltas))
         residuals.append(residual)
@@ -129,6 +151,51 @@ def validate_lidar_axis_evidence(
         "tolerance_m": tolerance_m,
         "status": "passed",
     }
+
+
+def _validate_independent_carla_capture(
+    axis: Mapping[str, Any], carla_frame_id: int
+) -> tuple[list[tuple[float, float, float, float]], list[float]]:
+    """Load the immutable CARLA-side capture used as anchor ground truth.
+
+    The source response and its configured calibration are not independent
+    evidence.  The capture JSON must instead name a native CARLA LiDAR stream
+    recorded at exactly the rendered frame.
+    """
+
+    if axis.get("evidence_source") != NATIVE_CAPTURE_SCHEMA:
+        raise LiDARAxisEvidenceError("LiDAR axis evidence has no native CARLA capture source")
+    capture_ref = axis.get("independent_carla_capture_ref")
+    capture_path = _validate_file_ref(
+        capture_ref, label="independent CARLA LiDAR capture", expected_frame_id=carla_frame_id
+    )
+    try:
+        capture = json.loads(capture_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise LiDARAxisEvidenceError("independent CARLA LiDAR capture is not valid JSON") from exc
+    if not isinstance(capture, Mapping):
+        raise LiDARAxisEvidenceError("independent CARLA LiDAR capture must be an object")
+    if (
+        capture.get("schema_version") != NATIVE_CAPTURE_SCHEMA
+        or capture.get("status") != "passed"
+        or capture.get("carla_frame_id") != carla_frame_id
+        or capture.get("coordinate_frame") != "carla_sensor"
+    ):
+        raise LiDARAxisEvidenceError("independent CARLA LiDAR capture is not a passed same-frame native capture")
+    points_ref = axis.get("independent_carla_points_ref")
+    points_path = _validate_file_ref(
+        points_ref,
+        label="independent CARLA LiDAR XYZI payload",
+        expected_frame_id=carla_frame_id,
+        required_encoding=XYZI_ENCODING,
+    )
+    capture_points_ref = capture.get("raw_xyzi_ref")
+    if not isinstance(capture_points_ref, Mapping) or not isinstance(points_ref, Mapping):
+        raise LiDARAxisEvidenceError("independent CARLA capture must bind its XYZI payload")
+    for key in ("path", "sha256", "byte_count", "encoding", "carla_frame_id"):
+        if capture_points_ref.get(key) != points_ref.get(key):
+            raise LiDARAxisEvidenceError("independent CARLA capture points reference does not match capture JSON")
+    return _read_xyzi(points_path), _validated_rigid_matrix(capture.get("sensor_to_ego"))
 
 
 def _validate_file_ref(
