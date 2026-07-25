@@ -26,6 +26,10 @@ from runners.validate_multimodal_closed_loop import (
     MultimodalClosedLoopError,
     validate_multimodal_closed_loop_result,
 )
+from runtime.scene0061_lidar_axis_gate import (
+    LiDARAxisEvidenceError,
+    validate_lidar_axis_evidence,
+)
 
 
 class CarlaAcceptanceError(RuntimeError):
@@ -292,6 +296,15 @@ def _validate_transfuserpp_external_evidence(config: dict[str, Any]) -> None:
     experiment = config.get("experiment") or {}
     matrix = lidar_spec.get("sensor_to_ego")
     live = evidence.get("live_render_lidar") or {}
+    try:
+        validate_lidar_axis_evidence(
+            evidence,
+            sensor_to_ego=matrix,
+            live_render_lidar=live,
+        )
+        axis_evidence_valid = True
+    except (LiDARAxisEvidenceError, OSError, ValueError):
+        axis_evidence_valid = False
     content_valid = (
         evidence.get("schema_version")
         == "scene0061_lidar_coordinate_validation.v1"
@@ -316,6 +329,7 @@ def _validate_transfuserpp_external_evidence(config: dict[str, Any]) -> None:
         and int(live["point_count"]) > 0
         and live.get("timestamp_inside_artifact_range") is True
         and live.get("scene_start_matches_artifact") is True
+        and axis_evidence_valid
     )
     if not file_valid or not content_valid:
         raise CarlaAcceptanceError(

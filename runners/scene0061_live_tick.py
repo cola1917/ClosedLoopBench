@@ -272,6 +272,141 @@ def _read_jsonl_objects(path: Path, name: str, problems: list[str]) -> list[dict
     return values
 
 
+def _is_within(path: Path, root: Path) -> bool:
+    """Return whether a resolved artifact is contained by its run directory."""
+
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _validate_materialized_payload(
+    record: Mapping[str, Any],
+    *,
+    output_dir: Path,
+    seen_paths: set[Path],
+    problems: list[str],
+) -> None:
+    """Re-hash a response payload rather than trusting its JSON pointer.
+
+    The NuRec evidence contract deliberately permits metadata without a local
+    payload.  That is useful for generic clients, but insufficient for this
+    physical G0 diagnostic: its RGB/LiDAR response must remain independently
+    inspectable after CARLA and NRE have been torn down.
+    """
+
+    modality = str(record.get("modality") or "unknown")
+    sensor_id = str(record.get("sensor_id") or "unknown")
+    label = f"{modality}:{sensor_id}"
+    metadata = record.get("response_metadata")
+    if not isinstance(metadata, Mapping):
+        problems.append(f"{label} has no response metadata")
+        return
+    materialized = metadata.get("materialized_payload")
+    if not isinstance(materialized, Mapping):
+        problems.append(f"{label} has no materialized response payload")
+        return
+    declared_path = str(materialized.get("path") or "").strip()
+    if not declared_path:
+        problems.append(f"{label} materialized payload path is empty")
+        return
+    payload_path = Path(declared_path).expanduser().resolve()
+    payload_root = output_dir.resolve() / "algorithm_sensor_payloads"
+    if not _is_within(payload_path, payload_root):
+        problems.append(f"{label} materialized payload is outside this run")
+        return
+    if not payload_path.is_file():
+        problems.append(f"{label} materialized payload does not exist")
+        return
+    if payload_path in seen_paths:
+        problems.append(f"{label} reuses a materialized payload path")
+        return
+    seen_paths.add(payload_path)
+    byte_count = materialized.get("byte_count")
+    if byte_count != payload_path.stat().st_size:
+        problems.append(f"{label} materialized payload byte count does not match")
+    if str(materialized.get("sha256") or "") != _sha256_file(payload_path):
+        problems.append(f"{label} materialized payload SHA-256 does not match")
+
+
+def _validate_physical_multimodal_evidence(
+    evidence: Mapping[str, Any],
+    *,
+    output_dir: Path,
+    environment: Mapping[str, Any] | None,
+    problems: list[str],
+) -> None:
+    """Apply Scene-0061 G0 checks that are stricter than the shared schema.
+
+    This is intentionally an acceptance-layer validator.  The shared contract
+    supports any non-empty RGB/LiDAR request set and clients that do not retain
+    payload files; Scene-0061 G0 specifically requires one live six-camera and
+    one-LiDAR frame whose local artifacts can be re-hashed.
+    """
+
+    try:
+        validate_nurec_multimodal_evidence(evidence)
+    except NuRecMultimodalError as exc:
+        problems.append(f"persisted NuRec frame is invalid: {exc}")
+        return
+
+    records = evidence.get("records")
+    if not isinstance(records, list):
+        problems.append("persisted NuRec frame has no response records")
+        return
+    rgb_records = [record for record in records if record.get("modality") == "rgb"]
+    lidar_records = [record for record in records if record.get("modality") == "lidar"]
+    if len(rgb_records) != 6:
+        problems.append("persisted NuRec frame does not contain exactly six RGB responses")
+    if len(lidar_records) != 1:
+        problems.append("persisted NuRec frame does not contain exactly one LiDAR response")
+    sensor_ids = [str(record.get("sensor_id") or "") for record in records]
+    if not all(sensor_ids) or len(sensor_ids) != len(set(sensor_ids)):
+        problems.append("persisted NuRec frame has missing or duplicate sensor IDs")
+    seen_paths: set[Path] = set()
+    for record in records:
+        _validate_materialized_payload(
+            record, output_dir=output_dir, seen_paths=seen_paths, problems=problems
+        )
+
+    dispatch = evidence.get("dispatch")
+    if not isinstance(dispatch, Mapping):
+        problems.append("persisted NuRec frame has no NRE dispatch evidence")
+        return
+    if dispatch.get("nre_api") != "SensorsimService/26.04":
+        problems.append("persisted NuRec frame is not bound to NRE SensorsimService/26.04")
+    if dispatch.get("response_validation") != "injected_modality_specific_inspector":
+        problems.append("persisted NuRec frame lacks modality-specific NRE response validation")
+    if dispatch.get("canonical_scene_id") != evidence.get("scene_id"):
+        problems.append("persisted NuRec dispatch canonical scene does not match evidence")
+
+    expected_runtime = (environment or {}).get("nurec_runtime")
+    if isinstance(expected_runtime, Mapping):
+        expected_scene = expected_runtime.get("runtime_scene_id")
+        if expected_scene and dispatch.get("runtime_scene_id") != expected_scene:
+            problems.append("persisted NuRec dispatch runtime scene does not match prepared config")
+
+    native_scan = (environment or {}).get("native_scan_manifest")
+    if isinstance(native_scan, Mapping):
+        alignment = dispatch.get("temporal_alignment")
+        if not isinstance(alignment, Mapping):
+            problems.append("persisted NuRec frame has no native-scan alignment")
+        else:
+            if alignment.get("source") != "hashed_native_scan_manifest":
+                problems.append("persisted NuRec alignment is not sourced from a hashed native scan")
+            if alignment.get("manifest_sha256") != native_scan.get("sha256"):
+                problems.append("persisted NuRec alignment manifest SHA-256 does not match prepared input")
+            try:
+                if int(alignment.get("midpoint_error_us")) > int(
+                    alignment.get("max_midpoint_error_us")
+                ):
+                    problems.append("persisted NuRec native-scan alignment exceeds its threshold")
+            except (TypeError, ValueError):
+                problems.append("persisted NuRec native-scan alignment has invalid midpoint evidence")
+
+
 def _validate_static_actor_binding(config: Mapping[str, Any], sidecar_identity: Mapping[str, Any] | None) -> None:
     """Reject a config/sidecar contract drift before a CARLA process is touched."""
 
@@ -413,6 +548,11 @@ def prepare_live_tick(
         "opendrive": xodr_identity,
         "actor_bindings": sidecar_identity,
         "native_scan_manifest": native_scan_manifest,
+        "nurec_runtime": {
+            "runtime_scene_id": str(
+                ((config.get("nurec_runtime") or {}).get("runtime_scene_id") or "")
+            )
+        },
         "carla_basic_agent": carla_basic_agent,
         "artifacts": {
             "basic_agent_plan": str(plan_path.resolve()),
@@ -510,6 +650,13 @@ def validate_live_tick_result(result: Mapping[str, Any], output_dir: Path) -> di
     """Validate the first physical multimodal frame and persisted evidence."""
 
     problems: list[str] = []
+    environment: Mapping[str, Any] | None = None
+    environment_path = output_dir / "runtime_environment.json"
+    if environment_path.is_file():
+        try:
+            environment = _load_object(environment_path)
+        except Scene0061LiveTickError as exc:
+            problems.append(f"cannot read persisted runtime environment: {exc}")
     detail = str(result.get("detail") or "")
     expected_one_tick_termination = (
         result.get("status") == "failed"
@@ -544,10 +691,12 @@ def validate_live_tick_result(result: Mapping[str, Any], output_dir: Path) -> di
         problems.append("persisted NuRec trace does not contain exactly one frame")
     else:
         nurec_frame = persisted_rows["nurec_multimodal_trace.jsonl"][0]
-        try:
-            validate_nurec_multimodal_evidence(nurec_frame)
-        except NuRecMultimodalError as exc:
-            problems.append(f"persisted NuRec frame is invalid: {exc}")
+        _validate_physical_multimodal_evidence(
+            nurec_frame,
+            output_dir=output_dir,
+            environment=environment,
+            problems=problems,
+        )
         frame = persisted_rows.get("frame_trace.jsonl", [{}])[0]
         trace_frame_id = nurec_frame.get("frame_id")
         carla_frame_id = frame.get("world_tick_frame") or frame.get("snapshot_frame")

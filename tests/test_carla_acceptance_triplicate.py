@@ -2,6 +2,7 @@ import copy
 import hashlib
 import importlib
 import json
+import struct
 import sys
 import tempfile
 import unittest
@@ -264,6 +265,18 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "lidar-coordinate.json"
+            payload_path = Path(directory) / "live-lidar.xyzi"
+            native_scan_path = Path(directory) / "native-scan-manifest.json"
+            points = [
+                (1.0, 0.0, 0.0, 0.5),
+                (0.0, 2.0, 0.0, 0.5),
+                (0.0, 0.0, 3.0, 0.5),
+                (2.0, 2.0, 2.0, 0.5),
+            ]
+            payload_path.write_bytes(
+                b"".join(struct.pack("<4f", *point) for point in points)
+            )
+            native_scan_path.write_text("{\"scan\":0}", encoding="utf-8")
             matrix = [
                 1.0, 0.0, 0.0, 0.0,
                 0.0, 1.0, 0.0, 0.0,
@@ -288,9 +301,40 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                     "status": "passed",
                     "rpc_status": "ok",
                     "payload_sha256_valid": True,
-                    "point_count": 1024,
+                    "point_count": len(points),
                     "timestamp_inside_artifact_range": True,
                     "scene_start_matches_artifact": True,
+                    "carla_frame_id": 491,
+                },
+                "axis_validation": {
+                    "schema_version": "scene0061_lidar_axis_alignment.v1",
+                    "status": "passed",
+                    "carla_frame_id": 491,
+                    "tolerance_m": 0.01,
+                    "measured_max_abs_error_m": 0.0,
+                    "measured_rms_error_m": 0.0,
+                    "payload_ref": {
+                        "path": str(payload_path),
+                        "sha256": hashlib.sha256(payload_path.read_bytes()).hexdigest(),
+                        "byte_count": payload_path.stat().st_size,
+                        "encoding": "float32_xyzi_little_endian",
+                        "carla_frame_id": 491,
+                    },
+                    "native_scan_manifest_ref": {
+                        "path": str(native_scan_path),
+                        "sha256": hashlib.sha256(native_scan_path.read_bytes()).hexdigest(),
+                        "byte_count": native_scan_path.stat().st_size,
+                        "carla_frame_id": 491,
+                        "scan_index": 0,
+                    },
+                    "anchors": [
+                        {
+                            "source_point_index": index,
+                            "sensor_local_point_m": list(point[:3]),
+                            "carla_ego_point_m": [point[0], point[1], point[2] + 2.5],
+                        }
+                        for index, point in enumerate(points)
+                    ],
                 },
             }
             path.write_text(json.dumps(evidence), encoding="utf-8")
