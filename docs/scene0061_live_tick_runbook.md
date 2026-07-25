@@ -96,6 +96,7 @@ cd "$REPO"
   --run-id "$RUN_ID" \
   --opendrive "$XODR" \
   --carla-python-api "$CARLA_PYTHON_API" \
+  --capture-native-lidar \
   --prepare-only
 
 "$PY" -m json.tool "$OUT/runtime_environment.json"
@@ -106,6 +107,7 @@ cd "$REPO"
   --run-id "$RUN_ID" \
   --opendrive "$XODR" \
   --carla-python-api "$CARLA_PYTHON_API" \
+  --capture-native-lidar \
   --execute-prepared
 ```
 
