@@ -76,6 +76,32 @@ def _git_commit(project_root: Path = PROJECT_ROOT) -> str | None:
     return commit or None
 
 
+def _python_runtime_identity() -> dict[str, Any]:
+    """Return the interpreter identity that will execute CARLA/NuRec code.
+
+    Generated NuRec protobuf modules are coupled to the protobuf runtime.  The
+    identity is captured during preparation and checked again before execution
+    so a shell's system Python cannot silently replace the env_build interpreter.
+    """
+
+    protobuf: dict[str, Any] = {"available": False}
+    try:
+        import google.protobuf  # type: ignore[import-not-found]
+
+        protobuf = {
+            "available": True,
+            "version": str(getattr(google.protobuf, "__version__", "")),
+            "path": str(Path(str(getattr(google.protobuf, "__file__", ""))).resolve()),
+        }
+    except Exception as exc:  # Evidence must say why an interpreter cannot load protobuf.
+        protobuf["detail"] = f"{type(exc).__name__}: {exc}"
+    return {
+        "executable": str(Path(sys.executable).resolve()),
+        "version": sys.version.split()[0],
+        "protobuf": protobuf,
+    }
+
+
 def _file_identity(path: Path | None, *, required: bool = False) -> dict[str, Any] | None:
     if path is None:
         if required:
@@ -226,6 +252,27 @@ def _validate_static_actor_binding(config: Mapping[str, Any], sidecar_identity: 
         ) from exc
 
 
+def _preflight_sensor_handler(
+    config: dict[str, Any], output_dir: Path, sensor_handler_factory: Callable[[dict[str, Any], Path], Any]
+) -> dict[str, Any]:
+    """Import generated protobufs and construct the handler without touching CARLA."""
+
+    try:
+        handler = sensor_handler_factory(config, output_dir)
+        if not callable(handler):
+            raise Scene0061LiveTickError("sensor handler factory returned a non-callable")
+        if hasattr(handler, "close"):
+            handler.close()
+    except Exception as exc:
+        raise Scene0061LiveTickError(
+            f"NuRec sensor handler preflight failed under {Path(sys.executable).resolve()}: {exc}"
+        ) from exc
+    return {
+        "status": "passed",
+        "factory": f"{sensor_handler_factory.__module__}:{sensor_handler_factory.__name__}",
+    }
+
+
 def prepare_live_tick(
     *,
     config_path: Path,
@@ -303,6 +350,7 @@ def prepare_live_tick(
         "prepared_at_utc": _utc_now(),
         "run_id": str(run_id),
         "git_commit": _git_commit(),
+        "python_runtime": _python_runtime_identity(),
         "config": config_identity,
         "runtime_config": runtime_config_identity,
         "opendrive": xodr_identity,
@@ -328,6 +376,12 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
     environment = _load_object(environment_path)
     if environment.get("schema_version") != "scene0061_live_tick_environment.v1":
         raise Scene0061LiveTickError("unsupported runtime_environment schema")
+    prepared_python = environment.get("python_runtime")
+    current_python = _python_runtime_identity()
+    if prepared_python != current_python:
+        raise Scene0061LiveTickError(
+            "prepared interpreter/protobuf identity does not match the executing process"
+        )
     for name in ("config", "runtime_config", "opendrive", "actor_bindings", "native_scan_manifest"):
         identity = environment.get(name)
         if identity is None:
@@ -356,6 +410,11 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
     ):
         raise Scene0061LiveTickError(
             "basic_agent_plan selected config path/SHA-256 does not match runtime_environment"
+        )
+    handler_preflight = environment.get("sensor_handler_preflight")
+    if not isinstance(handler_preflight, Mapping) or handler_preflight.get("status") != "passed":
+        raise Scene0061LiveTickError(
+            "prepared environment has no successful NuRec sensor-handler preflight"
         )
     return environment
 
@@ -465,6 +524,12 @@ def execute_live_tick(
 
     root = output_dir.expanduser().resolve()
     environment = verify_prepared_live_tick(root)
+    expected_factory = (environment.get("sensor_handler_preflight") or {}).get("factory")
+    actual_factory = f"{sensor_handler_factory.__module__}:{sensor_handler_factory.__name__}"
+    if expected_factory != actual_factory:
+        raise Scene0061LiveTickError(
+            "prepared NuRec sensor-handler factory does not match the executing factory"
+        )
     environment_path = root / "runtime_environment.json"
     environment["status"] = "running"
     environment["execution_started_at_utc"] = _utc_now()
@@ -550,6 +615,12 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_sec=args.timeout_sec,
                 ego_driver=args.ego_driver,
             )
+        if args.prepare_only:
+            config = _load_object(args.config.expanduser().resolve())
+            environment["sensor_handler_preflight"] = _preflight_sensor_handler(
+                config, args.output_dir.expanduser().resolve(), _load_callable(args.sensor_handler_factory)
+            )
+            _write_json(args.output_dir.expanduser().resolve() / "runtime_environment.json", environment)
         if args.prepare_only:
             print(json.dumps(environment, ensure_ascii=False, indent=2))
             return 0

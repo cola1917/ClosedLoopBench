@@ -1009,6 +1009,8 @@ def _run_basic_agent_loop(
                 required=multimodal_sensor_required,
                 handler_present=sensor_frame_handler is not None,
             ),
+            "frame_trace_count": len(frame_trace),
+            "termination_reason": termination_reason,
             "ego_driver_diagnostics": failure_diagnostics,
         }
         _write_report_if_requested(plan, report)

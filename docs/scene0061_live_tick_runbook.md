@@ -18,18 +18,18 @@ different configuration after preparation.
 
 ## Remote sequence
 
-Run preparation first, then inspect `runtime_environment.json`. All four
+Run preparation first using env_build's existing `autodrive` interpreter, then inspect `runtime_environment.json`. All four
 explicit inputs must remain identical for the execution command.
 
 ```bash
-python3 runners/scene0061_live_tick.py \
+/home/cwadmin/sim-env/miniconda3/envs/autodrive/bin/python runners/scene0061_live_tick.py \
   --config /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/diagnostics/native_scan_original_v7_sidewalks8m_bbox_bottom_1tick_ee3760d_v12_r11/smoke_currentbound.json \
   --output-dir /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/diagnostics/scene0061_live_tick_r12 \
   --run-id scene0061-live-tick-r12 \
   --opendrive /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/runtime/road.nurec-route-extended-both-v7.sidewalks8m.bfe8fe6.xodr \
   --prepare-only
 
-python3 runners/scene0061_live_tick.py \
+/home/cwadmin/sim-env/miniconda3/envs/autodrive/bin/python runners/scene0061_live_tick.py \
   --config /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/diagnostics/native_scan_original_v7_sidewalks8m_bbox_bottom_1tick_ee3760d_v12_r11/smoke_currentbound.json \
   --output-dir /home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-final-closure-v2/diagnostics/scene0061_live_tick_r12 \
   --run-id scene0061-live-tick-r12 \
@@ -39,7 +39,10 @@ python3 runners/scene0061_live_tick.py \
 
 `runtime_environment.json` must record the intended commit, absolute source
 config path and SHA-256, sidecar SHA-256, native scan manifest SHA-256, and
-OpenDRIVE SHA-256. A hash/path mismatch is a hard stop.
+OpenDRIVE SHA-256, plus the exact Python executable and protobuf version. The
+prepare-only sensor-handler preflight must pass. A hash/path/interpreter mismatch
+is a hard stop. Do not use the host `/usr/bin/python3`: its protobuf 3.12.4 is
+incompatible with the installed NuRec generated modules.
 
 `route_incomplete` after exactly one tick is an expected smoke termination. It
 is not a passed full route. The G0 smoke passes only when all of these are

@@ -62,7 +62,29 @@ class Scene0061LiveTickTests(unittest.TestCase):
             self.assertEqual(provenance["selected_config_path"], str(config.resolve()))
             self.assertEqual(provenance["selected_config_sha256"], environment["config"]["sha256"])
             self.assertEqual(environment["config"]["byte_count"], config.stat().st_size)
+            self.assertEqual(environment["python_runtime"]["executable"], str(Path(__import__("sys").executable).resolve()))
             self.assertIn("artifact_manifest", environment["artifacts"])
+
+    def test_execute_rejects_a_different_interpreter_before_callback(self):
+        from runners.scene0061_live_tick import (
+            Scene0061LiveTickError,
+            execute_live_tick,
+            prepare_live_tick,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, xodr, _ = self._inputs(root)
+            output = root / "diagnostic"
+            prepare_live_tick(
+                config_path=config, output_dir=output, run_id="r11-fixed", opendrive_path=xodr
+            )
+            environment_path = output / "runtime_environment.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["python_runtime"]["executable"] = "/wrong/python"
+            environment_path.write_text(json.dumps(environment), encoding="utf-8")
+            with self.assertRaisesRegex(Scene0061LiveTickError, "interpreter/protobuf identity"):
+                execute_live_tick(output, sensor_handler_factory=lambda _config, _output: lambda _context: {})
 
     def test_execute_fails_before_callback_when_recorded_runtime_config_drifts(self):
         from runners.scene0061_live_tick import (
@@ -89,6 +111,32 @@ class Scene0061LiveTickTests(unittest.TestCase):
             with self.assertRaisesRegex(Scene0061LiveTickError, "runtime_config path/SHA-256"):
                 execute_live_tick(output, sensor_handler_factory=factory)
             self.assertFalse(called)
+
+    def test_execute_requires_the_preflighted_sensor_handler_factory(self):
+        from runners.scene0061_live_tick import (
+            Scene0061LiveTickError,
+            execute_live_tick,
+            prepare_live_tick,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, xodr, _ = self._inputs(root)
+            output = root / "diagnostic"
+            environment = prepare_live_tick(
+                config_path=config, output_dir=output, run_id="r11-fixed", opendrive_path=xodr
+            )
+            environment["sensor_handler_preflight"] = {
+                "status": "passed",
+                "factory": "expected.module:factory",
+            }
+            (output / "runtime_environment.json").write_text(
+                json.dumps(environment), encoding="utf-8"
+            )
+            with self.assertRaisesRegex(Scene0061LiveTickError, "factory does not match"):
+                execute_live_tick(
+                    output, sensor_handler_factory=lambda _config, _output: lambda _context: {}
+                )
 
     def test_sidecar_hash_mismatch_is_rejected_before_output_creation(self):
         from runners.scene0061_live_tick import Scene0061LiveTickError, prepare_live_tick
