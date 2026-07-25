@@ -43,7 +43,10 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
             "status": "passed",
             "carla_frame_id": frame_id,
             "coordinate_frame": "carla_sensor",
+            "sensor_to_ego_observation": "carla_actor_get_transform",
             "sensor_to_ego": IDENTITY,
+            "observed_sensor_world_transform": IDENTITY,
+            "observed_ego_world_transform": IDENTITY,
             "raw_xyzi_ref": _ref(capture_points_path, frame_id),
         }
         capture_path = root / "carla-native.json"
@@ -118,6 +121,26 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
             with self.assertRaisesRegex(LiDARAxisEvidenceError, "independent CARLA LiDAR capture"):
                 validate_lidar_axis_evidence(
                     evidence, sensor_to_ego=IDENTITY, live_render_lidar=evidence["live_render_lidar"]
+                )
+
+    def test_rejects_capture_relative_pose_that_does_not_rederive_from_carla_observations(self):
+        from runtime.scene0061_lidar_axis_collector import (
+            LiDARAxisCollectionError,
+            collect_lidar_axis_evidence,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            values = self._inputs(Path(directory))
+            capture = json.loads(values[3].read_text(encoding="utf-8"))
+            capture["sensor_to_ego"][3] = 1.0
+            values[3].write_text(json.dumps(capture), encoding="utf-8")
+            with self.assertRaisesRegex(
+                LiDARAxisCollectionError,
+                "does not match observed actor transforms",
+            ):
+                collect_lidar_axis_evidence(
+                    run_config=values[0], nurec_evidence=values[1], frame_trace=values[2],
+                    native_capture_path=values[3], native_scan_manifest_path=values[4],
                 )
 
 

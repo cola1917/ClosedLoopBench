@@ -195,7 +195,66 @@ def _validate_independent_carla_capture(
     for key in ("path", "sha256", "byte_count", "encoding", "carla_frame_id"):
         if capture_points_ref.get(key) != points_ref.get(key):
             raise LiDARAxisEvidenceError("independent CARLA capture points reference does not match capture JSON")
-    return _read_xyzi(points_path), _validated_rigid_matrix(capture.get("sensor_to_ego"))
+    return _read_xyzi(points_path), _observed_capture_sensor_to_ego(capture)
+
+
+def _observed_capture_sensor_to_ego(capture: Mapping[str, Any]) -> list[float]:
+    """Re-derive the native-sensor rig pose from CARLA actor observations.
+
+    The requested attachment transform is useful provenance, but is not an
+    independent physical observation.  A capture may be used as coordinate
+    ground truth only when its persisted relative transform agrees with the
+    two world transforms returned by CARLA actor APIs after the matching tick.
+    """
+
+    if capture.get("sensor_to_ego_observation") != "carla_actor_get_transform":
+        raise LiDARAxisEvidenceError(
+            "independent CARLA capture lacks actor-observed sensor-to-ego transform"
+        )
+    sensor_world = _validated_rigid_matrix(capture.get("observed_sensor_world_transform"))
+    ego_world = _validated_rigid_matrix(capture.get("observed_ego_world_transform"))
+    recorded = _validated_rigid_matrix(capture.get("sensor_to_ego"))
+    derived = _matrix_multiply(_invert_rigid_matrix(ego_world), sensor_world)
+    if any(abs(left - right) > 1e-6 for left, right in zip(recorded, derived)):
+        raise LiDARAxisEvidenceError(
+            "independent CARLA capture sensor_to_ego does not match observed actor transforms"
+        )
+    return derived
+
+
+def _invert_rigid_matrix(matrix: object) -> list[float]:
+    value = _validated_rigid_matrix(matrix)
+    rotation = [
+        value[0], value[1], value[2],
+        value[4], value[5], value[6],
+        value[8], value[9], value[10],
+    ]
+    transpose = [
+        rotation[0], rotation[3], rotation[6],
+        rotation[1], rotation[4], rotation[7],
+        rotation[2], rotation[5], rotation[8],
+    ]
+    translation = [value[3], value[7], value[11]]
+    inverse_translation = [
+        -sum(transpose[row * 3 + column] * translation[column] for column in range(3))
+        for row in range(3)
+    ]
+    return [
+        transpose[0], transpose[1], transpose[2], inverse_translation[0],
+        transpose[3], transpose[4], transpose[5], inverse_translation[1],
+        transpose[6], transpose[7], transpose[8], inverse_translation[2],
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+
+def _matrix_multiply(left: object, right: object) -> list[float]:
+    lhs = _validated_rigid_matrix(left)
+    rhs = _validated_rigid_matrix(right)
+    return _validated_rigid_matrix([
+        sum(lhs[row * 4 + index] * rhs[index * 4 + column] for index in range(4))
+        for row in range(4)
+        for column in range(4)
+    ])
 
 
 def _validate_file_ref(

@@ -297,7 +297,15 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                 "status": "passed",
                 "carla_frame_id": 491,
                 "coordinate_frame": "carla_sensor",
+                "sensor_to_ego_observation": "carla_actor_get_transform",
                 "sensor_to_ego": matrix,
+                "observed_sensor_world_transform": matrix,
+                "observed_ego_world_transform": [
+                    1.0, 0.0, 0.0, 0.0,
+                    0.0, 1.0, 0.0, 0.0,
+                    0.0, 0.0, 1.0, 0.0,
+                    0.0, 0.0, 0.0, 1.0,
+                ],
                 "raw_xyzi_ref": {
                     "path": str(native_capture_points_path),
                     "sha256": hashlib.sha256(native_capture_points_path.read_bytes()).hexdigest(),

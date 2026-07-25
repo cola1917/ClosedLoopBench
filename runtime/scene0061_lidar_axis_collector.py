@@ -25,6 +25,7 @@ from runtime.scene0061_lidar_axis_gate import (
     XYZI_ENCODING,
     LiDARAxisEvidenceError,
     _has_non_coplanar_anchor_set,
+    _observed_capture_sensor_to_ego,
     _transform_point,
     _validated_rigid_matrix,
 )
@@ -81,7 +82,13 @@ def collect_lidar_axis_evidence(
     capture_ref = _file_ref(native_capture_path, frame_id=frame_id)
     capture_points_ref = _capture_points_ref(capture, frame_id)
     capture_points = _read_xyzi(Path(capture_points_ref["path"]))
-    capture_matrix = _validated_rigid_matrix(capture.get("sensor_to_ego"))
+    # Do not treat a JSON relative pose as an observation.  The capture is
+    # independent only when it carries both CARLA actor world transforms and
+    # its recorded relative pose re-derives from those observations.
+    try:
+        capture_matrix = _observed_capture_sensor_to_ego(capture)
+    except LiDARAxisEvidenceError as exc:
+        raise LiDARAxisCollectionError(str(exc)) from exc
 
     anchors = _select_anchors(
         nurec_points=nurec_points,
