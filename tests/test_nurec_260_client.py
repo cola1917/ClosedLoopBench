@@ -1,3 +1,4 @@
+import json
 import struct
 import unittest
 from types import SimpleNamespace
@@ -346,6 +347,46 @@ class NuRec260ClientTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(NuRecMultimodalError, "sidecar contract mismatch"):
             _validate_runtime_actor_binding_contract(run, {}, sidecar)
+
+    def test_handler_rejects_sidecar_source_track_drift_with_structured_detail(self):
+        from adapters.nurec_260_client import _validate_runtime_actor_binding_contract
+        from adapters.nurec_multimodal import NuRecMultimodalError
+
+        actor_id = VEHICLE_TRACK
+        run = {
+            "actor_binding": {"selected_actor_ids": [actor_id]},
+            "actors": [{
+                "actor_id": actor_id,
+                "source_track_id": actor_id,
+                "binding": {
+                    "nurec_track_id": actor_id,
+                    "sensor_pose_source": "carla_runtime_actor_pose",
+                    "sensor_pose_reference": "carla_bounding_box_center",
+                    "required_modalities": ["rgb", "lidar"],
+                },
+            }],
+        }
+        sidecar = {
+            "bindings": [{
+                "actor_id": actor_id,
+                "source_track_id": "stale-source-track",
+                "nurec": {"track_id": actor_id},
+                "sensor_sync": {
+                    "pose_source": "carla_runtime_actor_pose",
+                    "pose_reference": "carla_bounding_box_center",
+                    "required_modalities": ["rgb", "lidar"],
+                },
+            }],
+        }
+        with self.assertRaises(NuRecMultimodalError) as captured:
+            _validate_runtime_actor_binding_contract(run, {}, sidecar)
+        message = str(captured.exception)
+        self.assertIn("sidecar contract mismatch", message)
+        detail = json.loads(message.split(": ", 1)[1])
+        self.assertEqual(detail["actor_id"], actor_id)
+        self.assertEqual(detail["mismatches"], ["source_track_id"])
+        self.assertEqual(detail["embedded"]["source_track_id"], actor_id)
+        self.assertEqual(detail["sidecar"]["source_track_id"], "stale-source-track")
 
     def test_runtime_inventory_reports_service_identity_and_lidar_boundary(self):
         inventory = self._client(_InventoryStub()).query_runtime_inventory()

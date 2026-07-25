@@ -26,7 +26,7 @@ class RuntimeCliPlanningTests(unittest.TestCase):
         self.assertIn("--output", result["command"])
 
     def test_basic_agent_plan_cli_writer_outputs_json(self):
-        from runners.run_carla_basic_agent import write_basic_agent_plan
+        from runners.run_carla_basic_agent import run_basic_agent, write_basic_agent_plan
 
         run_config = {
             "schema_version": "carla_run_config.mvp.v0",
@@ -57,6 +57,21 @@ class RuntimeCliPlanningTests(unittest.TestCase):
             self.assertEqual(plan["scenario_id"], "scene-cli-plan")
             self.assertEqual(plan["connection"]["host"], "localhost")
             self.assertEqual(plan["ego"]["destination"]["x"], 10.0)
+            provenance = plan["provenance"]["run_config"]
+            self.assertEqual(provenance["absolute_path"], str(config_path.resolve()))
+            self.assertEqual(provenance["byte_count"], len(config_path.read_bytes()))
+
+            config_path.write_text(
+                json.dumps({**run_config, "run_id": "drifted"}), encoding="utf-8"
+            )
+            result = run_basic_agent(
+                plan,
+                carla_module=types.SimpleNamespace(),
+                agent_module=None,
+            )
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["reason"], "run_config_provenance_mismatch")
+            self.assertRegex(result["detail"], r"(byte count|SHA-256) mismatch")
 
     def test_basic_agent_execute_without_carla_fails_structurally(self):
         from runners.run_carla_basic_agent import run_basic_agent

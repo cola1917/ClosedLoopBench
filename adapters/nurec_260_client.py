@@ -551,15 +551,35 @@ def _validate_runtime_actor_binding_contract(
         embedded = actor["binding"]
         sync = sidecar.get("sensor_sync") or {}
         nurec = sidecar.get("nurec") or {}
-        if (
-            embedded.get("nurec_track_id") != nurec.get("track_id")
-            or embedded.get("sensor_pose_source") != sync.get("pose_source")
-            or embedded.get("sensor_pose_reference") != sync.get("pose_reference")
-            or list(embedded.get("required_modalities") or [])
-            != list(sync.get("required_modalities") or [])
-        ):
+        embedded_contract = {
+            "track_id": embedded.get("nurec_track_id"),
+            "source_track_id": actor.get("source_track_id"),
+            "pose_source": embedded.get("sensor_pose_source"),
+            "pose_reference": embedded.get("sensor_pose_reference"),
+            "required_modalities": list(embedded.get("required_modalities") or []),
+        }
+        sidecar_contract = {
+            "track_id": nurec.get("track_id"),
+            "source_track_id": sidecar.get("source_track_id"),
+            "pose_source": sync.get("pose_source"),
+            "pose_reference": sync.get("pose_reference"),
+            "required_modalities": list(sync.get("required_modalities") or []),
+        }
+        mismatches = [
+            key
+            for key in embedded_contract
+            if embedded_contract[key] != sidecar_contract[key]
+        ]
+        if mismatches:
+            detail = {
+                "actor_id": actor_id,
+                "embedded": embedded_contract,
+                "sidecar": sidecar_contract,
+                "mismatches": mismatches,
+            }
             raise NuRecMultimodalError(
-                f"NuRec actor binding sidecar contract mismatch for actor {actor_id}"
+                "NuRec actor binding sidecar contract mismatch: "
+                + json.dumps(detail, ensure_ascii=False, sort_keys=True)
             )
 
 

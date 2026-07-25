@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import math
@@ -41,6 +42,7 @@ def build_basic_agent_plan(
     runtime_route_distance_m: float | None = None,
     physics_smoke: bool = False,
     multimodal_sensor_required: bool = False,
+    run_config_provenance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     ego = run_config.get("ego") or {}
     carla_config = run_config.get("carla") or {}
@@ -50,7 +52,7 @@ def build_basic_agent_plan(
     destination = dict(reference[-1]) if reference else dict(initial_state)
     scenario_id = str(run_config["scenario_id"])
 
-    return {
+    plan = {
         "schema_version": "basic_agent_plan.mvp.v0",
         "run_id": run_config.get("run_id") or run_experiment.get("run_id"),
         "scenario_id": scenario_id,
@@ -199,6 +201,60 @@ def build_basic_agent_plan(
             ),
         },
     }
+    if run_config_provenance is not None:
+        plan["provenance"] = {"run_config": dict(run_config_provenance)}
+    return plan
+
+
+def build_run_config_provenance(run_config_path: Path) -> dict[str, Any]:
+    """Return the exact file identity a persisted CLI plan must use."""
+
+    path = Path(run_config_path).resolve()
+    body = path.read_bytes()
+    return {
+        "schema_version": "run_config_provenance.v1",
+        "absolute_path": str(path),
+        "sha256": hashlib.sha256(body).hexdigest(),
+        "byte_count": len(body),
+    }
+
+
+def validate_plan_run_config_provenance(plan: Mapping[str, Any]) -> None:
+    """Fail closed if a persisted plan no longer identifies its config bytes."""
+
+    provenance = plan.get("provenance")
+    if provenance is None:
+        return
+    if not isinstance(provenance, Mapping):
+        raise ValueError("plan provenance must be an object")
+    config = provenance.get("run_config")
+    if not isinstance(config, Mapping):
+        raise ValueError("plan provenance.run_config is required")
+    if config.get("schema_version") != "run_config_provenance.v1":
+        raise ValueError("unsupported plan run-config provenance schema")
+    raw_path = config.get("absolute_path")
+    expected_sha256 = config.get("sha256")
+    expected_size = config.get("byte_count")
+    if not isinstance(raw_path, str) or not raw_path:
+        raise ValueError("plan run-config provenance requires absolute_path")
+    path = Path(raw_path)
+    if not path.is_absolute():
+        raise ValueError("plan run-config provenance path must be absolute")
+    if (
+        not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in expected_sha256)
+    ):
+        raise ValueError("plan run-config provenance requires a lowercase SHA-256")
+    if not isinstance(expected_size, int) or isinstance(expected_size, bool) or expected_size < 0:
+        raise ValueError("plan run-config provenance requires a non-negative byte_count")
+    if not path.is_file():
+        raise ValueError(f"planned run config no longer exists: {path}")
+    body = path.read_bytes()
+    if len(body) != expected_size:
+        raise ValueError("planned run config byte count mismatch")
+    if hashlib.sha256(body).hexdigest() != expected_sha256:
+        raise ValueError("planned run config SHA-256 mismatch")
 
 
 def write_basic_agent_plan(
@@ -225,6 +281,7 @@ def write_basic_agent_plan(
     physics_smoke: bool = False,
     multimodal_sensor_required: bool = False,
 ) -> Path:
+    run_config_path = Path(run_config_path).resolve()
     run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
     plan = build_basic_agent_plan(
         run_config,
@@ -247,6 +304,7 @@ def write_basic_agent_plan(
         runtime_route_distance_m=runtime_route_distance_m,
         physics_smoke=physics_smoke,
         multimodal_sensor_required=multimodal_sensor_required,
+        run_config_provenance=build_run_config_provenance(run_config_path),
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -262,6 +320,10 @@ def run_basic_agent(
     actor_behavior_planner=None,
     sensor_frame_handler=None,
 ) -> dict[str, Any]:
+    try:
+        validate_plan_run_config_provenance(plan)
+    except ValueError as exc:
+        return _failed_result(plan, "run_config_provenance_mismatch", str(exc))
     if carla_module is None:
         try:
             import carla as carla_module  # type: ignore[no-redef]
@@ -3357,7 +3419,7 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    run_config_path = Path(args.run_config)
+    run_config_path = Path(args.run_config).resolve()
     output = Path(args.output) if args.output else run_config_path.with_name("basic_agent_plan.json")
     run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
     plan = build_basic_agent_plan(
@@ -3381,6 +3443,7 @@ def main(argv=None) -> int:
         runtime_route_distance_m=args.runtime_route_distance_m,
         physics_smoke=args.physics_smoke,
         multimodal_sensor_required=args.multimodal_sensor_required,
+        run_config_provenance=build_run_config_provenance(run_config_path),
         output=str(output.with_name("closed_loop_report.json")),
     )
     output.parent.mkdir(parents=True, exist_ok=True)
