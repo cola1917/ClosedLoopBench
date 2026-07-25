@@ -384,6 +384,12 @@ def _validate_actor_control_contract(
             )
         actor = actor_matches[0]
         row = row_matches[0]
+        control_contract = actor.get("control_mode_contract")
+        binding = actor.get("binding")
+        if not isinstance(control_contract, Mapping) or not isinstance(binding, Mapping):
+            raise Scene0061TransFuserPPRemoteError(
+                f"actor control contract or binding is absent for track {track_id}"
+            )
         if (
             actor.get("closed_loop_level") != expected_mode
             or actor.get("effective_control_mode") != expected_mode
@@ -391,6 +397,17 @@ def _validate_actor_control_contract(
         ):
             raise Scene0061TransFuserPPRemoteError(
                 f"actor control mode mismatch for track {track_id}"
+            )
+        pose_source = row.get("sensor_pose_source")
+        pose_reference = row.get("sensor_pose_reference")
+        if (
+            pose_source != binding.get("sensor_pose_source")
+            or pose_source != control_contract.get("sensor_pose_source")
+            or pose_reference != binding.get("sensor_pose_reference")
+            or pose_reference != control_contract.get("sensor_pose_reference")
+        ):
+            raise Scene0061TransFuserPPRemoteError(
+                f"actor pose contract mismatch for track {track_id}"
             )
 
 

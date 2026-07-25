@@ -145,6 +145,7 @@ class ActorBindingTests(unittest.TestCase):
         )
         run = {
             "scenario_id": SCENE_TOKEN,
+            "nurec_runtime": {"target": "127.0.0.1:46443"},
             "actors": [
                 {
                     "actor_id": VEHICLE_TRACK,
@@ -171,9 +172,17 @@ class ActorBindingTests(unittest.TestCase):
                 ]
             )
             bound = json.loads(output.read_text(encoding="utf-8"))
+            binding_sha256 = __import__("hashlib").sha256(
+                binding_path.read_bytes()
+            ).hexdigest()
 
         self.assertEqual(status, 0)
         self.assertEqual(bound["actors"][0]["binding"]["nurec_track_id"], VEHICLE_TRACK)
+        self.assertEqual(bound["nurec_runtime"]["actor_bindings"], str(binding_path.resolve()))
+        self.assertEqual(
+            bound["nurec_runtime"]["actor_bindings_sha256"],
+            binding_sha256,
+        )
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -40,6 +41,15 @@ def main(argv=None) -> int:
         return 2
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
+    nurec_runtime = bound.get("nurec_runtime")
+    if isinstance(nurec_runtime, dict):
+        # The handler reads this sidecar independently of the actor bindings
+        # embedded above.  Freeze both its exact bytes and its path here so a
+        # previously generated sidecar cannot silently contradict the run.
+        nurec_runtime["actor_bindings"] = str(args.actor_bindings.resolve())
+        nurec_runtime["actor_bindings_sha256"] = hashlib.sha256(
+            args.actor_bindings.read_bytes()
+        ).hexdigest()
     args.output.write_text(
         json.dumps(bound, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )

@@ -77,6 +77,30 @@ class Scene0061TransFuserPPVariantTests(unittest.TestCase):
                         row["runner_executor"],
                         actor["control_mode_contract"]["runner_executor"],
                     )
+                    self.assertEqual(
+                        row["sensor_pose_source"],
+                        actor["control_mode_contract"]["sensor_pose_source"],
+                    )
+                    self.assertEqual(
+                        row["sensor_pose_reference"],
+                        actor["control_mode_contract"]["sensor_pose_reference"],
+                    )
+                    self.assertEqual(
+                        row["sensor_pose_reference"],
+                        actor["binding"]["sensor_pose_reference"],
+                    )
+                self.assertEqual(
+                    variant["actors"][0]["control_mode_contract"][
+                        "sensor_pose_reference"
+                    ],
+                    "carla_bounding_box_center",
+                )
+                self.assertEqual(
+                    variant["actors"][1]["control_mode_contract"][
+                        "sensor_pose_reference"
+                    ],
+                    "carla_bounding_box_bottom",
+                )
 
     def test_hard_brake_retimes_only_along_source_corridor(self):
         from runtime.scene0061_variants import build_scene0061_variant

@@ -399,6 +399,12 @@ def _freeze_actor_control_modes(
             "source_mode": source_mode,
             "effective_mode": effective_mode,
             "runner_executor": execution_evidence,
+            # Keep the per-actor frozen contract authoritative as well as the
+            # binding and aggregate control contract.  Runtime handlers consume
+            # this object independently, so omitting the reference here can
+            # preserve a stale carla_actor_origin value in generated configs.
+            "sensor_pose_source": pose_source,
+            "sensor_pose_reference": pose_reference,
             "immutable": True,
         }
         binding = actor.get("binding")

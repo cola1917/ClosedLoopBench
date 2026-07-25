@@ -637,8 +637,8 @@ def _run_basic_agent_loop(
                         evidence["runtime_frame_offset_m"] = offset
                         actor["_runtime_spawn_evidence"] = evidence
                 if render_pose is not None:
-                    render_pose = _apply_bound_actor_render_pose_offset(
-                        actor, render_pose
+                    render_pose = _apply_runtime_reference_frame_offset(
+                        actor, render_pose, render_pose_reference
                     )
                 actor_states[actor_id] = {
                     "actor_type": _actor_kind(actor),
@@ -1608,6 +1608,27 @@ def _apply_bound_actor_render_pose_offset(
         + float(offset.get(axis, 0.0))
         for axis in ("x", "y", "z", "roll", "pitch", "yaw")
     }
+
+
+def _apply_runtime_reference_frame_offset(
+    actor: Mapping[str, Any],
+    render_pose: Mapping[str, Any],
+    render_pose_reference: str | None,
+) -> dict[str, float]:
+    """Apply the deferred source-frame correction only to CARLA bbox centres.
+
+    Pedestrian bindings use their CARLA bbox bottom as their declared physical
+    reference.  Reusing the vehicle correction for that reference would shift a
+    valid ground-contact pose and make the NuRec request inconsistent with its
+    actor binding.
+    """
+
+    if render_pose_reference != "carla_bounding_box_center":
+        return {
+            axis: float(render_pose.get(axis, 0.0))
+            for axis in ("x", "y", "z", "roll", "pitch", "yaw")
+        }
+    return _apply_bound_actor_render_pose_offset(actor, render_pose)
 
 
 def _sidewalk_walker_retry_transform(

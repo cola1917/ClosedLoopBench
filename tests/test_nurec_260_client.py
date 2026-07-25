@@ -316,6 +316,37 @@ class NuRec260ClientTests(unittest.TestCase):
                 SimpleNamespace(),
             )
 
+    def test_handler_rejects_sidecar_pose_contract_that_differs_from_run_config(self):
+        from adapters.nurec_260_client import _validate_runtime_actor_binding_contract
+        from adapters.nurec_multimodal import NuRecMultimodalError
+
+        actor_id = VEHICLE_TRACK
+        run = {
+            "actor_binding": {"selected_actor_ids": [actor_id]},
+            "actors": [{
+                "actor_id": actor_id,
+                "binding": {
+                    "nurec_track_id": actor_id,
+                    "sensor_pose_source": "carla_runtime_actor_pose",
+                    "sensor_pose_reference": "carla_bounding_box_center",
+                    "required_modalities": ["rgb", "lidar"],
+                },
+            }],
+        }
+        sidecar = {
+            "bindings": [{
+                "actor_id": actor_id,
+                "nurec": {"track_id": actor_id},
+                "sensor_sync": {
+                    "pose_source": "carla_runtime_actor_pose",
+                    "pose_reference": "carla_actor_origin",
+                    "required_modalities": ["rgb", "lidar"],
+                },
+            }],
+        }
+        with self.assertRaisesRegex(NuRecMultimodalError, "sidecar contract mismatch"):
+            _validate_runtime_actor_binding_contract(run, {}, sidecar)
+
     def test_runtime_inventory_reports_service_identity_and_lidar_boundary(self):
         inventory = self._client(_InventoryStub()).query_runtime_inventory()
 

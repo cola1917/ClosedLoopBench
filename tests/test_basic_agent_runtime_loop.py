@@ -915,6 +915,37 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         )
         self.assertNotIn("_runtime_render_pose_offset", actor)
 
+    def test_runtime_frame_offset_never_changes_bbox_bottom_pedestrian_pose(self):
+        from runners.run_carla_basic_agent import _apply_runtime_reference_frame_offset
+
+        actor = {
+            "_runtime_render_pose_offset": {
+                "x": 10.0,
+                "y": -20.0,
+                "z": 0.75,
+            }
+        }
+        pose = {
+            "x": 6.0,
+            "y": 2.0,
+            "z": 1.02,
+            "roll": 0.0,
+            "pitch": 0.0,
+            "yaw": 5.0,
+        }
+
+        vehicle_pose = _apply_runtime_reference_frame_offset(
+            actor, pose, "carla_bounding_box_center"
+        )
+        pedestrian_pose = _apply_runtime_reference_frame_offset(
+            actor, pose, "carla_bounding_box_bottom"
+        )
+
+        self.assertEqual(vehicle_pose["x"], 16.0)
+        self.assertEqual(vehicle_pose["y"], -18.0)
+        self.assertEqual(vehicle_pose["z"], 1.77)
+        self.assertEqual(pedestrian_pose, pose)
+
 
 if __name__ == "__main__":
     unittest.main()

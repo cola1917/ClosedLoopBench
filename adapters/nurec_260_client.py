@@ -479,6 +479,7 @@ def build_nurec_260_handler(
     client._payload_reference_root = Path(attempt_dir).resolve().parent
     scene_package = _load_json(config, "scene_package")
     binding_set = _load_json(config, "actor_bindings")
+    _validate_runtime_actor_binding_contract(run_config, config, binding_set)
     handler = make_nurec_sensor_frame_handler(
         scene_package,
         binding_set,
@@ -499,6 +500,67 @@ def _load_json(config: Mapping[str, Any], name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise NuRecMultimodalError(f"nurec_runtime.{name} must contain a JSON object")
     return value
+
+
+def _validate_runtime_actor_binding_contract(
+    run_config: Mapping[str, Any],
+    nurec_runtime: Mapping[str, Any],
+    binding_set: Mapping[str, Any],
+) -> None:
+    """Reject a NuRec sidecar that diverges from the CARLA actor contract.
+
+    A run config holds the actor binding used to create CARLA actors, while the
+    NuRec handler reads the sidecar named by ``nurec_runtime.actor_bindings``.
+    Both must identify the same physical object and pose reference before a
+    sensor transaction can be sent.
+    """
+
+    sidecar_path = Path(str(nurec_runtime.get("actor_bindings") or ""))
+    expected_sha256 = nurec_runtime.get("actor_bindings_sha256")
+    if expected_sha256 is not None:
+        expected_sha256 = str(expected_sha256)
+        if not _is_sha256(expected_sha256):
+            raise NuRecMultimodalError(
+                "nurec_runtime.actor_bindings_sha256 must be a lowercase SHA-256"
+            )
+        actual_sha256 = hashlib.sha256(sidecar_path.read_bytes()).hexdigest()
+        if actual_sha256 != expected_sha256:
+            raise NuRecMultimodalError(
+                "nurec_runtime.actor_bindings SHA-256 mismatch"
+            )
+
+    sidecar_by_id = {
+        str(item.get("actor_id") or ""): item
+        for item in binding_set.get("bindings") or []
+        if isinstance(item, Mapping)
+    }
+    embedded_by_id = {
+        str(actor.get("actor_id") or ""): actor
+        for actor in run_config.get("actors") or []
+        if isinstance(actor, Mapping) and isinstance(actor.get("binding"), Mapping)
+    }
+    declared = (run_config.get("actor_binding") or {}).get("selected_actor_ids")
+    actor_ids = [str(value) for value in declared] if isinstance(declared, list) else list(embedded_by_id)
+    for actor_id in actor_ids:
+        actor = embedded_by_id.get(actor_id)
+        sidecar = sidecar_by_id.get(actor_id)
+        if actor is None or sidecar is None:
+            raise NuRecMultimodalError(
+                f"NuRec actor binding sidecar does not match configured actor: {actor_id}"
+            )
+        embedded = actor["binding"]
+        sync = sidecar.get("sensor_sync") or {}
+        nurec = sidecar.get("nurec") or {}
+        if (
+            embedded.get("nurec_track_id") != nurec.get("track_id")
+            or embedded.get("sensor_pose_source") != sync.get("pose_source")
+            or embedded.get("sensor_pose_reference") != sync.get("pose_reference")
+            or list(embedded.get("required_modalities") or [])
+            != list(sync.get("required_modalities") or [])
+        ):
+            raise NuRecMultimodalError(
+                f"NuRec actor binding sidecar contract mismatch for actor {actor_id}"
+            )
 
 
 def _load_native_scan_reference(
