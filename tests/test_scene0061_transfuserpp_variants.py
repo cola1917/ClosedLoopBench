@@ -94,7 +94,7 @@ class Scene0061TransFuserPPVariantTests(unittest.TestCase):
                         if actor["effective_control_mode"] == "replay"
                         else (
                             "carla_bounding_box_bottom"
-                            if actor["type"] == "pedestrian"
+                            if row["actor_type"] == "pedestrian"
                             else "carla_bounding_box_center"
                         )
                     )
