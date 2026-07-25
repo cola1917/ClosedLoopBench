@@ -95,6 +95,35 @@ def _matrix():
 
 
 class CarlaNativeLidarProbeTests(unittest.TestCase):
+    def test_fallback_transform_matrix_uses_carla_rotation_convention(self):
+        from runtime.scene0061_carla_lidar_probe import (
+            _carla_transform_to_matrix,
+            _matrix_to_carla_transform,
+        )
+
+        # Expected values are CARLA's published UE Rotation matrix for
+        # roll=30, pitch=20, yaw=10 degrees, rather than a generic
+        # right-handed robotics Euler matrix.
+        transform = _Carla.Transform(
+            _Carla.Location(x=1.0, y=2.0, z=3.0),
+            _Carla.Rotation(roll=30.0, pitch=20.0, yaw=10.0),
+        )
+        matrix = _carla_transform_to_matrix(transform)
+        expected = [
+            0.9254165784, 0.0180283112, -0.3785223064, 1.0,
+            0.1631759112, 0.8825641193, 0.4409696105, 2.0,
+            0.3420201433, -0.4698463104, 0.8137976813, 3.0,
+            0.0, 0.0, 0.0, 1.0,
+        ]
+        for actual, wanted in zip(matrix, expected):
+            self.assertAlmostEqual(actual, wanted, places=8)
+
+        recovered = _matrix_to_carla_transform(_Carla, matrix)
+        self.assertAlmostEqual(recovered.rotation.roll, 30.0, places=8)
+        self.assertAlmostEqual(recovered.rotation.pitch, 20.0, places=8)
+        self.assertAlmostEqual(recovered.rotation.yaw, 10.0, places=8)
+        self.assertEqual((recovered.location.x, recovered.location.y, recovered.location.z), (1.0, 2.0, 3.0))
+
     def _probe(self, root):
         from runtime.scene0061_carla_lidar_probe import CarlaNativeLidarProbe
 

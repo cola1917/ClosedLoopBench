@@ -250,12 +250,17 @@ def _validate_raw_xyzi(raw: bytes) -> None:
 def _matrix_to_carla_transform(carla_module: Any, matrix: list[float]) -> Any:
     """Convert a proper row-major CARLA sensor-to-ego matrix to Transform."""
 
-    # For CARLA's roll(X), pitch(Y), yaw(Z) convention: R = Rz(yaw) Ry(pitch) Rx(roll).
-    pitch = math.asin(max(-1.0, min(1.0, -matrix[8])))
+    # This is CARLA/UE's documented Rotation matrix convention, not the
+    # right-handed robotics Rz(yaw) Ry(pitch) Rx(roll) convention.  In
+    # particular, CARLA has R[2, 0] = sin(pitch) and R[2, 1] =
+    # -cos(pitch) * sin(roll).  Keeping this inverse paired with
+    # ``_carla_transform_to_matrix`` matters when the physical LiDAR rig has
+    # non-zero roll or pitch.
+    pitch = math.asin(max(-1.0, min(1.0, matrix[8])))
     cosine = math.cos(pitch)
     if abs(cosine) > 1e-7:
         yaw = math.atan2(matrix[4], matrix[0])
-        roll = math.atan2(matrix[9], matrix[10])
+        roll = math.atan2(-matrix[9], matrix[10])
     else:
         # Gimbal lock has an infinity of roll/yaw decompositions.  A zero roll
         # is deterministic and exactly reconstructs the declared orientation.
@@ -273,8 +278,8 @@ def _carla_transform_to_matrix(transform: Any) -> list[float]:
     """Normalize a CARLA Transform returned by an actor API to 4x4 row-major.
 
     CARLA's native ``Transform.get_matrix`` is preferred.  The attribute-based
-    form supports CARLA-compatible test doubles while using the documented
-    roll(X), pitch(Y), yaw(Z) convention.
+    form supports CARLA-compatible test doubles and exactly reproduces CARLA
+    / UE's documented roll(X), pitch(Y), yaw(Z) matrix convention.
     """
 
     if transform is None:
@@ -306,9 +311,9 @@ def _carla_transform_to_matrix(transform: Any) -> list[float]:
     cp, sp = math.cos(pitch), math.sin(pitch)
     cy, sy = math.cos(yaw), math.sin(yaw)
     return _validated_rigid_matrix([
-        cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr, x,
-        sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr, y,
-        -sp, cp * sr, cp * cr, z,
+        cy * cp, cy * sp * sr - sy * cr, -cy * sp * cr - sy * sr, x,
+        sy * cp, sy * sp * sr + cy * cr, -sy * sp * cr + cy * sr, y,
+        sp, -cp * sr, cp * cr, z,
         0.0, 0.0, 0.0, 1.0,
     ])
 
