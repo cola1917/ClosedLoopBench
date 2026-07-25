@@ -6,7 +6,12 @@ from copy import deepcopy
 from typing import Any, Mapping
 
 from agents.plugin_contract import canonical_sha256
-from agents.transfuserpp_contract import ALGORITHM_ID, ALGORITHM_VERSION, cuda_runtime_identity
+from agents.transfuserpp_contract import (
+    ALGORITHM_ID,
+    ALGORITHM_VERSION,
+    camera_adaptation_contract,
+    cuda_runtime_identity,
+)
 from runtime.scene0061_counterfactual import validate_scene0061_counterfactual_matrix
 from runtime.scene0061_variants import (
     CASE_ACTOR_CONTROL_MODES,
@@ -117,15 +122,13 @@ def prepare_scene0061_transfuserpp_remote_run(
             "observation_topic": observation_topic,
             "algorithm_sensor_binding": {
                 "camera_sensor_id": "camera_front",
-                "camera_width": 800,
-                "camera_height": 450,
+                "camera_source_width": camera_spec["width"],
+                "camera_source_height": camera_spec["height"],
                 "camera_sensor_to_ego": deepcopy(camera_spec["sensor_to_ego"]),
                 "camera_sensor_to_ego_coordinate_frame": (
                     "carla_x_forward_y_right_z_up"
                 ),
-                "camera_adaptation": (
-                    "center_crop_800x450_to_800x400_then_resize_to_model_config"
-                ),
+                "camera_adaptation": camera_adaptation_contract(),
                 "lidar_sensor_id": "lidar_top",
                 "lidar_sensor_to_ego": deepcopy(lidar_spec["sensor_to_ego"]),
                 "lidar_axis_convention": "carla_sensor",
@@ -293,9 +296,9 @@ def _validate_formal_nurec_sensors(config: Mapping[str, Any]) -> None:
     for row in cameras:
         width = row.get("width", row.get("resolution_w"))
         height = row.get("height", row.get("resolution_h"))
-        if width != 800 or height != 450:
+        if width != 1600 or height != 900:
             raise Scene0061TransFuserPPRemoteError(
-                f"formal camera {row.get('sensor_id')} must be 800x450"
+                f"formal physical camera {row.get('sensor_id')} must be 1600x900"
             )
         _validated_sensor_to_ego(
             row.get("sensor_to_ego"), f"formal camera {row.get('sensor_id')}"

@@ -16,13 +16,13 @@ SENSOR_TO_EGO = [
 
 
 def _calibration():
+    from agents.transfuserpp_contract import camera_adaptation_contract
+
     return {
         "camera_sensor_id": "camera_front",
-        "camera_width": 800,
-        "camera_height": 450,
         "camera_sensor_to_ego": list(SENSOR_TO_EGO),
         "camera_sensor_to_ego_coordinate_frame": "carla_x_forward_y_right_z_up",
-        "camera_adaptation": "center_crop_800x450_to_800x400_then_resize_to_model_config",
+        "camera_adaptation": camera_adaptation_contract(),
         "lidar_sensor_id": "lidar_top",
         "lidar_sensor_to_ego": list(SENSOR_TO_EGO),
     }
@@ -113,8 +113,8 @@ class TransFuserPPContractTests(unittest.TestCase):
         )
 
         invalid = _observation()
-        invalid["calibration"]["camera_width"] = 640
-        with self.assertRaisesRegex(TransFuserPPContractError, "800x450"):
+        invalid["calibration"]["camera_adaptation"]["target_width"] = 640
+        with self.assertRaisesRegex(TransFuserPPContractError, "1600x900-to-800x450"):
             validate_observation(invalid)
         invalid = _observation()
         invalid["calibration"]["lidar_sensor_to_ego"][3] = 1.0
@@ -141,6 +141,44 @@ class TransFuserPPContractTests(unittest.TestCase):
         from agents.transfuserpp_contract import camera_center_crop_window
 
         self.assertEqual(camera_center_crop_window(800, 450, 1024, 512), [0, 25, 800, 425])
+
+    def test_physical_camera_adaptation_contract_is_hash_bound(self):
+        from agents.transfuserpp_contract import (
+            TransFuserPPContractError,
+            camera_adaptation_contract,
+            camera_adaptation_evidence,
+            validate_camera_adaptation_evidence,
+        )
+
+        contract = camera_adaptation_contract()
+        self.assertEqual(
+            (contract["source_width"], contract["source_height"]), (1600, 900)
+        )
+        self.assertEqual(
+            (contract["target_width"], contract["target_height"]), (800, 450)
+        )
+        evidence = camera_adaptation_evidence(
+            contract=contract,
+            source_payload=_observation()["rgb"]["camera_front"],
+            model_sensor_width=1024,
+            model_sensor_height=512,
+            center_crop_xyxy=[0, 25, 800, 425],
+            model_crop_applied_by_upstream=True,
+        )
+        validate_camera_adaptation_evidence(
+            evidence,
+            source_payload=_observation()["rgb"]["camera_front"],
+            calibration=_calibration(),
+            label="test evidence",
+        )
+        evidence["source_payload_sha256"] = "b" * 64
+        with self.assertRaisesRegex(TransFuserPPContractError, "hash or transform"):
+            validate_camera_adaptation_evidence(
+                evidence,
+                source_payload=_observation()["rgb"]["camera_front"],
+                calibration=_calibration(),
+                label="test evidence",
+            )
 
     def test_carla_navigation_snapshot_hash_is_path_independent(self):
         from agents.transfuserpp_contract import directory_snapshot_sha256

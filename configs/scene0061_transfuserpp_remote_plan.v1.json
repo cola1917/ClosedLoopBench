@@ -30,8 +30,8 @@
     "control_frequency_hz": 20.0,
     "carla_fixed_delta_seconds": 0.05,
     "carla_pythonapi_agents_navigation": "external_read_only_hash_verified_mount",
-    "camera_adaptation": "800x450_center_crop_800x400_resize_1024x512_then_upstream_crop",
-    "camera_calibration_contract": "per_frame_hash_bound_800x450_sensor_to_ego_and_adaptation",
+    "camera_adaptation": "physical_1600x900_resize_linear_to_800x450_then_upstream_model_crop",
+    "camera_calibration_contract": "per_frame_hash_bound_1600x900_source_sensor_to_ego_and_800x450_adaptation",
     "model_ego_coordinate_frame": "carla_x_forward_y_right_z_up",
     "official_leaderboard_sensor_equivalent": false,
     "upstream_sensor_agent_safety_controllers": "bypassed_and_reported"

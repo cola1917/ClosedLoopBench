@@ -9,10 +9,11 @@ from PIL import Image
 
 
 HASH = "d" * 64
-CALIBRATION = {
+def _calibration():
+    from agents.transfuserpp_contract import camera_adaptation_contract
+
+    return {
     "camera_sensor_id": "camera_front",
-    "camera_width": 800,
-    "camera_height": 450,
     "camera_sensor_to_ego": [
         1.0, 0.0, 0.0, 0.0,
         0.0, 1.0, 0.0, 0.0,
@@ -20,7 +21,7 @@ CALIBRATION = {
         0.0, 0.0, 0.0, 1.0,
     ],
     "camera_sensor_to_ego_coordinate_frame": "carla_x_forward_y_right_z_up",
-    "camera_adaptation": "center_crop_800x450_to_800x400_then_resize_to_model_config",
+    "camera_adaptation": camera_adaptation_contract(),
     "lidar_sensor_id": "lidar_top",
     "lidar_sensor_to_ego": [
         1.0, 0.0, 0.0, 0.0,
@@ -28,7 +29,10 @@ CALIBRATION = {
         0.0, 0.0, 1.0, 2.5,
         0.0, 0.0, 0.0, 1.0,
     ],
-}
+    }
+
+
+CALIBRATION = _calibration()
 
 
 def _sha(path):
@@ -121,6 +125,19 @@ def _record(root, *, frame_id, timestamp, case_id, labels, target_speed, brake):
                 "sensor_to_ego": list(CALIBRATION["lidar_sensor_to_ego"]),
             },
             "calibration": dict(CALIBRATION),
+            "camera_adaptation": __import__(
+                "agents.transfuserpp_contract", fromlist=["camera_adaptation_evidence"]
+            ).camera_adaptation_evidence(
+                contract=CALIBRATION["camera_adaptation"],
+                source_payload={
+                    "sha256": _sha(rgb),
+                    "byte_count": rgb.stat().st_size,
+                },
+                model_sensor_width=1024,
+                model_sensor_height=512,
+                center_crop_xyxy=[0, 25, 800, 425],
+                model_crop_applied_by_upstream=True,
+            ),
             "model_ego_coordinate_frame": "carla_x_forward_y_right_z_up",
             "ego_pose_coordinate_frame": "closedloopbench_scene_x_forward_y_left_z_up",
             "ego_pose": {"x": 0.0, "y": 0.0, "yaw": 0.0},

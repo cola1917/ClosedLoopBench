@@ -6,6 +6,8 @@ from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
+
 
 HASH = "a" * 64
 
@@ -86,6 +88,32 @@ class TransFuserPPRuntimeUnitTests(unittest.TestCase):
             self.assertEqual(
                 runtime._shared_relative_path(target),
                 "case/attempt/frame.npz",
+            )
+
+    def test_physical_camera_resize_requires_1600x900_source(self) -> None:
+        from agents.transfuserpp_contract import camera_adaptation_contract
+        from agents.transfuserpp_runtime import (
+            TransFuserPPModelRuntime,
+            TransFuserPPRuntimeError,
+        )
+
+        calls = []
+
+        def resize(image, size, *, interpolation):
+            calls.append((image.shape, size, interpolation))
+            return np.zeros((size[1], size[0], image.shape[2]), dtype=image.dtype)
+
+        runtime = TransFuserPPModelRuntime.__new__(TransFuserPPModelRuntime)
+        runtime.cv2 = SimpleNamespace(INTER_LINEAR=7, resize=resize)
+        output = runtime._adapt_physical_camera_image(
+            np.zeros((900, 1600, 3), dtype=np.uint8), camera_adaptation_contract()
+        )
+        self.assertEqual(output.shape, (450, 800, 3))
+        self.assertEqual(calls, [((900, 1600, 3), (800, 450), 7)])
+        with self.assertRaisesRegex(TransFuserPPRuntimeError, "1600x900"):
+            runtime._adapt_physical_camera_image(
+                np.zeros((450, 800, 3), dtype=np.uint8),
+                camera_adaptation_contract(),
             )
 
 

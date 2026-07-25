@@ -17,6 +17,7 @@ from agents.transfuserpp_contract import (
     ALGORITHM_VERSION,
     TransFuserPPContractError,
     assert_runtime_prepared,
+    camera_adaptation_evidence,
     camera_center_crop_window,
     REQUIRED_DENSE_KEYS,
     route_command_index,
@@ -304,10 +305,13 @@ class TransFuserPPModelRuntime:
             image = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         source_height, source_width = image.shape[:2]
-        if (source_width, source_height) != (800, 450):
-            raise TransFuserPPRuntimeError(
-                "formal camera_front payload must decode to exactly 800x450"
-            )
+        adaptation_contract = (obs.get("calibration") or {}).get("camera_adaptation")
+        if not isinstance(adaptation_contract, Mapping):
+            raise TransFuserPPRuntimeError("camera adaptation contract is absent")
+        try:
+            image = self._adapt_physical_camera_image(image, adaptation_contract)
+        except TransFuserPPContractError as exc:
+            raise TransFuserPPRuntimeError(str(exc)) from exc
         expected_width = int(self.model_config.camera_width)
         expected_height = int(self.model_config.camera_height)
         adaptation = str(
@@ -373,16 +377,14 @@ class TransFuserPPModelRuntime:
             "lidar_top": deepcopy(dict(lidar_ref)),
             "calibration": deepcopy(dict(obs["calibration"])),
             "rgb_tensor_shape": list(rgb.shape),
-            "camera_adaptation": {
-                "mode": adaptation,
-                "source_width": source_width,
-                "source_height": source_height,
-                "model_sensor_width": expected_width,
-                "model_sensor_height": expected_height,
-                "center_crop_xyxy": crop_window,
-                "model_crop_applied_by_upstream": bool(self.model_config.crop_image),
-                "official_leaderboard_sensor_equivalent": False,
-            },
+            "camera_adaptation": camera_adaptation_evidence(
+                contract=adaptation_contract,
+                source_payload=rgb_ref,
+                model_sensor_width=expected_width,
+                model_sensor_height=expected_height,
+                center_crop_xyxy=crop_window,
+                model_crop_applied_by_upstream=bool(self.model_config.crop_image),
+            ),
             "lidar_bev_shape": list(lidar_bev.shape),
             "lidar_point_count": int(xyz.shape[0]),
             "route_command": obs["route"]["route_command"],
@@ -626,6 +628,30 @@ class TransFuserPPModelRuntime:
             interpolation=self.cv2.INTER_LINEAR,
         )
         return resized, [left, top, right, bottom]
+
+    def _adapt_physical_camera_image(
+        self, image: Any, adaptation_contract: Mapping[str, Any]
+    ) -> Any:
+        """Resize the materialized physical NuRec image to TF++'s input canvas."""
+
+        from agents.transfuserpp_contract import validate_camera_adaptation_contract
+
+        contract = validate_camera_adaptation_contract(
+            adaptation_contract, "camera adaptation"
+        )
+        height, width = image.shape[:2]
+        if (width, height) != (
+            contract["source_width"],
+            contract["source_height"],
+        ):
+            raise TransFuserPPRuntimeError(
+                "formal camera_front payload dimensions do not match the 1600x900 physical source contract"
+            )
+        return self.cv2.resize(
+            image,
+            (contract["target_width"], contract["target_height"]),
+            interpolation=self.cv2.INTER_LINEAR,
+        )
 
     def _tensor_summary(self, value: Any) -> Any:
         if value is None:

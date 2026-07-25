@@ -52,8 +52,8 @@ def _base():
                 {
                     "sensor_id": name,
                     "model": "recorded",
-                    "width": 800,
-                    "height": 450,
+                    "width": 1600,
+                    "height": 900,
                     "sensor_to_ego": IDENTITY,
                 }
                 for name in cameras
@@ -103,10 +103,16 @@ class Scene0061TransFuserPPRemoteTests(unittest.TestCase):
         )
         self.assertEqual(
             (
-                run["ego"]["algorithm_sensor_binding"]["camera_width"],
-                run["ego"]["algorithm_sensor_binding"]["camera_height"],
+                run["ego"]["algorithm_sensor_binding"]["camera_source_width"],
+                run["ego"]["algorithm_sensor_binding"]["camera_source_height"],
             ),
-            (800, 450),
+            (1600, 900),
+        )
+        self.assertEqual(
+            run["ego"]["algorithm_sensor_binding"]["camera_adaptation"][
+                "target_width"
+            ],
+            800,
         )
         self.assertIn("S2_lead_hard_brake/seed_41", runtime["intermediate_output_dir"])
         self.assertEqual(runtime["experiment"]["variant_config_sha256"], run["experiment"]["variant_config_sha256"])
@@ -179,7 +185,7 @@ class Scene0061TransFuserPPRemoteTests(unittest.TestCase):
         cases.append((duplicate, "unique"))
         wrong_size = copy.deepcopy(_base())
         wrong_size["nurec_runtime"]["camera_specs"][0]["width"] = 640
-        cases.append((wrong_size, "800x450"))
+        cases.append((wrong_size, "1600x900"))
         invalid_pose = copy.deepcopy(_base())
         invalid_pose["nurec_runtime"]["camera_specs"][0]["sensor_to_ego"] = IDENTITY[:-1]
         cases.append((invalid_pose, "16"))
