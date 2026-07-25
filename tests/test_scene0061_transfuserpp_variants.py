@@ -89,18 +89,19 @@ class Scene0061TransFuserPPVariantTests(unittest.TestCase):
                         row["sensor_pose_reference"],
                         actor["binding"]["sensor_pose_reference"],
                     )
-                self.assertEqual(
-                    variant["actors"][0]["control_mode_contract"][
-                        "sensor_pose_reference"
-                    ],
-                    "carla_bounding_box_center",
-                )
-                self.assertEqual(
-                    variant["actors"][1]["control_mode_contract"][
-                        "sensor_pose_reference"
-                    ],
-                    "carla_bounding_box_bottom",
-                )
+                    expected_reference = (
+                        "source_track_frame"
+                        if actor["effective_control_mode"] == "replay"
+                        else (
+                            "carla_bounding_box_bottom"
+                            if actor["type"] == "pedestrian"
+                            else "carla_bounding_box_center"
+                        )
+                    )
+                    self.assertEqual(
+                        actor["control_mode_contract"]["sensor_pose_reference"],
+                        expected_reference,
+                    )
 
     def test_hard_brake_retimes_only_along_source_corridor(self):
         from runtime.scene0061_variants import build_scene0061_variant
