@@ -32,6 +32,17 @@ class CarlaAcceptanceError(RuntimeError):
     """Raised when any one of the three real CARLA runs lacks required evidence."""
 
 
+def _percentile(values: list[float], probability: float) -> float:
+    """Match the CUDA probe's deterministic linear percentile calculation."""
+
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * probability
+    lower = int(position)
+    upper = min(len(ordered) - 1, lower + 1)
+    weight = position - lower
+    return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
+
+
 def run_acceptance_triplicate(
     run_config: dict[str, Any],
     output_root: Path,
@@ -325,6 +336,31 @@ def _validate_transfuserpp_cuda_evidence(config: dict[str, Any]) -> None:
     latency = evidence.get("latency_ms") or {}
     gate = ((config.get("algorithm_runtime_identity") or {}).get("cuda_gate") or {})
     samples = latency.get("samples") or []
+    samples_are_valid = isinstance(samples, list) and all(
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+        and float(value) >= 0.0
+        for value in samples
+    )
+    # Convert only after validating the serialized values.  Evidence is
+    # untrusted, so a string or arbitrary object must fail closed rather than
+    # escape this validator with a conversion exception.
+    sample_values = [float(value) for value in samples] if samples_are_valid else []
+    latency_statistics_valid = (
+        samples_are_valid
+        and len(sample_values) > 0
+        and all(
+            not isinstance(latency.get(name), bool)
+            and isinstance(latency.get(name), (int, float))
+            and math.isfinite(float(latency[name]))
+            for name in ("mean", "p50", "p95", "p99")
+        )
+        and math.isclose(float(latency["mean"]), math.fsum(sample_values) / len(sample_values), rel_tol=0.0, abs_tol=1e-9)
+        and math.isclose(float(latency["p50"]), _percentile(sample_values, 0.50), rel_tol=0.0, abs_tol=1e-9)
+        and math.isclose(float(latency["p95"]), _percentile(sample_values, 0.95), rel_tol=0.0, abs_tol=1e-9)
+        and math.isclose(float(latency["p99"]), _percentile(sample_values, 0.99), rel_tol=0.0, abs_tol=1e-9)
+    )
     experiment_names = (
         "scene_id",
         "scene_version",
@@ -354,14 +390,11 @@ def _validate_transfuserpp_cuda_evidence(config: dict[str, Any]) -> None:
         and evidence.get("warmup_iterations") == gate.get("warmup_iterations")
         and isinstance(evidence.get("measured_iterations"), int)
         and evidence.get("measured_iterations") == gate.get("measured_iterations")
-        and isinstance(samples, list)
-        and len(samples) == evidence.get("measured_iterations")
-        and all(isinstance(value, (int, float)) and math.isfinite(float(value)) and value >= 0 for value in samples)
+        and len(sample_values) == evidence.get("measured_iterations")
+        and latency_statistics_valid
         and isinstance(evidence.get("cuda_peak_memory_allocated_bytes"), int)
         and 0 < evidence.get("cuda_peak_memory_allocated_bytes") <= gate.get("max_peak_memory_bytes", -1)
-        and isinstance(latency.get("p95"), (int, float))
         and latency.get("p95") <= gate.get("max_p95_latency_ms", -1)
-        and isinstance(latency.get("p99"), (int, float))
         and latency.get("p99") <= gate.get("max_p99_latency_ms", -1)
     )
     if not file_valid or not content_valid:

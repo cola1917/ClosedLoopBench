@@ -1077,6 +1077,9 @@ def cuda_runtime_identity(config: Mapping[str, Any]) -> dict[str, Any]:
         "model_config_sha256": config.get("model_config_sha256"),
         "carla_agents_sha256": config.get("carla_agents_sha256"),
         "container_image_digest": config.get("container_image_digest"),
+        # The CUDA report must be specific to the adapter implementation that
+        # loaded the checkpoint, not merely to the external model artifacts.
+        "adapter_source_sha256": adapter_source_snapshot_sha256(),
         "device": config.get("device", "cuda:0"),
         "cuda_gate": deepcopy(dict(config.get("cuda_gate") or {})),
     }

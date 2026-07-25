@@ -349,7 +349,13 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                 "tensor_warmup_completed": True,
                 "warmup_iterations": 2,
                 "measured_iterations": 3,
-                "latency_ms": {"samples": [10.0, 11.0, 12.0], "p95": 11.9, "p99": 11.98},
+                "latency_ms": {
+                    "samples": [10.0, 11.0, 12.0],
+                    "mean": 11.0,
+                    "p50": 11.0,
+                    "p95": 11.9,
+                    "p99": 11.98,
+                },
                 "cuda_peak_memory_allocated_bytes": 1024,
                 "gate": runtime_config["cuda_gate"],
                 "runtime_identity": runtime_identity,
@@ -363,6 +369,32 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
                 "evidence_sha256": hashlib.sha256(cuda_path.read_bytes()).hexdigest(),
             }
             _validate_transfuserpp_external_evidence(config)
+            cuda_evidence["latency_ms"] = {
+                "samples": [10.0, 11.0, 900.0],
+                "mean": 11.0,
+                "p50": 11.0,
+                "p95": 11.9,
+                "p99": 11.98,
+            }
+            cuda_path.write_text(json.dumps(cuda_evidence), encoding="utf-8")
+            config["algorithm_gpu_validation"]["evidence_sha256"] = hashlib.sha256(
+                cuda_path.read_bytes()
+            ).hexdigest()
+            with self.assertRaisesRegex(CarlaAcceptanceError, "CUDA warmup/VRAM/latency"):
+                _validate_transfuserpp_external_evidence(config)
+            cuda_evidence["latency_ms"] = {
+                "samples": [10.0, "not-a-latency", 12.0],
+                "mean": 11.0,
+                "p50": 11.0,
+                "p95": 11.9,
+                "p99": 11.98,
+            }
+            cuda_path.write_text(json.dumps(cuda_evidence), encoding="utf-8")
+            config["algorithm_gpu_validation"]["evidence_sha256"] = hashlib.sha256(
+                cuda_path.read_bytes()
+            ).hexdigest()
+            with self.assertRaisesRegex(CarlaAcceptanceError, "CUDA warmup/VRAM/latency"):
+                _validate_transfuserpp_external_evidence(config)
             config["nurec_runtime"]["runtime_scene_id"] = "different-runtime-scene"
             with self.assertRaisesRegex(CarlaAcceptanceError, "cannot be verified"):
                 _validate_transfuserpp_external_evidence(config)
