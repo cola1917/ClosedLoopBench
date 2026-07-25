@@ -319,6 +319,7 @@ def run_basic_agent(
     driver_factory=None,
     actor_behavior_planner=None,
     sensor_frame_handler=None,
+    physical_frame_probe_factory=None,
 ) -> dict[str, Any]:
     try:
         validate_plan_run_config_provenance(plan)
@@ -346,6 +347,7 @@ def run_basic_agent(
         driver_factory=driver_factory,
         actor_behavior_planner=actor_behavior_planner,
         sensor_frame_handler=sensor_frame_handler,
+        physical_frame_probe_factory=physical_frame_probe_factory,
     )
 
 
@@ -394,11 +396,13 @@ def _run_basic_agent_loop(
     driver_factory: Any = None,
     actor_behavior_planner: Any = None,
     sensor_frame_handler: Any = None,
+    physical_frame_probe_factory: Any = None,
 ) -> dict[str, Any]:
     client = None
     world = None
     ego_vehicle = None
     collision_sensor = None
+    physical_frame_probe = None
     ego_driver = None
     traffic_manager = None
     actor_vehicles: dict[str, Any] = {}
@@ -518,6 +522,21 @@ def _run_basic_agent_loop(
             _snap_plan_to_map(carla_module, world, plan)
 
         ego_vehicle = _spawn_ego_vehicle(carla_module, world, ego_config)
+        if physical_frame_probe_factory is not None:
+            physical_frame_probe = physical_frame_probe_factory(
+                carla_module=carla_module, world=world, ego_vehicle=ego_vehicle, plan=plan
+            )
+            if physical_frame_probe is None or not hasattr(physical_frame_probe, "start"):
+                raise RuntimeError(
+                    "physical frame probe factory must return an object with start()"
+                )
+            if not hasattr(physical_frame_probe, "persist_frame") or not hasattr(
+                physical_frame_probe, "close"
+            ):
+                raise RuntimeError(
+                    "physical frame probe requires persist_frame() and close()"
+                )
+            physical_frame_probe.start()
         collision_tracker, collision_sensor = _spawn_collision_tracker(
             carla_module,
             world,
@@ -623,6 +642,18 @@ def _run_basic_agent_loop(
                     getattr(timestamp, "delta_seconds", snapshot_delta_sec)
                 )
             world_frame = snapshot_frame if isinstance(snapshot_frame, int) else tick_frame
+            native_lidar_capture = None
+            if physical_frame_probe is not None:
+                if not isinstance(world_frame, int):
+                    raise RuntimeError(
+                        "physical frame probe requires an integer CARLA frame identity"
+                    )
+                capture_path = physical_frame_probe.persist_frame(world_frame)
+                native_lidar_capture = {
+                    "schema_version": "scene0061_native_lidar_probe_ref.v1",
+                    "carla_frame_id": world_frame,
+                    "capture_path": str(capture_path),
+                }
             if acceptance_evidence and isinstance(world_frame, int):
                 if previous_world_frame is not None and world_frame != previous_world_frame + 1:
                     raise RuntimeError(
@@ -863,6 +894,7 @@ def _run_basic_agent_loop(
                     "ego_control": _control_dict(control),
                     "actor_states": actor_states,
                     "multimodal_sensor": multimodal_summary,
+                    "native_lidar_capture": native_lidar_capture,
                 }
             )
             previous_speed_mps = ego_speed_mps
@@ -1020,6 +1052,16 @@ def _run_basic_agent_loop(
         result["report"] = report
         return result
     finally:
+        if physical_frame_probe is not None:
+            try:
+                physical_frame_probe.close()
+                cleanup_audit.append(
+                    {"action": "physical_frame_probe.close", "status": "succeeded"}
+                )
+            except Exception:
+                cleanup_audit.append(
+                    {"action": "physical_frame_probe.close", "status": "failed"}
+                )
         if sensor_frame_handler is not None and hasattr(sensor_frame_handler, "close"):
             try:
                 sensor_frame_handler.close()

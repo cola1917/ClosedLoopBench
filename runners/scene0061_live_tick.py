@@ -37,6 +37,11 @@ from adapters.nurec_multimodal import (
     validate_nurec_multimodal_evidence,
 )
 from adapters.nurec_260_client import _validate_runtime_actor_binding_contract
+from runtime.scene0061_carla_lidar_probe import CarlaNativeLidarProbe
+from runtime.scene0061_lidar_axis_collector import (
+    LiDARAxisCollectionError,
+    collect_lidar_axis_evidence,
+)
 
 
 class Scene0061LiveTickError(RuntimeError):
@@ -220,6 +225,7 @@ _EVIDENCE_ARTIFACTS = (
     "metrics_trace.jsonl",
     "cleanup_audit.json",
     "closed_loop_report.json",
+    "lidar_axis_evidence.json",
 )
 
 
@@ -462,6 +468,7 @@ def prepare_live_tick(
     ego_driver: str = "basic_agent",
     require_multimodal: bool = True,
     carla_python_api_path: Path | None = None,
+    capture_native_lidar: bool = False,
 ) -> dict[str, Any]:
     """Snapshot explicit inputs and create a plan for exactly one CARLA tick.
 
@@ -471,6 +478,8 @@ def prepare_live_tick(
 
     if not str(run_id).strip():
         raise Scene0061LiveTickError("run_id must be non-empty")
+    if not isinstance(capture_native_lidar, bool):
+        raise Scene0061LiveTickError("capture_native_lidar must be a boolean")
     source_config = config_path.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     xodr = opendrive_path.expanduser().resolve()
@@ -527,6 +536,7 @@ def prepare_live_tick(
         "selected_config_sha256": config_identity["sha256"],
         "runtime_config_path": runtime_config_identity["path"],
         "runtime_config_sha256": runtime_config_identity["sha256"],
+        "capture_native_lidar_requested": capture_native_lidar,
         **(
             {"carla_basic_agent": carla_basic_agent}
             if carla_basic_agent is not None
@@ -554,6 +564,10 @@ def prepare_live_tick(
             )
         },
         "carla_basic_agent": carla_basic_agent,
+        "physical_lidar_probe": {
+            "requested": capture_native_lidar,
+            "mode": "same_frame_carla_native_lidar" if capture_native_lidar else "not_requested",
+        },
         "artifacts": {
             "basic_agent_plan": str(plan_path.resolve()),
             "runtime_environment": str(environment_path.resolve()),
@@ -640,6 +654,17 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
     ):
         raise Scene0061LiveTickError(
             "basic_agent_plan selected config path/SHA-256 does not match runtime_environment"
+        )
+    physical_lidar_probe = environment.get("physical_lidar_probe")
+    if not isinstance(physical_lidar_probe, Mapping) or not isinstance(
+        physical_lidar_probe.get("requested"), bool
+    ):
+        raise Scene0061LiveTickError(
+            "prepared environment has no boolean physical LiDAR probe request"
+        )
+    if provenance.get("capture_native_lidar_requested") is not physical_lidar_probe.get("requested"):
+        raise Scene0061LiveTickError(
+            "basic_agent_plan native LiDAR probe request does not match runtime_environment"
         )
     handler_preflight = environment.get("sensor_handler_preflight")
     if not isinstance(handler_preflight, Mapping) or handler_preflight.get("status") != "passed":
@@ -753,6 +778,115 @@ def validate_live_tick_result(result: Mapping[str, Any], output_dir: Path) -> di
     }
 
 
+def _physical_lidar_probe_factory(
+    config: Mapping[str, Any], output_dir: Path
+) -> Callable[..., CarlaNativeLidarProbe]:
+    """Bind a CARLA-native probe only to the configured ``lidar_top`` rig.
+
+    The factory is built from the immutable runtime config used by the NuRec
+    handler.  It never reads an historical output or infers a transform from a
+    renderer response.
+    """
+
+    runtime = config.get("nurec_runtime")
+    specs = runtime.get("lidar_specs") if isinstance(runtime, Mapping) else None
+    rows = [
+        row
+        for row in specs or []
+        if isinstance(row, Mapping) and row.get("sensor_id") == "lidar_top"
+    ]
+    if len(rows) != 1:
+        raise Scene0061LiveTickError(
+            "physical LiDAR probe requires exactly one configured lidar_top spec"
+        )
+    spec = rows[0]
+    matrix = spec.get("sensor_to_ego")
+    attributes = spec.get("carla_native_probe_attributes")
+    if attributes is not None and not isinstance(attributes, Mapping):
+        raise Scene0061LiveTickError(
+            "lidar_top.carla_native_probe_attributes must be an object when supplied"
+        )
+
+    def factory(*, carla_module: Any, world: Any, ego_vehicle: Any, plan: Any) -> CarlaNativeLidarProbe:
+        del plan
+        return CarlaNativeLidarProbe(
+            carla_module=carla_module,
+            world=world,
+            ego_vehicle=ego_vehicle,
+            output_dir=output_dir,
+            sensor_to_ego=matrix,
+            blueprint_attributes=attributes,
+        )
+
+    return factory
+
+
+def _collect_lidar_axis_evidence(
+    *,
+    output_dir: Path,
+    config: Mapping[str, Any],
+    environment: Mapping[str, Any],
+    capture_native_lidar: bool,
+) -> dict[str, Any]:
+    """Try a physical coordinate proof, preserving an explicit failure otherwise.
+
+    A non-passing collection is evidence of a real blocker, not a reason to
+    mutate NuRec's coordinate metadata.  This function therefore catches only
+    expected collection failures and records the exact reason beside the run.
+    """
+
+    base = {
+        "schema_version": "scene0061_lidar_coordinate_validation.v1",
+        "collection_source": "same_frame_carla_native_lidar_probe",
+    }
+    if not capture_native_lidar:
+        # The default G0 diagnostic is not silently changed by an auxiliary
+        # sensor.  Record the absence explicitly so it cannot be mistaken for
+        # either a physical axis pass or a collection failure.
+        return {
+            **base,
+            "status": "not_requested",
+            "reason": "native_lidar_capture_not_requested",
+        }
+    try:
+        frame_rows = _read_jsonl_objects(output_dir / "frame_trace.jsonl", "frame_trace.jsonl", [])
+        nurec_rows = _read_jsonl_objects(
+            output_dir / "nurec_multimodal_trace.jsonl",
+            "nurec_multimodal_trace.jsonl",
+            [],
+        )
+        if len(frame_rows) != 1 or len(nurec_rows) != 1:
+            raise LiDARAxisCollectionError(
+                "physical axis collection requires exactly one frame and one NuRec trace"
+            )
+        capture = frame_rows[0].get("native_lidar_capture")
+        if not isinstance(capture, Mapping) or not capture.get("capture_path"):
+            raise LiDARAxisCollectionError(
+                "physical axis collection has no same-frame CARLA native LiDAR capture"
+            )
+        native_scan = environment.get("native_scan_manifest")
+        if not isinstance(native_scan, Mapping) or not native_scan.get("path"):
+            raise LiDARAxisCollectionError(
+                "physical axis collection has no prepared native-scan manifest"
+            )
+        evidence = collect_lidar_axis_evidence(
+            run_config=config,
+            nurec_evidence=nurec_rows[0],
+            frame_trace=frame_rows[0],
+            native_capture_path=Path(str(capture["capture_path"])),
+            native_scan_manifest_path=Path(str(native_scan["path"])),
+        )
+        evidence["collection_source"] = base["collection_source"]
+        return evidence
+    except (LiDARAxisCollectionError, OSError, ValueError) as exc:
+        return {
+            **base,
+            "status": "failed",
+            "reason": "physical_axis_collection_failed",
+            "detail": str(exc),
+        }
+
+
 def execute_live_tick(
     output_dir: Path,
     *,
@@ -781,13 +915,27 @@ def execute_live_tick(
         Path(str((environment.get("runtime_config") or {}).get("path")))
     )
     plan = _load_object(Path(str((environment.get("artifacts") or {}).get("basic_agent_plan") or "")))
+    physical_lidar_probe = environment.get("physical_lidar_probe")
+    assert isinstance(physical_lidar_probe, Mapping)
+    capture_native_lidar = physical_lidar_probe["requested"]
+    assert isinstance(capture_native_lidar, bool)
     result_path = Path(str((environment.get("artifacts") or {}).get("runtime_result") or ""))
     validation_path = Path(str((environment.get("artifacts") or {}).get("live_tick_validation") or ""))
     try:
         handler = sensor_handler_factory(config, root)
         if not callable(handler):
             raise Scene0061LiveTickError("sensor handler factory returned a non-callable")
-        result = execute(plan, sensor_frame_handler=handler)
+        if execute is run_basic_agent and capture_native_lidar:
+            result = execute(
+                plan,
+                sensor_frame_handler=handler,
+                physical_frame_probe_factory=_physical_lidar_probe_factory(config, root),
+            )
+        else:
+            # Test and alternate integrations retain their established callable
+            # contract.  The production BasicAgent path is the only one allowed
+            # to make a physical CARLA coordinate claim.
+            result = execute(plan, sensor_frame_handler=handler)
     except Exception as exc:
         result = {
             "status": "failed",
@@ -795,11 +943,22 @@ def execute_live_tick(
             "detail": str(exc),
         }
     _write_json(result_path, result)
+    axis_evidence = _collect_lidar_axis_evidence(
+        output_dir=root,
+        config=config,
+        environment=environment,
+        capture_native_lidar=capture_native_lidar,
+    )
+    _write_json(root / "lidar_axis_evidence.json", axis_evidence)
     validation = validate_live_tick_result(result, root)
     _write_json(validation_path, validation)
     environment["status"] = validation["status"]
     environment["execution_finished_at_utc"] = _utc_now()
     environment["validation"] = validation
+    environment["lidar_axis_evidence"] = {
+        **_file_identity(root / "lidar_axis_evidence.json", required=True),
+        "status": axis_evidence["status"],
+    }
     _write_json(environment_path, environment)
     manifest = _write_artifact_manifest(root)
     manifest_path = root / "artifact_manifest.json"
@@ -839,6 +998,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sensor-handler-factory", default="adapters.nurec_260_client:build_nurec_260_handler")
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--execute-prepared", action="store_true")
+    parser.add_argument(
+        "--capture-native-lidar",
+        action="store_true",
+        help=(
+            "Explicitly arm a same-frame CARLA native LiDAR capture for the physical axis gate. "
+            "The prepared and executing values must match."
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         if args.prepare_only and args.execute_prepared:
@@ -857,6 +1024,10 @@ def main(argv: list[str] | None = None) -> int:
                     (environment.get("carla_basic_agent") or {}).get("python_api_path")
                     != str(args.carla_python_api.expanduser().resolve())
                 )
+                or (
+                    ((environment.get("physical_lidar_probe") or {}).get("requested")
+                    is not args.capture_native_lidar)
+                )
             ):
                 raise Scene0061LiveTickError("explicit execute-prepared inputs do not match the prepared environment")
         else:
@@ -870,6 +1041,7 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_sec=args.timeout_sec,
                 ego_driver=args.ego_driver,
                 carla_python_api_path=args.carla_python_api,
+                capture_native_lidar=args.capture_native_lidar,
             )
         if args.prepare_only:
             config = _load_object(

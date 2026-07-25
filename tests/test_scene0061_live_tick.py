@@ -64,6 +64,54 @@ class Scene0061LiveTickTests(unittest.TestCase):
             self.assertEqual(environment["config"]["byte_count"], config.stat().st_size)
             self.assertEqual(environment["python_runtime"]["executable"], str(Path(__import__("sys").executable).resolve()))
             self.assertIn("artifact_manifest", environment["artifacts"])
+            self.assertFalse(environment["physical_lidar_probe"]["requested"])
+            self.assertFalse(plan["runtime"]["provenance"]["capture_native_lidar_requested"])
+
+    def test_prepare_records_explicit_native_lidar_probe_request(self):
+        from runners.scene0061_live_tick import prepare_live_tick, verify_prepared_live_tick
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, xodr, _ = self._inputs(root)
+            output = root / "diagnostic"
+            environment = prepare_live_tick(
+                config_path=config,
+                output_dir=output,
+                run_id="native-lidar",
+                opendrive_path=xodr,
+                capture_native_lidar=True,
+            )
+            self.assertTrue(environment["physical_lidar_probe"]["requested"])
+            self.assertTrue(
+                json.loads((output / "basic_agent_plan.json").read_text(encoding="utf-8"))["runtime"]["provenance"]["capture_native_lidar_requested"]
+            )
+            environment["sensor_handler_preflight"] = {
+                "status": "passed", "factory": "builtins:print"
+            }
+            (output / "runtime_environment.json").write_text(json.dumps(environment), encoding="utf-8")
+            self.assertTrue(verify_prepared_live_tick(output)["physical_lidar_probe"]["requested"])
+
+    def test_verify_rejects_native_lidar_request_that_drifts_from_plan(self):
+        from runners.scene0061_live_tick import (
+            Scene0061LiveTickError,
+            prepare_live_tick,
+            verify_prepared_live_tick,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, xodr, _ = self._inputs(root)
+            output = root / "diagnostic"
+            environment = prepare_live_tick(
+                config_path=config,
+                output_dir=output,
+                run_id="native-lidar",
+                opendrive_path=xodr,
+            )
+            environment["physical_lidar_probe"]["requested"] = True
+            (output / "runtime_environment.json").write_text(json.dumps(environment), encoding="utf-8")
+            with self.assertRaisesRegex(Scene0061LiveTickError, "native LiDAR probe request"):
+                verify_prepared_live_tick(output)
 
     def test_execute_rejects_a_different_interpreter_before_callback(self):
         from runners.scene0061_live_tick import (
