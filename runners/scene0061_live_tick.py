@@ -217,7 +217,9 @@ def _validate_static_actor_binding(config: Mapping[str, Any], sidecar_identity: 
         sidecar = _load_object(Path(str(sidecar_identity["path"])))
         resolved_config = json.loads(json.dumps(config))
         resolved_config.setdefault("nurec_runtime", {})["actor_bindings"] = sidecar_identity["path"]
-        _validate_runtime_actor_binding_contract(resolved_config, runtime, sidecar)
+        _validate_runtime_actor_binding_contract(
+            resolved_config, resolved_config["nurec_runtime"], sidecar
+        )
     except (NuRecMultimodalError, OSError, KeyError, TypeError, ValueError) as exc:
         raise Scene0061LiveTickError(
             f"static actor-binding contract is not executable: {exc}"
