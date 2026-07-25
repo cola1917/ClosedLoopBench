@@ -217,6 +217,75 @@ def _native_scan_manifest_identity(config: Mapping[str, Any], config_path: Path)
     return identity
 
 
+def _formal_runtime_execution_identities(
+    config: Mapping[str, Any], config_path: Path, opendrive_path: Path
+) -> dict[str, dict[str, Any]] | None:
+    """Verify the actual CARLA/NRE files bound by a formal-base derivation.
+
+    A formal matrix locks source assets, but the live run also consumes an NRE
+    wrapper and a CARLA-converted OpenDRIVE.  If a config declares itself as a
+    derived formal base, these execution files must be the exact files whose
+    identities were recorded by that derivation.  Smoke configs intentionally
+    do not opt into this additional contract.
+    """
+
+    derivation = config.get("formal_base_derivation")
+    if derivation is None:
+        return None
+    if not isinstance(derivation, Mapping) or derivation.get("schema_version") != (
+        "scene0061_formal_base_derivation.v1"
+    ):
+        raise Scene0061LiveTickError("formal base derivation record is invalid")
+    records = derivation.get("runtime_execution_inputs")
+    if not isinstance(records, list):
+        raise Scene0061LiveTickError(
+            "formal base derivation lacks runtime execution input identities"
+        )
+    expected_roles = {
+        "runtime_scene_package",
+        "runtime_actor_bindings",
+        "runtime_native_scan_manifest",
+        "runtime_opendrive",
+    }
+    declared: dict[str, Mapping[str, Any]] = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise Scene0061LiveTickError("formal runtime execution input is not an object")
+        role = str(record.get("role") or "")
+        if role in declared:
+            raise Scene0061LiveTickError("formal runtime execution input roles are not unique")
+        declared[role] = record
+    if set(declared) != expected_roles:
+        raise Scene0061LiveTickError("formal runtime execution input roles are incomplete")
+    runtime = config.get("nurec_runtime")
+    if not isinstance(runtime, Mapping):
+        raise Scene0061LiveTickError("formal base config lacks nurec_runtime")
+    native_scan = runtime.get("native_scan_manifest")
+    if not isinstance(native_scan, Mapping):
+        raise Scene0061LiveTickError("formal base config lacks native scan manifest")
+    configured = {
+        "runtime_scene_package": _configured_file(config_path, runtime.get("scene_package")),
+        "runtime_actor_bindings": _configured_file(config_path, runtime.get("actor_bindings")),
+        "runtime_native_scan_manifest": _configured_file(config_path, native_scan.get("path")),
+        "runtime_opendrive": opendrive_path.expanduser().resolve(),
+    }
+    identities: dict[str, dict[str, Any]] = {}
+    for role, path in configured.items():
+        identity = _file_identity(path, required=True)
+        assert identity is not None
+        record = declared[role]
+        if (
+            identity.get("path") != record.get("path")
+            or identity.get("sha256") != record.get("sha256")
+            or identity.get("byte_count") != record.get("byte_count")
+        ):
+            raise Scene0061LiveTickError(
+                f"formal runtime execution input {role} path/SHA-256 no longer matches"
+            )
+        identities[role] = identity
+    return identities
+
+
 def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -494,6 +563,7 @@ def prepare_live_tick(
     config = _load_object(source_config)
     sidecar_identity = _actor_binding_identity(config, source_config)
     native_scan_manifest = _native_scan_manifest_identity(config, source_config)
+    formal_execution_inputs = _formal_runtime_execution_identities(config, source_config, xodr)
     _validate_static_actor_binding(config, sidecar_identity)
     carla_basic_agent = (
         _preflight_carla_basic_agent(carla_python_api_path)
@@ -562,6 +632,7 @@ def prepare_live_tick(
         "opendrive": xodr_identity,
         "actor_bindings": sidecar_identity,
         "native_scan_manifest": native_scan_manifest,
+        "formal_runtime_execution_inputs": formal_execution_inputs,
         "nurec_runtime": {
             "runtime_scene_id": str(
                 ((config.get("nurec_runtime") or {}).get("runtime_scene_id") or "")
@@ -608,6 +679,28 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
         expected = str(identity.get("sha256") or "")
         if not path.is_file() or _sha256_file(path) != expected:
             raise Scene0061LiveTickError(f"recorded {name} path/SHA-256 no longer matches")
+    formal_execution_inputs = environment.get("formal_runtime_execution_inputs")
+    if formal_execution_inputs is not None:
+        if not isinstance(formal_execution_inputs, Mapping):
+            raise Scene0061LiveTickError("formal runtime execution inputs must be an object")
+        expected_roles = {
+            "runtime_scene_package",
+            "runtime_actor_bindings",
+            "runtime_native_scan_manifest",
+            "runtime_opendrive",
+        }
+        if set(formal_execution_inputs) != expected_roles:
+            raise Scene0061LiveTickError("formal runtime execution inputs are incomplete")
+        for role, identity in formal_execution_inputs.items():
+            if not isinstance(identity, Mapping):
+                raise Scene0061LiveTickError(
+                    f"formal runtime execution input {role} must be an object"
+                )
+            path = Path(str(identity.get("path") or ""))
+            if not path.is_file() or _sha256_file(path) != identity.get("sha256"):
+                raise Scene0061LiveTickError(
+                    f"recorded formal runtime execution input {role} path/SHA-256 no longer matches"
+                )
     selected_config = environment.get("config")
     runtime_config = environment.get("runtime_config")
     if not isinstance(selected_config, Mapping) or not isinstance(runtime_config, Mapping):
