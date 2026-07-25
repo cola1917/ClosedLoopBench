@@ -12,9 +12,17 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
+
+
+# The runbook invokes this tool by absolute path from an arbitrary remote
+# shell.  In that form Python initially exposes only runners/ on sys.path.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from agents.plugin_contract import strict_json_loads
 from runtime.scene0061_lidar_axis_normalization import (

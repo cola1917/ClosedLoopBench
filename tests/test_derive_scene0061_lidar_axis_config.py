@@ -1,5 +1,7 @@
 import hashlib
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -89,6 +91,36 @@ class DeriveScene0061LiDARAxisConfigTests(unittest.TestCase):
             original_output = output.read_bytes()
             self.assertEqual(main(args), 2)
             self.assertEqual(output.read_bytes(), original_output)
+
+    def test_cli_runs_by_absolute_script_path_outside_the_repository(self):
+        """The remote runbook executes this tool by absolute script path."""
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as cwd:
+            root = Path(directory)
+            source = root / "r18.json"
+            source.write_text(json.dumps(_source_config()), encoding="utf-8")
+            output = root / "r19.json"
+            script = (
+                Path(__file__).resolve().parents[1]
+                / "runners"
+                / "derive_scene0061_lidar_axis_config.py"
+            )
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(script),
+                    "--source-config",
+                    str(source),
+                    "--output",
+                    str(output),
+                ],
+                cwd=cwd,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(json.loads(completed.stdout)["status"], "passed")
+            self.assertTrue(output.is_file())
 
     def test_derived_config_is_accepted_as_an_explicit_live_tick_input(self):
         from runners.derive_scene0061_lidar_axis_config import derive_lidar_axis_config_file
