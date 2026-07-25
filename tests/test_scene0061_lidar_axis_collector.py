@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 import json
 import struct
 import tempfile
@@ -203,6 +204,76 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
             [row["independent_capture_point_index"] for row in selected],
             [10_000, 10_001, 10_002, 10_003],
         )
+
+    def test_rejects_every_alternate_proper_signed_axis_permutation(self):
+        """A cloud encoded in any other right-handed axis basis cannot pass.
+
+        Proper signed permutations cover all 24 orientation-preserving ways to
+        relabel and flip the three sensor axes.  The identity is the declared
+        CARLA sensor basis; each of the other 23 must fail before an axis claim
+        is written, even though the points are otherwise real, same-frame, and
+        hash-bound.
+        """
+        from runtime.scene0061_lidar_axis_collector import (
+            LiDARAxisCollectionError,
+            collect_lidar_axis_evidence,
+        )
+
+        native_points = [
+            (1.25, 2.5, 4.75, 0.1),
+            (6.5, 10.25, 15.75, 0.2),
+            (21.5, 28.25, 36.75, 0.3),
+            (45.5, 55.25, 66.75, 0.4),
+        ]
+        for permutation in itertools.permutations(range(3)):
+            inversions = sum(
+                permutation[left] > permutation[right]
+                for left in range(3)
+                for right in range(left + 1, 3)
+            )
+            parity = 1 if inversions % 2 == 0 else -1
+            for signs in itertools.product((-1.0, 1.0), repeat=3):
+                if parity * signs[0] * signs[1] * signs[2] != 1.0:
+                    continue
+                if permutation == (0, 1, 2) and signs == (1.0, 1.0, 1.0):
+                    continue
+                with self.subTest(permutation=permutation, signs=signs), tempfile.TemporaryDirectory() as directory:
+                    values = self._inputs(Path(directory))
+                    nurec_path = Path(
+                        values[1]["records"][0]["response_metadata"]["materialized_payload"]["path"]
+                    )
+                    capture = json.loads(values[3].read_text(encoding="utf-8"))
+                    capture_path = Path(capture["raw_xyzi_ref"]["path"])
+                    capture_path.write_bytes(
+                        b"".join(struct.pack("<4f", *point) for point in native_points)
+                    )
+                    capture["raw_xyzi_ref"] = _ref(capture_path, values[1]["frame_id"])
+                    values[3].write_text(json.dumps(capture), encoding="utf-8")
+                    alternate = [
+                        tuple(signs[index] * point[permutation[index]] for index in range(3))
+                        + (point[3],)
+                        for point in native_points
+                    ]
+                    nurec_path.write_bytes(
+                        b"".join(struct.pack("<4f", *point) for point in alternate)
+                    )
+                    metadata = values[1]["records"][0]["response_metadata"]
+                    metadata["point_count"] = len(alternate)
+                    metadata["materialized_payload"] = {
+                        **_ref(nurec_path, values[1]["frame_id"]),
+                        "coordinate_frame": "unverified",
+                    }
+                    with self.assertRaisesRegex(
+                        LiDARAxisCollectionError,
+                        "fewer than four non-coplanar",
+                    ):
+                        collect_lidar_axis_evidence(
+                            run_config=values[0],
+                            nurec_evidence=values[1],
+                            frame_trace=values[2],
+                            native_capture_path=values[3],
+                            native_scan_manifest_path=values[4],
+                        )
 
 
 if __name__ == "__main__":
