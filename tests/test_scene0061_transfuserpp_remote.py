@@ -28,7 +28,11 @@ def _base():
         for index in range(8)
     ]
     return {
-        "scenario_id": "scene-0061",
+        "scenario_id": "cc8c0bf57f984915a77078b10eb33198",
+        "experiment": {
+            "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+            "scene_version": "formal40k-v1",
+        },
         "carla": {"fixed_delta_seconds": 0.05},
         "ego": {
             "initial_state": {"x": 0.0, "y": 0.0},
@@ -159,6 +163,30 @@ class Scene0061TransFuserPPRemoteTests(unittest.TestCase):
         config = copy.deepcopy(_base())
         config["nurec_runtime"]["lidar_axis_convention"] = "unverified"
         with self.assertRaisesRegex(Scene0061TransFuserPPRemoteError, "axis convention"):
+            prepare_scene0061_transfuserpp_remote_run(
+                config,
+                {},
+                build_scene0061_counterfactual_matrix(),
+                case_id="S0_original_replay",
+                seed=41,
+                event_timestamp_sec=None,
+            )
+
+    def test_rejects_smoke_identity_before_matrix_can_promote_it(self):
+        from runtime.scene0061_counterfactual import build_scene0061_counterfactual_matrix
+        from runtime.scene0061_transfuserpp_remote import (
+            Scene0061TransFuserPPRemoteError,
+            prepare_scene0061_transfuserpp_remote_run,
+        )
+
+        config = _base()
+        config["experiment"] = {
+            "scene_id": "cc8c0bf57f984915a77078b10eb33198",
+            "scene_version": "nurec-renderable-lidar-v3-smoke",
+        }
+        with self.assertRaisesRegex(
+            Scene0061TransFuserPPRemoteError, "scene_version does not match"
+        ):
             prepare_scene0061_transfuserpp_remote_run(
                 config,
                 {},

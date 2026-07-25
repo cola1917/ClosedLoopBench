@@ -61,6 +61,7 @@ def prepare_scene0061_transfuserpp_remote_run(
 
     scene = frozen_matrix["scene_identity"]
     source = deepcopy(dict(base_run_config))
+    _validate_formal_base_identity(source, scene)
     source_experiment = dict(source.get("experiment") or {})
     source_experiment.update(
         {
@@ -269,6 +270,37 @@ def prepare_scene0061_transfuserpp_remote_run(
         ],
     }
     return variant, runtime_config, bundle
+
+
+def _validate_formal_base_identity(
+    source: Mapping[str, Any], scene: Mapping[str, Any]
+) -> None:
+    """Reject a smoke/diagnostic config before matrix metadata can overwrite it.
+
+    A formal matrix describes the target experiment; it is not authority to
+    promote a physically different source run.  In particular, the r19 live
+    tick is useful LiDAR evidence but carries a smoke scene version and must
+    never become a formal TransFuser++ base merely because this preparation
+    function subsequently fills matrix identity fields.
+    """
+
+    experiment = source.get("experiment")
+    if not isinstance(experiment, Mapping):
+        raise Scene0061TransFuserPPRemoteError(
+            "formal base run config requires an experiment identity"
+        )
+    if experiment.get("scene_id") != scene.get("scene_id"):
+        raise Scene0061TransFuserPPRemoteError(
+            "base run config scene_id does not match the formal matrix"
+        )
+    if experiment.get("scene_version") != scene.get("scene_version"):
+        raise Scene0061TransFuserPPRemoteError(
+            "base run config scene_version does not match the formal matrix"
+        )
+    if source.get("scenario_id") != scene.get("scene_id"):
+        raise Scene0061TransFuserPPRemoteError(
+            "base run config scenario_id does not match the formal matrix"
+        )
 
 
 def _validate_formal_nurec_sensors(config: Mapping[str, Any]) -> None:
