@@ -15,6 +15,11 @@ from adapters.nurec_multimodal import (
     validate_nurec_multimodal_evidence,
 )
 from adapters.nurec_runtime_handler import make_nurec_sensor_frame_handler
+from runtime.scene0061_lidar_axis_normalization import (
+    LiDARAxisNormalizationError,
+    normalize_lidar_xyzi,
+    validate_lidar_axis_normalization,
+)
 
 
 class NuRec260Client:
@@ -43,6 +48,7 @@ class NuRec260Client:
         payload_reference_root: str | Path | None = None,
         lidar_response_coordinate_frame: str = "unverified",
         lidar_axis_convention: str = "unverified",
+        lidar_axis_normalization: Mapping[str, Any] | None = None,
         native_scan_manifest: Mapping[str, Any] | None = None,
         native_scan_manifest_sha256: str | None = None,
         native_scan_max_midpoint_error_us: int = 25_000,
@@ -89,6 +95,14 @@ class NuRec260Client:
         )
         self._lidar_response_coordinate_frame = str(lidar_response_coordinate_frame)
         self._lidar_axis_convention = str(lidar_axis_convention)
+        try:
+            self._lidar_axis_normalization = (
+                validate_lidar_axis_normalization(lidar_axis_normalization)
+                if lidar_axis_normalization is not None
+                else None
+            )
+        except LiDARAxisNormalizationError as exc:
+            raise NuRecMultimodalError(str(exc)) from exc
         self._native_scan_alignment = _validate_native_scan_manifest(
             native_scan_manifest,
             manifest_sha256=native_scan_manifest_sha256,
@@ -328,15 +342,44 @@ class NuRec260Client:
             return metadata
 
         metadata = _inspect_lidar_response(response, body)
-        xyzi = _lidar_xyzi_bytes(response, body)
-        materialized = self._materialize_payload(payload, xyzi, suffix=".bin")
+        raw_xyzi = _lidar_xyzi_bytes(response, body)
+        normalization = self._lidar_axis_normalization
+        if normalization is None:
+            materialized = self._materialize_payload(payload, raw_xyzi, suffix=".bin")
+        else:
+            raw_materialized = self._materialize_payload(
+                payload, raw_xyzi, suffix=".nre.bin"
+            )
+            normalized_xyzi = normalize_lidar_xyzi(
+                raw_xyzi, normalization["response_to_sensor"]
+            )
+            materialized = self._materialize_payload(payload, normalized_xyzi, suffix=".bin")
         if materialized is not None:
-            metadata["materialized_payload"] = {
-                **materialized,
-                "encoding": "float32_xyzi_little_endian",
-                "coordinate_frame": self._lidar_response_coordinate_frame,
-                "axis_convention": self._lidar_axis_convention,
-            }
+            if normalization is None:
+                metadata["materialized_payload"] = {
+                    **materialized,
+                    "encoding": "float32_xyzi_little_endian",
+                    "coordinate_frame": self._lidar_response_coordinate_frame,
+                    "axis_convention": self._lidar_axis_convention,
+                }
+            else:
+                # The normalised payload is for algorithm/axis consumers.  Keep
+                # the renderer byte stream beside it so either hash can be
+                # independently verified and the conversion can be replayed.
+                assert raw_materialized is not None
+                metadata["materialized_payload"] = {
+                    **materialized,
+                    "encoding": "float32_xyzi_little_endian",
+                    "coordinate_frame": normalization["target_coordinate_frame"],
+                    "axis_convention": normalization["target_axis_convention"],
+                }
+                metadata["raw_response_payload"] = {
+                    **raw_materialized,
+                    "encoding": "float32_xyzi_little_endian",
+                    "coordinate_frame": normalization["source_coordinate_frame"],
+                    "axis_convention": normalization["source_axis_convention"],
+                }
+                metadata["axis_normalization"] = normalization
         return metadata
 
     def _materialize_payload(
@@ -457,6 +500,11 @@ def build_nurec_260_client(
             config.get("lidar_response_coordinate_frame") or "unverified"
         ),
         lidar_axis_convention=str(config.get("lidar_axis_convention") or "unverified"),
+        lidar_axis_normalization=(
+            config.get("lidar_axis_normalization")
+            if isinstance(config.get("lidar_axis_normalization"), Mapping)
+            else None
+        ),
         native_scan_manifest=manifest,
         native_scan_manifest_sha256=manifest_sha256,
         native_scan_max_midpoint_error_us=max_midpoint_error_us,

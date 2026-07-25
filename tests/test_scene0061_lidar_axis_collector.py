@@ -275,6 +275,60 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
                             native_scan_manifest_path=values[4],
                         )
 
+    def test_replays_declared_nre_response_axis_normalization_before_accepting_anchors(self):
+        from runtime.scene0061_lidar_axis_collector import collect_lidar_axis_evidence
+        from runtime.scene0061_lidar_axis_gate import validate_lidar_axis_evidence
+        from runtime.scene0061_lidar_axis_normalization import normalize_lidar_xyzi
+
+        # NRE 26.04 response axes observed in r18: CARLA sensor = [-z, -y, -x].
+        transform = [
+            0.0, 0.0, -1.0, 0.0,
+            0.0, -1.0, 0.0, 0.0,
+            -1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ]
+        contract = {
+            "schema_version": "nre_lidar_axis_normalization.v1",
+            "source_coordinate_frame": "nre_26_04_lidar_sensor",
+            "source_axis_convention": "nre_26_04_render_axes",
+            "target_coordinate_frame": "sensor_local",
+            "target_axis_convention": "carla_sensor",
+            "response_to_sensor": transform,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            values = self._inputs(Path(directory))
+            capture = json.loads(values[3].read_text(encoding="utf-8"))
+            capture_path = Path(capture["raw_xyzi_ref"]["path"])
+            normal = capture_path.read_bytes()
+            raw_points = []
+            for x, y, z, intensity in struct.iter_unpack("<4f", normal):
+                raw_points.append((-z, -y, -x, intensity))
+            raw = b"".join(struct.pack("<4f", *point) for point in raw_points)
+            nurec_path = Path(values[1]["records"][0]["response_metadata"]["materialized_payload"]["path"])
+            raw_path = nurec_path.with_name("nre-raw.xyzi")
+            raw_path.write_bytes(raw)
+            nurec_path.write_bytes(normalize_lidar_xyzi(raw, transform))
+            metadata = values[1]["records"][0]["response_metadata"]
+            metadata["point_count"] = len(raw_points)
+            metadata["materialized_payload"] = {**_ref(nurec_path, values[1]["frame_id"]), "coordinate_frame": "sensor_local", "axis_convention": "carla_sensor"}
+            metadata["raw_response_payload"] = {**_ref(raw_path, values[1]["frame_id"]), "coordinate_frame": "nre_26_04_lidar_sensor", "axis_convention": "nre_26_04_render_axes"}
+            metadata["axis_normalization"] = {
+                **contract,
+                "response_to_sensor_sha256": __import__("agents.plugin_contract", fromlist=["canonical_sha256"]).canonical_sha256(transform),
+            }
+            values[0]["nurec_runtime"]["lidar_axis_normalization"] = dict(contract)
+            evidence = collect_lidar_axis_evidence(
+                run_config=values[0], nurec_evidence=values[1], frame_trace=values[2],
+                native_capture_path=values[3], native_scan_manifest_path=values[4],
+            )
+            self.assertIn("response_axis_normalization", evidence["axis_validation"])
+            self.assertEqual(
+                validate_lidar_axis_evidence(
+                    evidence, sensor_to_ego=IDENTITY, live_render_lidar=evidence["live_render_lidar"]
+                )["status"],
+                "passed",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

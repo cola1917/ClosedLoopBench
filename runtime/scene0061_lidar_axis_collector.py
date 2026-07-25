@@ -29,6 +29,11 @@ from runtime.scene0061_lidar_axis_gate import (
     _transform_point,
     _validated_rigid_matrix,
 )
+from runtime.scene0061_lidar_axis_normalization import (
+    LiDARAxisNormalizationError,
+    validate_lidar_axis_normalization,
+    verify_normalized_lidar_payload,
+)
 
 
 NATIVE_CAPTURE_SCHEMA = "scene0061_carla_native_lidar_capture.v1"
@@ -76,6 +81,9 @@ def collect_lidar_axis_evidence(
 
     record = _live_lidar_record(nurec_evidence)
     payload_ref = _materialized_lidar_ref(record, frame_id)
+    normalization = _verified_response_axis_normalization(
+        run_config=run_config, record=record, normalized_payload_ref=payload_ref
+    )
     nurec_points = _read_xyzi(Path(payload_ref["path"]))
     live_count = (record.get("response_metadata") or {}).get("point_count")
     if live_count != len(nurec_points):
@@ -146,6 +154,7 @@ def collect_lidar_axis_evidence(
             "measured_max_abs_error_m": max_abs,
             "measured_rms_error_m": math.sqrt(sum(value * value for value in residuals) / len(residuals)),
             "payload_ref": payload_ref,
+            **({"response_axis_normalization": normalization} if normalization else {}),
             "native_scan_manifest_ref": _file_ref(native_scan_manifest_path, frame_id=frame_id, scan_index=_native_scan_index(nurec_evidence)),
             "independent_carla_capture_ref": capture_ref,
             "independent_carla_points_ref": capture_points_ref,
@@ -153,6 +162,40 @@ def collect_lidar_axis_evidence(
         },
     }
     return evidence
+
+
+def _verified_response_axis_normalization(
+    *,
+    run_config: Mapping[str, Any],
+    record: Mapping[str, Any],
+    normalized_payload_ref: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    runtime = run_config.get("nurec_runtime")
+    declared = runtime.get("lidar_axis_normalization") if isinstance(runtime, Mapping) else None
+    metadata = record.get("response_metadata")
+    if declared is None:
+        return None
+    if not isinstance(metadata, Mapping):
+        raise LiDARAxisCollectionError("NuRec LiDAR record has no response metadata")
+    try:
+        expected = validate_lidar_axis_normalization(declared)
+        observed = metadata.get("axis_normalization")
+        if observed != expected:
+            raise LiDARAxisCollectionError(
+                "NuRec LiDAR response normalization does not match runtime config"
+            )
+        verified = verify_normalized_lidar_payload(
+            raw_response_payload=metadata.get("raw_response_payload"),
+            normalized_payload={
+                **dict(normalized_payload_ref),
+                "coordinate_frame": metadata.get("materialized_payload", {}).get("coordinate_frame"),
+                "axis_convention": metadata.get("materialized_payload", {}).get("axis_convention"),
+            },
+            normalization=observed,
+        )
+    except LiDARAxisNormalizationError as exc:
+        raise LiDARAxisCollectionError(str(exc)) from exc
+    return verified
 
 
 def _select_anchors(*, nurec_points: list[tuple[float, float, float, float]], nurec_to_ego: list[float], capture_points: list[tuple[float, float, float, float]], capture_to_ego: list[float], tolerance_m: float) -> list[dict[str, Any]]:

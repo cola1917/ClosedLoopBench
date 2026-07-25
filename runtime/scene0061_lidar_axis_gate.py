@@ -17,6 +17,11 @@ import struct
 from pathlib import Path
 from typing import Any, Mapping
 
+from runtime.scene0061_lidar_axis_normalization import (
+    LiDARAxisNormalizationError,
+    verify_normalized_lidar_payload,
+)
+
 
 AXIS_EVIDENCE_SCHEMA = "scene0061_lidar_axis_alignment.v1"
 XYZI_ENCODING = "float32_xyzi_little_endian"
@@ -60,6 +65,26 @@ def validate_lidar_axis_evidence(
         expected_frame_id=carla_frame_id,
         required_encoding=XYZI_ENCODING,
     )
+    response_normalization = axis.get("response_axis_normalization")
+    if response_normalization is not None:
+        if not isinstance(response_normalization, Mapping):
+            raise LiDARAxisEvidenceError("response axis normalization must be an object")
+        normalized_ref = response_normalization.get("normalized_payload")
+        if not isinstance(normalized_ref, Mapping) or any(
+            normalized_ref.get(key) != payload_ref.get(key)
+            for key in ("path", "sha256", "byte_count", "encoding")
+        ):
+            raise LiDARAxisEvidenceError(
+                "response axis normalization is not bound to the LiDAR payload"
+            )
+        try:
+            verify_normalized_lidar_payload(
+                raw_response_payload=response_normalization.get("raw_response_payload"),
+                normalized_payload=normalized_ref,
+                normalization=response_normalization.get("normalization"),
+            )
+        except LiDARAxisNormalizationError as exc:
+            raise LiDARAxisEvidenceError(str(exc)) from exc
     native_scan_ref = axis.get("native_scan_manifest_ref")
     _validate_file_ref(
         native_scan_ref,
