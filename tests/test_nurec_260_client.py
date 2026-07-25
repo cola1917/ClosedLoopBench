@@ -1,6 +1,9 @@
+import hashlib
 import json
 import struct
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from tests.test_actor_binding import VEHICLE_TRACK
@@ -279,6 +282,49 @@ class NuRec260ClientTests(unittest.TestCase):
             lidar["response_metadata"],
             {"point_count": 2, "encoding": "float_xyz_intensity"},
         )
+
+    def test_materializes_hash_bound_xyzi_with_declared_coordinate_provenance(self):
+        """The retained artifact must be the exact inference byte stream.
+
+        The full protobuf digest protects the RPC response, while the payload
+        reference protects the reusable little-endian XYZI representation used
+        by the downstream algorithm and by coordinate-axis evidence collection.
+        """
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            client = self._client(
+                payload_output_dir=root / "payloads",
+                payload_reference_root=root,
+                lidar_response_coordinate_frame="sensor_local",
+                lidar_axis_convention="carla_sensor",
+            )
+            evidence = client.dispatch_frame(_frame())
+
+            self.assertEqual(evidence["status"], "passed")
+            lidar = next(
+                row for row in evidence["records"] if row["modality"] == "lidar"
+            )
+            payload = lidar["response_metadata"]["materialized_payload"]
+            path = Path(payload["path"])
+            expected = struct.pack(
+                "<8f", 1.0, 2.0, 3.0, 0.25, 4.0, 5.0, 6.0, 0.75
+            )
+            self.assertEqual(path.read_bytes(), expected)
+            self.assertEqual(payload["byte_count"], len(expected))
+            self.assertEqual(payload["sha256"], hashlib.sha256(expected).hexdigest())
+            self.assertEqual(
+                payload["relative_path"],
+                "payloads/frame_00000042/lidar_top.bin",
+            )
+            self.assertEqual(payload["encoding"], "float32_xyzi_little_endian")
+            self.assertEqual(payload["coordinate_frame"], "sensor_local")
+            self.assertEqual(payload["axis_convention"], "carla_sensor")
+
+            # This exercises the shared Scene Exchange contract rather than
+            # merely trusting the client-produced dictionary shape.
+            from adapters.nurec_multimodal import validate_nurec_multimodal_evidence
+
+            validate_nurec_multimodal_evidence(evidence)
 
     def test_rejects_malformed_nre_260_buffered_lidar_response(self):
         evidence = self._client(
