@@ -112,6 +112,35 @@ class Scene0061LiveTickTests(unittest.TestCase):
                 execute_live_tick(output, sensor_handler_factory=factory)
             self.assertFalse(called)
 
+    def test_verify_rejects_a_rehashed_runtime_snapshot_that_differs_from_source(self):
+        from runners.scene0061_live_tick import (
+            Scene0061LiveTickError,
+            _file_identity,
+            prepare_live_tick,
+            verify_prepared_live_tick,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, xodr, _ = self._inputs(root)
+            output = root / "diagnostic"
+            prepare_live_tick(
+                config_path=config, output_dir=output, run_id="r11-fixed", opendrive_path=xodr
+            )
+            snapshot = output / "runtime_run_config.json"
+            snapshot.write_text(json.dumps({"scenario_id": "different"}), encoding="utf-8")
+            snapshot_identity = _file_identity(snapshot, required=True)
+            assert snapshot_identity is not None
+            environment_path = output / "runtime_environment.json"
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["runtime_config"] = snapshot_identity
+            environment_path.write_text(json.dumps(environment), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                Scene0061LiveTickError, "snapshot does not match the selected config bytes"
+            ):
+                verify_prepared_live_tick(output)
+
     def test_execute_requires_the_preflighted_sensor_handler_factory(self):
         from runners.scene0061_live_tick import (
             Scene0061LiveTickError,

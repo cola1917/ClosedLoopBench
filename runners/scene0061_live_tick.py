@@ -590,6 +590,19 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
         expected = str(identity.get("sha256") or "")
         if not path.is_file() or _sha256_file(path) != expected:
             raise Scene0061LiveTickError(f"recorded {name} path/SHA-256 no longer matches")
+    selected_config = environment.get("config")
+    runtime_config = environment.get("runtime_config")
+    if not isinstance(selected_config, Mapping) or not isinstance(runtime_config, Mapping):
+        raise Scene0061LiveTickError(
+            "prepared environment requires selected and runtime configuration identities"
+        )
+    if (
+        selected_config.get("sha256") != runtime_config.get("sha256")
+        or selected_config.get("byte_count") != runtime_config.get("byte_count")
+    ):
+        raise Scene0061LiveTickError(
+            "runtime configuration snapshot does not match the selected config bytes"
+        )
     carla_basic_agent = environment.get("carla_basic_agent")
     if carla_basic_agent is not None:
         if not isinstance(carla_basic_agent, Mapping) or carla_basic_agent.get("status") != "passed":
@@ -609,7 +622,7 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
             raise Scene0061LiveTickError(
                 "recorded CARLA BasicAgent path/SHA-256 no longer matches"
             )
-    runtime_config = environment.get("runtime_config") or {}
+    runtime_config = runtime_config or {}
     plan_path = Path(str((environment.get("artifacts") or {}).get("basic_agent_plan") or ""))
     plan = _load_object(plan_path)
     provenance = ((plan.get("runtime") or {}).get("provenance") or {})
@@ -620,7 +633,7 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
         raise Scene0061LiveTickError(
             "basic_agent_plan runtime config path/SHA-256 does not match runtime_environment"
         )
-    selected_config = environment.get("config") or {}
+    selected_config = selected_config or {}
     if (
         provenance.get("selected_config_path") != selected_config.get("path")
         or provenance.get("selected_config_sha256") != selected_config.get("sha256")
@@ -760,10 +773,13 @@ def execute_live_tick(
     environment["status"] = "running"
     environment["execution_started_at_utc"] = _utc_now()
     _write_json(environment_path, environment)
-    # Build the handler from the explicit source path supplied by the operator.
-    # This preserves relative paths in the source config; the byte-for-byte
-    # snapshot is archival evidence and is verified separately above.
-    config = _load_object(Path(str((environment.get("config") or {}).get("path"))))
+    # The handler must consume the byte-for-byte runtime snapshot that was
+    # verified above, rather than re-reading the operator's source path.  This
+    # keeps the archived run input and the actual NuRec request configuration
+    # identical at execution time.
+    config = _load_object(
+        Path(str((environment.get("runtime_config") or {}).get("path")))
+    )
     plan = _load_object(Path(str((environment.get("artifacts") or {}).get("basic_agent_plan") or "")))
     result_path = Path(str((environment.get("artifacts") or {}).get("runtime_result") or ""))
     validation_path = Path(str((environment.get("artifacts") or {}).get("live_tick_validation") or ""))
@@ -856,7 +872,9 @@ def main(argv: list[str] | None = None) -> int:
                 carla_python_api_path=args.carla_python_api,
             )
         if args.prepare_only:
-            config = _load_object(args.config.expanduser().resolve())
+            config = _load_object(
+                Path(str((environment.get("runtime_config") or {}).get("path")))
+            )
             environment["sensor_handler_preflight"] = _preflight_sensor_handler(
                 config, args.output_dir.expanduser().resolve(), _load_callable(args.sensor_handler_factory)
             )
