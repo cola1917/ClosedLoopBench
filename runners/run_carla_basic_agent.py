@@ -3223,6 +3223,17 @@ def _current_bound_actor_poses(
     return result
 
 
+def _actor_annotation_window(actor: dict[str, Any]) -> tuple[float, float] | None:
+    timed = [
+        float(point["t_sec"])
+        for point in actor.get("reference_trajectory") or []
+        if isinstance(point, dict) and point.get("t_sec") is not None
+    ]
+    if not timed:
+        return None
+    return min(timed), max(timed)
+
+
 def _build_sensor_frame_context(
     plan: dict[str, Any],
     *,
@@ -3254,6 +3265,26 @@ def _build_sensor_frame_context(
         binding = actor.get("binding") or {}
         current = current_actor_poses.get(actor_id)
         previous = previous_actor_poses.get(actor_id)
+        absent_reason = None
+        window = _actor_annotation_window(actor)
+        if window is not None and not (
+            window[0] <= scenario_time_sec <= window[1]
+        ):
+            # Outside the source annotation window the track has no fitted
+            # temporal appearance; injecting a pose makes the renderer
+            # extrapolate into debris. The actor simply does not render.
+            absent_reason = "outside_source_annotation_window"
+        elif (current is None or previous is None) and actor_id not in actor_states:
+            absent_reason = "actor_despawned"
+        if absent_reason is not None:
+            samples[actor_id] = {
+                "source": binding.get("sensor_pose_source"),
+                "pose_reference": binding.get("sensor_pose_reference"),
+                "absent": True,
+                "absent_reason": absent_reason,
+                "nurec_track_id": binding.get("nurec_track_id"),
+            }
+            continue
         if current is None or previous is None:
             raise RuntimeError(f"bound actor has no render pose pair: {actor_id}")
         declared_reference = binding.get("sensor_pose_reference")

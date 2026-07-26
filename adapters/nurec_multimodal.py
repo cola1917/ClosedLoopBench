@@ -397,6 +397,13 @@ def _dynamic_objects(
         sample = actor_samples.get(actor_id)
         if not isinstance(sample, Mapping):
             raise NuRecMultimodalError(f"actor sample is missing: {actor_id}")
+        if sample.get("absent"):
+            # The actor is outside its source annotation window (or already
+            # despawned). Injecting a dynamic pose would force the temporal
+            # Gaussians to extrapolate outside their fitted range, which
+            # renders as a debris cloud; the honest behaviour is that the
+            # track simply does not render this frame.
+            continue
         expected_source = binding["sensor_sync"]["pose_source"]
         if sample.get("source") != expected_source:
             raise NuRecMultimodalError(

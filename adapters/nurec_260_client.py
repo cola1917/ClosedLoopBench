@@ -123,6 +123,12 @@ class NuRec260Client:
         # field. Matches NVIDIA's replay integration; the wide-window path is
         # kept only for reproducing historical evidence.
         self.rgb_instant_sampling: bool = True
+        # Fail-closed on native-scan alignment by default (formal one-tick
+        # evidence semantics). Closed-loop runs that legitimately outlive the
+        # recorded scan coverage set this False: frames beyond coverage render
+        # at their logical window and the evidence records
+        # status=out_of_native_scan_range instead of killing the drive.
+        self.native_scan_alignment_required: bool = True
         self._grpc_options = [
             ("grpc.max_send_message_length", int(max_message_bytes)),
             ("grpc.max_receive_message_length", int(max_message_bytes)),
@@ -218,13 +224,33 @@ class NuRec260Client:
         midpoint_error = abs((wire_start + wire_end) // 2 - logical_midpoint)
         max_error = config["max_midpoint_error_us"]
         if midpoint_error > max_error:
-            raise NuRecMultimodalError(
-                "nearest native LiDAR scan exceeds midpoint threshold: "
-                f"error_us={midpoint_error}, max_us={max_error}"
-            )
+            if self.native_scan_alignment_required:
+                raise NuRecMultimodalError(
+                    "nearest native LiDAR scan exceeds midpoint threshold: "
+                    f"error_us={midpoint_error}, max_us={max_error}"
+                )
+            # The drive has legitimately outlived the recorded scan coverage
+            # (e.g. the ego finishes the route after the source scene ends).
+            # Render at the logical window and record the honest status
+            # instead of aborting the whole closed loop.
+            return {
+                "policy": "nearest_native_lidar_scan_midpoint",
+                "source": "hashed_native_scan_manifest",
+                "status": "out_of_native_scan_range",
+                "manifest_sha256": config["manifest_sha256"],
+                "artifact_sha256": config["artifact_sha256"],
+                "native_scan_index": index,
+                "logical_start_us": logical_start,
+                "logical_end_us": logical_end,
+                "wire_start_us": logical_start,
+                "wire_end_us": max(logical_start + 1, logical_end),
+                "midpoint_error_us": midpoint_error,
+                "max_midpoint_error_us": max_error,
+            }
         return {
             "policy": "nearest_native_lidar_scan_midpoint",
             "source": "hashed_native_scan_manifest",
+            "status": "aligned",
             "manifest_sha256": config["manifest_sha256"],
             "artifact_sha256": config["artifact_sha256"],
             "native_scan_index": index,
