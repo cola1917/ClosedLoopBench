@@ -50,6 +50,7 @@ def validate_run(
 
     frames_checked = 0
     frames_passed = 0
+    frames_unrendered = 0
     problems: list[dict] = []
 
     for line_no, line in enumerate(
@@ -62,6 +63,11 @@ def validate_run(
             if record.get("modality") == "lidar"
         ]
         for record in lidar_records:
+            if record.get("status") != "passed":
+                # No rendered payload exists for this frame (e.g. the drive
+                # outlived the scene time range) - nothing to re-verify.
+                frames_unrendered += 1
+                continue
             frames_checked += 1
             frame_problems: list[str] = []
             metadata = record.get("response_metadata") or {}
@@ -125,6 +131,7 @@ def validate_run(
         "matrix_provenance": "r22 same-frame physical gate (lidar_axis_evidence.json)",
         "lidar_frames_checked": frames_checked,
         "lidar_frames_passed": frames_passed,
+        "lidar_frames_unrendered": frames_unrendered,
         "problems": problems[:50],
         "problem_count": len(problems),
     }

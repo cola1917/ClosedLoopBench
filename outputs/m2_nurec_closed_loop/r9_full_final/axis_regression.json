@@ -1,0 +1,12 @@
+{
+  "schema_version": "nurec_lidar_axis_regression.v1",
+  "status": "passed",
+  "run_dir": "/home/cwadmin/workspace/ClosedLoopBench/outputs/m2_nurec_closed_loop/r9_full_final",
+  "expected_matrix_sha256": "8277ba837a2779bf041c9a1ee8a8f78f8c912192d06b74082a01a1706d96d925",
+  "matrix_provenance": "r22 same-frame physical gate (lidar_axis_evidence.json)",
+  "lidar_frames_checked": 382,
+  "lidar_frames_passed": 382,
+  "lidar_frames_unrendered": 62,
+  "problems": [],
+  "problem_count": 0
+}

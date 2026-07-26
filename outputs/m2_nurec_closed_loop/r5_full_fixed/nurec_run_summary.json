@@ -1,0 +1,29 @@
+{
+  "status": "failed",
+  "reason": "basic_agent_runtime_failed",
+  "detail": "$.shared_dynamic_objects has too few items",
+  "ticks": null,
+  "route_progress": null,
+  "collision_count": null,
+  "termination_reason": "max_ticks",
+  "frame_trace_count": 382,
+  "multimodal_sensor": {
+    "required": false,
+    "handler_present": true,
+    "status": "passed",
+    "sensor_closed_loop": true,
+    "frame_count": 382,
+    "passed_frame_count": 382,
+    "failed_frame_count": 0,
+    "modalities": [
+      "rgb",
+      "lidar"
+    ]
+  },
+  "nurec_frames_materialized": 382,
+  "first_frame_dir": "frame_00004648",
+  "last_frame_dir": "frame_00005029",
+  "cleanup_succeeded": true,
+  "report_path": "/home/cwadmin/workspace/ClosedLoopBench/outputs/m2_nurec_closed_loop/r5_full_fixed/closed_loop_report.json",
+  "output_dir": "/home/cwadmin/workspace/ClosedLoopBench/outputs/m2_nurec_closed_loop/r5_full_fixed"
+}
