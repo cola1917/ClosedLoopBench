@@ -95,6 +95,42 @@ def _git_commit(project_root: Path = PROJECT_ROOT) -> str | None:
     return commit or None
 
 
+def _git_tracked_worktree_clean(project_root: Path = PROJECT_ROOT) -> bool | None:
+    """Return whether ``HEAD`` matches every tracked path in the worktree.
+
+    Runtime artifacts deliberately live beside the source checkout on the
+    remote host.  They may be untracked, so using ``git status --porcelain``
+    here would make a valid evidence directory look like source drift.  A
+    diff against ``HEAD`` instead rejects both staged and unstaged changes to
+    tracked files while intentionally allowing untracked diagnostics/bundles.
+    ``None`` means Git could not establish the condition at all.
+    """
+
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(project_root),
+                "diff-index",
+                "--quiet",
+                "--ignore-submodules=none",
+                "HEAD",
+                "--",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    return None
+
+
 def _execution_git_commit(project_root: Path = PROJECT_ROOT) -> str:
     """Return the immutable commit that owns this execution.
 
@@ -107,6 +143,16 @@ def _execution_git_commit(project_root: Path = PROJECT_ROOT) -> str:
     if not isinstance(commit, str) or _GIT_COMMIT_RE.fullmatch(commit) is None:
         raise Scene0061LiveTickError(
             "live-tick execution requires a lowercase 40-character Git commit"
+        )
+    tracked_worktree_clean = _git_tracked_worktree_clean(project_root)
+    if tracked_worktree_clean is not True:
+        detail = (
+            "contains tracked modifications"
+            if tracked_worktree_clean is False
+            else "could not be verified"
+        )
+        raise Scene0061LiveTickError(
+            "live-tick execution requires a clean tracked Git worktree; " + detail
         )
     return commit
 

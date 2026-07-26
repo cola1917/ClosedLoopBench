@@ -22,6 +22,17 @@ def _config(sidecar: Path) -> dict:
 
 
 class Scene0061LiveTickTests(unittest.TestCase):
+    def setUp(self):
+        # Most unit tests exercise evidence/config drift rather than the
+        # repository itself.  A developer's local edit must not mask those
+        # checks; the dedicated test below exercises the real Git gate.
+        self._execution_commit_patcher = mock.patch(
+            "runners.scene0061_live_tick._execution_git_commit",
+            return_value="f" * 40,
+        )
+        self._execution_commit_patcher.start()
+        self.addCleanup(self._execution_commit_patcher.stop)
+
     def _inputs(self, root: Path):
         sidecar = root / "bindings.json"
         sidecar.write_text("{}\n", encoding="utf-8")
@@ -30,6 +41,52 @@ class Scene0061LiveTickTests(unittest.TestCase):
         xodr = root / "scene.xodr"
         xodr.write_text("<OpenDRIVE/>\n", encoding="utf-8")
         return config, xodr, sidecar
+
+    def test_execution_checkout_rejects_tracked_drift_but_allows_untracked_evidence(self):
+        self._execution_commit_patcher.stop()
+        from runners.scene0061_live_tick import (
+            Scene0061LiveTickError,
+            _execution_git_commit,
+            _git_tracked_worktree_clean,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess = __import__("subprocess")
+            subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@example.com"],
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Test"],
+                check=True,
+                capture_output=True,
+            )
+            tracked = root / "runner.py"
+            tracked.write_text("VALUE = 1\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "runner.py"], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-m", "base"],
+                check=True,
+                capture_output=True,
+            )
+
+            # Historical diagnostics are intentionally untracked and must not
+            # prevent an otherwise immutable source checkout from executing.
+            (root / "outputs").mkdir()
+            (root / "outputs" / "r22-evidence.json").write_text("{}\n", encoding="utf-8")
+            self.assertTrue(_git_tracked_worktree_clean(root))
+            self.assertRegex(_execution_git_commit(root), r"^[0-9a-f]{40}$")
+
+            tracked.write_text("VALUE = 2\n", encoding="utf-8")
+            self.assertFalse(_git_tracked_worktree_clean(root))
+            with self.assertRaisesRegex(Scene0061LiveTickError, "clean tracked Git worktree"):
+                _execution_git_commit(root)
+
+            subprocess.run(["git", "-C", str(root), "add", "runner.py"], check=True)
+            self.assertFalse(_git_tracked_worktree_clean(root))
 
     def test_prepare_snapshots_explicit_inputs_and_records_hashes(self):
         from runners.scene0061_live_tick import prepare_live_tick
