@@ -232,28 +232,126 @@ class CarlaAcceptanceTriplicateTests(unittest.TestCase):
     def test_transfuserpp_clean_algorithm_evidence_is_mandatory(self):
         from runners.run_carla_acceptance_triplicate import (
             CarlaAcceptanceError,
+            _write_transfuserpp_attempt_config,
             validate_acceptance_runs,
         )
 
         valid = _result()
         valid["algorithm_evidence_validation"] = {"status": "passed"}
-        accepted = validate_acceptance_runs(
-            [copy.deepcopy(valid), copy.deepcopy(valid), copy.deepcopy(valid)],
-            require_algorithm_clean=True,
-        )
-        self.assertEqual(
-            accepted[0]["algorithm_evidence_validation"]["status"], "passed"
-        )
-        invalid = copy.deepcopy(valid)
-        invalid["algorithm_evidence_validation"] = {
-            "status": "failed",
-            "problems": ["backend_failure_trace_nonempty"],
-        }
-        with self.assertRaisesRegex(CarlaAcceptanceError, "algorithm evidence"):
-            validate_acceptance_runs(
-                [copy.deepcopy(valid), invalid, copy.deepcopy(valid)],
-                require_algorithm_clean=True,
+        identity = {"identity": "base"}
+        with tempfile.TemporaryDirectory() as directory:
+            complete = []
+            for attempt in range(1, 4):
+                item = copy.deepcopy(valid)
+                run_id = f"formal-attempt-{attempt:02d}"
+                item["attempt_provenance"] = _write_transfuserpp_attempt_config(
+                    {
+                        "run_id": run_id,
+                        "experiment": {"run_id": run_id},
+                        "config_identity": identity,
+                    },
+                    run_dir=Path(directory) / run_id,
+                    attempt=attempt,
+                    base_config_identity=identity,
+                )
+                complete.append(item)
+            accepted = validate_acceptance_runs(
+                complete, require_algorithm_clean=True
             )
+            self.assertEqual(
+                accepted[0]["algorithm_evidence_validation"]["status"], "passed"
+            )
+            invalid = copy.deepcopy(complete[1])
+            invalid["algorithm_evidence_validation"] = {
+                "status": "failed",
+                "problems": ["backend_failure_trace_nonempty"],
+            }
+            with self.assertRaisesRegex(CarlaAcceptanceError, "algorithm evidence"):
+                validate_acceptance_runs(
+                    [copy.deepcopy(complete[0]), invalid, copy.deepcopy(complete[2])],
+                    require_algorithm_clean=True,
+                )
+
+    def test_transfuserpp_triplicate_materializes_and_binds_each_attempt_config(self):
+        from runners.run_carla_acceptance_triplicate import run_acceptance_triplicate
+
+        plans = []
+
+        def execute(plan):
+            plans.append(copy.deepcopy(plan))
+            return _result()
+
+        config = {
+            "scenario_id": "scene-triplicate",
+            "run_id": "formal",
+            "experiment": {"algorithm_id": "transfuserpp_v5"},
+            "config_identity": {
+                "schema_version": "closedloopbench_run_config_identity.v1",
+                "canonical_sha256": "a" * 64,
+                "hash_scope": "whole_run_config_excluding_config_identity_and_algorithm_gpu_validation",
+            },
+        }
+        passed_attempt = {"status": "passed", "problems": []}
+        with tempfile.TemporaryDirectory() as directory, mock.patch(
+            "runners.run_carla_acceptance_triplicate._validate_transfuserpp_run_config_identity"
+        ), mock.patch(
+            "runners.run_carla_acceptance_triplicate._validate_transfuserpp_external_evidence"
+        ), mock.patch(
+            "runners.run_carla_acceptance_triplicate._validate_transfuserpp_attempt_evidence",
+            return_value=passed_attempt,
+        ):
+            result = run_acceptance_triplicate(config, Path(directory), execute=execute)
+
+            self.assertEqual(result["status"], "passed")
+            self.assertEqual(len(plans), 3)
+            for index, plan in enumerate(plans, 1):
+                provenance = plan["provenance"]["run_config"]
+                config_path = Path(provenance["absolute_path"])
+                materialized = json.loads(config_path.read_text(encoding="utf-8"))
+                self.assertEqual(materialized["run_id"], f"formal-attempt-{index:02d}")
+                self.assertEqual(
+                    materialized["experiment"]["run_id"],
+                    f"formal-attempt-{index:02d}",
+                )
+                self.assertEqual(
+                    result["runs"][index - 1]["attempt_provenance"]["executed_run_config"],
+                    provenance,
+                )
+
+    def test_transfuserpp_attempt_provenance_rejects_tampered_config(self):
+        from runners.run_carla_acceptance_triplicate import (
+            _validate_transfuserpp_attempt_provenance,
+            _write_transfuserpp_attempt_config,
+        )
+
+        identity = {"identity": "base"}
+        with tempfile.TemporaryDirectory() as directory:
+            run_dir = Path(directory)
+            config = {
+                "run_id": "formal-attempt-01",
+                "experiment": {"run_id": "formal-attempt-01"},
+                "config_identity": identity,
+            }
+            provenance = _write_transfuserpp_attempt_config(
+                config,
+                run_dir=run_dir,
+                attempt=1,
+                base_config_identity=identity,
+            )
+            _validate_transfuserpp_attempt_provenance(
+                provenance,
+                expected_attempt=1,
+                expected_run_id="formal-attempt-01",
+                expected_base_config_identity=identity,
+            )
+            Path(provenance["executed_run_config"]["absolute_path"]).write_text(
+                "{}", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(ValueError, "not bound"):
+                _validate_transfuserpp_attempt_provenance(
+                    provenance,
+                    expected_attempt=1,
+                )
 
     def test_transfuserpp_lidar_coordinate_file_hash_is_verified(self):
         from agents.plugin_contract import canonical_sha256

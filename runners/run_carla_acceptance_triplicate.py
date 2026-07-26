@@ -20,7 +20,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from runners.run_carla_basic_agent import (
     _import_basic_agent_cls,
     build_basic_agent_plan,
+    build_run_config_provenance,
     run_basic_agent,
+    validate_plan_run_config_provenance,
 )
 from runners.validate_multimodal_closed_loop import (
     MultimodalClosedLoopError,
@@ -92,6 +94,14 @@ def run_acceptance_triplicate(
         experiment = dict(config.get("experiment") or {})
         experiment["run_id"] = run_id
         config["experiment"] = experiment
+        attempt_provenance = None
+        if transfuserpp_required:
+            attempt_provenance = _write_transfuserpp_attempt_config(
+                config,
+                run_dir=run_dir,
+                attempt=attempt,
+                base_config_identity=run_config["config_identity"],
+            )
         report_path = run_dir / "closed_loop_report.json"
         plan = build_basic_agent_plan(
             config,
@@ -105,7 +115,22 @@ def run_acceptance_triplicate(
             opendrive_path=opendrive_path,
             ego_driver=ego_driver,
             snap_to_map=bool(opendrive_path),
+            run_config_provenance=(
+                attempt_provenance["executed_run_config"]
+                if attempt_provenance is not None
+                else None
+            ),
         )
+        # The built-in runner validates this again immediately before it
+        # touches CARLA.  Validate here too, so an injected executor cannot
+        # accidentally run a plan whose materialized config has changed.
+        if attempt_provenance is not None:
+            try:
+                validate_plan_run_config_provenance(plan)
+            except ValueError as exc:
+                raise CarlaAcceptanceError(
+                    f"attempt {attempt} run-config provenance cannot be verified: {exc}"
+                ) from exc
         (run_dir / "basic_agent_plan.json").write_text(
             json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -142,6 +167,19 @@ def run_acceptance_triplicate(
                 getattr(handler, "close", None)
             )
         if transfuserpp_required:
+            assert attempt_provenance is not None
+            try:
+                _validate_transfuserpp_attempt_provenance(
+                    attempt_provenance,
+                    expected_attempt=attempt,
+                    expected_run_id=run_id,
+                    expected_base_config_identity=run_config["config_identity"],
+                )
+            except ValueError as exc:
+                raise CarlaAcceptanceError(
+                    f"attempt {attempt} run-config provenance cannot be verified: {exc}"
+                ) from exc
+            result["attempt_provenance"] = attempt_provenance
             algorithm_validation = _validate_transfuserpp_attempt_evidence(
                 result,
                 config=config,
@@ -245,6 +283,17 @@ def validate_acceptance_runs(
             raise CarlaAcceptanceError(
                 f"attempt {index} lacks clean TransFuser++ algorithm evidence"
             )
+        attempt_provenance = result.get("attempt_provenance")
+        if require_algorithm_clean:
+            try:
+                _validate_transfuserpp_attempt_provenance(
+                    attempt_provenance,
+                    expected_attempt=index,
+                )
+            except ValueError as exc:
+                raise CarlaAcceptanceError(
+                    f"attempt {index} run-config provenance cannot be verified: {exc}"
+                ) from exc
         validated.append(
             {
                 "attempt": index,
@@ -261,6 +310,7 @@ def validate_acceptance_runs(
                 "algorithm_evidence_validation": result.get(
                     "algorithm_evidence_validation"
                 ),
+                "attempt_provenance": attempt_provenance,
             }
         )
     return validated
@@ -434,6 +484,97 @@ def _validate_transfuserpp_run_config_identity(config: dict[str, Any]) -> None:
         raise CarlaAcceptanceError(
             "TransFuser++ run config canonical identity cannot be verified"
         )
+
+
+def _write_transfuserpp_attempt_config(
+    config: dict[str, Any],
+    *,
+    run_dir: Path,
+    attempt: int,
+    base_config_identity: dict[str, Any],
+) -> dict[str, Any]:
+    """Materialize the exact config used by one formal TF++ attempt.
+
+    The formal run-config identity names the immutable input bundle.  Each
+    triplicate run necessarily has a different run ID, so its executed config
+    cannot share that canonical hash.  Persisting and hash-binding this small
+    derived config closes that distinction without weakening the base identity.
+    """
+
+    path = run_dir / "executed_run_config.json"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    executed = build_run_config_provenance(path)
+    provenance = {
+        "schema_version": "transfuserpp_acceptance_attempt_provenance.v1",
+        "attempt": attempt,
+        "run_id": config.get("run_id"),
+        "base_run_config_identity": deepcopy(base_config_identity),
+        "executed_run_config": executed,
+        "executed_run_config_canonical_sha256": canonical_sha256(config),
+    }
+    (run_dir / "attempt_provenance.json").write_text(
+        json.dumps(provenance, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return provenance
+
+
+def _validate_transfuserpp_attempt_provenance(
+    provenance: Any,
+    *,
+    expected_attempt: int,
+    expected_run_id: str | None = None,
+    expected_base_config_identity: dict[str, Any] | None = None,
+) -> None:
+    """Fail closed unless an attempt still resolves to its exact config bytes."""
+
+    if not isinstance(provenance, dict):
+        raise ValueError("attempt provenance is required")
+    if provenance.get("schema_version") != (
+        "transfuserpp_acceptance_attempt_provenance.v1"
+    ):
+        raise ValueError("unsupported attempt provenance schema")
+    if provenance.get("attempt") != expected_attempt:
+        raise ValueError("attempt provenance number mismatch")
+    run_id = provenance.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError("attempt provenance requires run_id")
+    if expected_run_id is not None and run_id != expected_run_id:
+        raise ValueError("attempt provenance run_id mismatch")
+    base_identity = provenance.get("base_run_config_identity")
+    if not isinstance(base_identity, dict):
+        raise ValueError("attempt provenance requires base run-config identity")
+    if (
+        expected_base_config_identity is not None
+        and base_identity != expected_base_config_identity
+    ):
+        raise ValueError("attempt provenance base run-config identity mismatch")
+    executed = provenance.get("executed_run_config")
+    try:
+        validate_plan_run_config_provenance({"provenance": {"run_config": executed}})
+    except ValueError as exc:
+        raise ValueError(f"executed run config is not bound: {exc}") from exc
+    assert isinstance(executed, dict)
+    path = Path(str(executed["absolute_path"]))
+    try:
+        config = strict_json_loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ValueError("executed run config is not strict JSON") from exc
+    if not isinstance(config, dict):
+        raise ValueError("executed run config must be an object")
+    if config.get("run_id") != run_id:
+        raise ValueError("executed run config run_id mismatch")
+    experiment = config.get("experiment")
+    if not isinstance(experiment, dict) or experiment.get("run_id") != run_id:
+        raise ValueError("executed run config experiment run_id mismatch")
+    if config.get("config_identity") != base_identity:
+        raise ValueError("executed run config base identity mismatch")
+    if provenance.get("executed_run_config_canonical_sha256") != canonical_sha256(config):
+        raise ValueError("executed run config canonical SHA-256 mismatch")
 
 
 def _validate_transfuserpp_attempt_evidence(
