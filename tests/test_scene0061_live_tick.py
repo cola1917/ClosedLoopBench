@@ -399,6 +399,100 @@ class Scene0061LiveTickTests(unittest.TestCase):
                     opendrive_path=xodr,
                 )
 
+    def test_formal_run_id_mismatch_is_rejected_before_output_creation(self):
+        from runners.scene0061_live_tick import Scene0061LiveTickError, prepare_live_tick
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config, xodr, sidecar = self._inputs(root)
+            package = root / "nre-wrapper.json"
+            package.write_text("{}\n", encoding="utf-8")
+            native = root / "native-scan.json"
+            native.write_text("{}\n", encoding="utf-8")
+            payload = json.loads(config.read_text(encoding="utf-8"))
+
+            def identity(path: Path) -> dict:
+                return {
+                    "path": str(path.resolve()),
+                    "sha256": __import__("hashlib").sha256(path.read_bytes()).hexdigest(),
+                    "byte_count": path.stat().st_size,
+                }
+
+            payload["run_id"] = "formal-exact-run"
+            payload["experiment"] = {"run_id": "formal-exact-run"}
+            payload["nurec_runtime"].update(
+                {
+                    "scene_package": str(package.resolve()),
+                    "native_scan_manifest": {
+                        "path": str(native.resolve()),
+                        "sha256": identity(native)["sha256"],
+                    },
+                }
+            )
+            payload["formal_base_derivation"] = {
+                "schema_version": "scene0061_formal_base_derivation.v1",
+                "runtime_execution_inputs": [
+                    {"role": "runtime_scene_package", **identity(package)},
+                    {"role": "runtime_actor_bindings", **identity(sidecar)},
+                    {"role": "runtime_native_scan_manifest", **identity(native)},
+                    {"role": "runtime_opendrive", **identity(xodr)},
+                ],
+            }
+            config.write_text(json.dumps(payload), encoding="utf-8")
+            output = root / "diagnostic"
+            with self.assertRaisesRegex(Scene0061LiveTickError, "run_id must match"):
+                prepare_live_tick(
+                    config_path=config,
+                    output_dir=output,
+                    run_id="different-run",
+                    opendrive_path=xodr,
+                )
+            self.assertFalse(output.exists())
+
+    def test_passing_axis_evidence_is_bound_to_exact_live_tick_inputs(self):
+        from runners.scene0061_live_tick import _bind_axis_evidence_to_live_tick
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "formal.json"
+            config.write_text("{}\n", encoding="utf-8")
+            snapshot = root / "runtime_run_config.json"
+            snapshot.write_bytes(config.read_bytes())
+            opendrive = root / "road.xodr"
+            opendrive.write_text("<OpenDRIVE/>\n", encoding="utf-8")
+            validation_path = root / "live_tick_validation.json"
+            validation = {"status": "passed", "frame_trace_count": 1}
+            validation_path.write_text(json.dumps(validation), encoding="utf-8")
+
+            def identity(path: Path) -> dict:
+                return {
+                    "path": str(path.resolve()),
+                    "sha256": __import__("hashlib").sha256(path.read_bytes()).hexdigest(),
+                    "byte_count": path.stat().st_size,
+                }
+
+            result = _bind_axis_evidence_to_live_tick(
+                {"status": "passed"},
+                environment={
+                    "run_id": "formal-live",
+                    "config": identity(config),
+                    "runtime_config": identity(snapshot),
+                    "opendrive": identity(opendrive),
+                },
+                validation=validation,
+                validation_path=validation_path,
+            )
+
+            provenance = result["live_tick_provenance"]
+            self.assertEqual(provenance["run_id"], "formal-live")
+            self.assertEqual(provenance["selected_config"], identity(config))
+            self.assertEqual(provenance["runtime_config"], identity(snapshot))
+            self.assertEqual(provenance["opendrive"], identity(opendrive))
+            self.assertEqual(provenance["live_tick_validation"]["status"], "passed")
+            self.assertEqual(
+                provenance["live_tick_validation"]["sha256"], identity(validation_path)["sha256"]
+            )
+
     def test_result_validation_rejects_empty_or_failed_persisted_evidence(self):
         from runners.scene0061_live_tick import validate_live_tick_result
 

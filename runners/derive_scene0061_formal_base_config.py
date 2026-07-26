@@ -295,7 +295,24 @@ def derive_formal_base_file(*, source_config: Path, matrix: Path, immutable_path
     return {"status": "passed", "output": _write_once(output, result), "formal_base_derivation": result["formal_base_derivation"]}
 
 
-def _validate_formal_evidence(evidence: Mapping[str, Any], experiment: Mapping[str, Any], runtime: Mapping[str, Any]) -> None:
+def _validate_bound_file_identity(value: object, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise Scene0061FormalBaseError(f"LiDAR evidence lacks {label} identity")
+    path = Path(str(value.get("path") or "")).expanduser().resolve()
+    actual = _identity(path, f"LiDAR evidence {label}")
+    if any(actual.get(name) != value.get(name) for name in ("path", "sha256", "byte_count")):
+        raise Scene0061FormalBaseError(f"LiDAR evidence {label} identity no longer matches")
+    return actual
+
+
+def _validate_formal_evidence(
+    evidence: Mapping[str, Any],
+    experiment: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    derivation: Mapping[str, Any],
+    base_identity: Mapping[str, Any],
+    evidence_identity: Mapping[str, Any],
+) -> None:
     # The full native-anchor replay is performed by scene0061_live_tick before
     # this file is written. Binding rechecks the formal identity and passed
     # status rather than pretending an independent JSON-only replay is enough.
@@ -316,17 +333,75 @@ def _validate_formal_evidence(evidence: Mapping[str, Any], experiment: Mapping[s
     axis = evidence.get("axis_validation")
     if not isinstance(axis, Mapping) or axis.get("status") != "passed":
         raise Scene0061FormalBaseError("LiDAR evidence lacks a passing native-anchor axis validation")
+    replay = evidence.get("gate_replay")
+    if not isinstance(replay, Mapping) or replay.get("status") != "passed":
+        raise Scene0061FormalBaseError("LiDAR evidence lacks a passing production gate replay")
+    provenance = evidence.get("live_tick_provenance")
+    if not isinstance(provenance, Mapping) or provenance.get("schema_version") != (
+        "scene0061_lidar_live_tick_provenance.v1"
+    ):
+        raise Scene0061FormalBaseError("LiDAR evidence lacks live-tick provenance")
+    if provenance.get("run_id") != experiment.get("run_id"):
+        raise Scene0061FormalBaseError("LiDAR evidence run_id does not match formal base")
+    selected = _validate_bound_file_identity(
+        provenance.get("selected_config"), "selected config"
+    )
+    for name in ("path", "sha256", "byte_count"):
+        if selected.get(name) != base_identity.get(name):
+            raise Scene0061FormalBaseError(
+                "LiDAR evidence selected config does not match formal base"
+            )
+    snapshot = _validate_bound_file_identity(
+        provenance.get("runtime_config"), "runtime config snapshot"
+    )
+    if any(snapshot.get(name) != base_identity.get(name) for name in ("sha256", "byte_count")):
+        raise Scene0061FormalBaseError(
+            "LiDAR evidence runtime config snapshot does not match formal base"
+        )
+    opendrive = _validate_bound_file_identity(provenance.get("opendrive"), "OpenDRIVE")
+    validation = _validate_bound_file_identity(
+        provenance.get("live_tick_validation"), "live-tick validation"
+    )
+    if provenance["live_tick_validation"].get("status") != "passed":
+        raise Scene0061FormalBaseError("LiDAR evidence live-tick validation is not passed")
+    try:
+        validation_payload = strict_json_loads(Path(validation["path"]).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise Scene0061FormalBaseError(f"cannot read strict live-tick validation: {exc}") from exc
+    if not isinstance(validation_payload, Mapping) or validation_payload.get("status") != "passed":
+        raise Scene0061FormalBaseError("persisted live-tick validation is not passed")
+    evidence_path = Path(str(evidence_identity.get("path") or "")).expanduser().resolve()
+    output_root = evidence_path.parent
+    if evidence_path.name != "lidar_axis_evidence.json":
+        raise Scene0061FormalBaseError("LiDAR evidence must be the live-tick output artifact")
+    if snapshot["path"] != str((output_root / "runtime_run_config.json").resolve()):
+        raise Scene0061FormalBaseError("LiDAR evidence runtime config is not from the same output directory")
+    if validation["path"] != str((output_root / "live_tick_validation.json").resolve()):
+        raise Scene0061FormalBaseError("LiDAR evidence validation is not from the same output directory")
+    rows = derivation.get("runtime_execution_inputs")
+    declared_opendrive = [
+        row for row in rows or []
+        if isinstance(row, Mapping) and row.get("role") == "runtime_opendrive"
+    ]
+    if len(declared_opendrive) != 1 or any(
+        opendrive.get(name) != declared_opendrive[0].get(name)
+        for name in ("path", "sha256", "byte_count")
+    ):
+        raise Scene0061FormalBaseError("LiDAR evidence OpenDRIVE does not match formal base")
 
 
 def bind_lidar_evidence(base: Mapping[str, Any], base_identity: Mapping[str, Any], evidence: Mapping[str, Any], evidence_identity: Mapping[str, Any], bound_run_id: str) -> dict[str, Any]:
     experiment, runtime = base.get("experiment"), base.get("nurec_runtime")
+    derivation = base.get("formal_base_derivation")
     if not str(bound_run_id).strip():
         raise Scene0061FormalBaseError("bound run ID must be non-empty")
-    if not isinstance(experiment, Mapping) or experiment.get("scene_version") != FORMAL_VERSION or not isinstance(base.get("formal_base_derivation"), Mapping):
+    if not isinstance(experiment, Mapping) or experiment.get("scene_version") != FORMAL_VERSION or not isinstance(derivation, Mapping):
         raise Scene0061FormalBaseError("LiDAR binding requires a derived formal40k base config")
     if not isinstance(runtime, Mapping) or runtime.get("lidar_coordinate_validation") is not None:
         raise Scene0061FormalBaseError("formal base must have unbound LiDAR coordinate evidence")
-    _validate_formal_evidence(evidence, experiment, runtime)
+    _validate_formal_evidence(
+        evidence, experiment, runtime, derivation, base_identity, evidence_identity
+    )
     result = deepcopy(dict(base))
     result["run_id"] = str(bound_run_id)
     result["experiment"] = {**dict(experiment), "run_id": str(bound_run_id)}

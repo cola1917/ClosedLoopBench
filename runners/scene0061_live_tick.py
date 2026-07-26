@@ -564,6 +564,13 @@ def prepare_live_tick(
     sidecar_identity = _actor_binding_identity(config, source_config)
     native_scan_manifest = _native_scan_manifest_identity(config, source_config)
     formal_execution_inputs = _formal_runtime_execution_identities(config, source_config, xodr)
+    if formal_execution_inputs is not None:
+        configured_run_id = config.get("run_id")
+        experiment_run_id = (config.get("experiment") or {}).get("run_id")
+        if configured_run_id != run_id or experiment_run_id != run_id:
+            raise Scene0061LiveTickError(
+                "formal live tick run_id must match the derived config and experiment run IDs"
+            )
     _validate_static_actor_binding(config, sidecar_identity)
     carla_basic_agent = (
         _preflight_carla_basic_agent(carla_python_api_path)
@@ -1014,6 +1021,45 @@ def _collect_lidar_axis_evidence(
     return evidence
 
 
+def _bind_axis_evidence_to_live_tick(
+    evidence: Mapping[str, Any],
+    *,
+    environment: Mapping[str, Any],
+    validation: Mapping[str, Any],
+    validation_path: Path,
+) -> dict[str, Any]:
+    """Bind a coordinate result to the exact prepared config and live-tick gate.
+
+    Scene identity alone is insufficient freshness: two formal runs can share
+    every scene hash.  The binder therefore records the execution run ID, the
+    selected config, its byte-identical runtime snapshot, the OpenDRIVE, and
+    the persisted live-tick validation that covered the same output directory.
+    """
+
+    required = {name: environment.get(name) for name in ("config", "runtime_config", "opendrive")}
+    if not str(environment.get("run_id") or "").strip():
+        raise Scene0061LiveTickError("LiDAR evidence provenance requires the live-tick run ID")
+    if any(not isinstance(value, Mapping) for value in required.values()):
+        raise Scene0061LiveTickError("LiDAR evidence provenance lacks prepared input identities")
+    if validation.get("status") != "passed":
+        return dict(evidence)
+    validation_identity = _file_identity(validation_path, required=True)
+    assert validation_identity is not None
+    result = dict(evidence)
+    result["live_tick_provenance"] = {
+        "schema_version": "scene0061_lidar_live_tick_provenance.v1",
+        "run_id": environment["run_id"],
+        "selected_config": dict(required["config"]),
+        "runtime_config": dict(required["runtime_config"]),
+        "opendrive": dict(required["opendrive"]),
+        "live_tick_validation": {
+            **validation_identity,
+            "status": validation["status"],
+        },
+    }
+    return result
+
+
 def execute_live_tick(
     output_dir: Path,
     *,
@@ -1076,9 +1122,15 @@ def execute_live_tick(
         environment=environment,
         capture_native_lidar=capture_native_lidar,
     )
-    _write_json(root / "lidar_axis_evidence.json", axis_evidence)
     validation = validate_live_tick_result(result, root)
     _write_json(validation_path, validation)
+    axis_evidence = _bind_axis_evidence_to_live_tick(
+        axis_evidence,
+        environment=environment,
+        validation=validation,
+        validation_path=validation_path,
+    )
+    _write_json(root / "lidar_axis_evidence.json", axis_evidence)
     environment["status"] = validation["status"]
     environment["execution_finished_at_utc"] = _utc_now()
     environment["validation"] = validation
