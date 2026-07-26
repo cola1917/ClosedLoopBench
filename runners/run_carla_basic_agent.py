@@ -412,6 +412,7 @@ def _run_basic_agent_loop(
     runtime_config = _runtime_report_config(plan)
     ticks_completed = 0
     actor_execution_evidence: dict[str, str] = {}
+    actor_despawn_evidence: dict[str, dict[str, Any]] = {}
     actor_physical_response: dict[str, dict[str, float]] = {}
     actor_initial_poses: dict[str, dict[str, Any]] = {}
     frame_trace: list[dict[str, Any]] = []
@@ -684,6 +685,14 @@ def _run_basic_agent_loop(
             ticks_completed += 1
             ego_pose = _vehicle_pose(ego_vehicle)
             ego_speed_mps = _vehicle_speed_mps(ego_vehicle)
+            if plan.get("despawn_actors_on_reference_exhausted"):
+                actor_despawn_evidence.update(
+                    _despawn_reference_exhausted_actors(
+                        plan.get("actors") or [],
+                        actor_vehicles,
+                        simulation_time_sec=simulation_time_sec,
+                    )
+                )
             actor_distances_m, actor_decisions, min_ttc = _reactive_actor_tick(
                 plan.get("actors") or [],
                 ego_pose=ego_pose,
@@ -723,6 +732,7 @@ def _run_basic_agent_loop(
                         vehicle,
                         transform=transform,
                         actor_pose=pose,
+                        run_time_sec=run_time_sec,
                     )
                 reference_pose = _reference_pose_at_time(
                     actor, run_time_sec
@@ -1001,6 +1011,7 @@ def _run_basic_agent_loop(
             "collision_sensor_available": collision_sensor is not None,
             "actor_control_evidence": dict(actor_execution_evidence),
             "actor_control_mode_evidence": actor_control_mode_evidence,
+            "actor_despawn_evidence": dict(actor_despawn_evidence),
             "actor_physical_response": dict(actor_physical_response),
             "actor_runtime_binding": actor_runtime_binding_evidence,
             "multimodal_sensor": _multimodal_runtime_summary(
@@ -2210,6 +2221,7 @@ def _bound_actor_render_pose(
     *,
     transform: Any | None = None,
     actor_pose: dict[str, float] | None = None,
+    run_time_sec: float | None = None,
 ) -> tuple[dict[str, float], str]:
     """Return the NuRec track reference pose used by NVIDIA's CARLA adapter.
 
@@ -2218,9 +2230,27 @@ def _bound_actor_render_pose(
     before sending a controllable dynamic object to gRPC. Pedestrian source poses
     refer to the ground-contact point, while CARLA walker origins are capsule
     centres; pedestrian tracks therefore use the bottom of the CARLA bounding box.
+
+    Replay-frozen actors (``sensor_pose_reference == "source_track_frame"``, as
+    stamped by the counterfactual actor-control contract) render at the source
+    reference trajectory pose for the current simulation time instead of a
+    CARLA-entity-derived pose.
     """
 
     reference = str((actor.get("binding") or {}).get("sensor_pose_reference") or "")
+    if reference == "source_track_frame":
+        if run_time_sec is None:
+            raise RuntimeError(
+                f"bound actor {actor.get('actor_id', 'actor')} uses source_track_frame "
+                "render poses but no simulation time was provided"
+            )
+        reference_pose = _reference_pose_at_time(actor, run_time_sec)
+        if reference_pose is None:
+            raise RuntimeError(
+                f"bound actor {actor.get('actor_id', 'actor')} uses source_track_frame "
+                "render poses but has no timed reference trajectory"
+            )
+        return dict(reference_pose), reference
     if transform is None or actor_pose is None:
         transform, actor_pose = _vehicle_transform_and_pose(entity)
     if reference == "carla_actor_origin":
@@ -2623,6 +2653,55 @@ def _actor_reference_speed(
     if trajectory and isinstance(trajectory[-1], dict) and trajectory[-1].get("speed_mps") is not None:
         return float(trajectory[-1]["speed_mps"])
     return None
+
+
+def _despawn_reference_exhausted_actors(
+    actors: list[dict[str, Any]],
+    actor_vehicles: dict[str, Any],
+    *,
+    simulation_time_sec: float,
+    grace_sec: float = 0.5,
+) -> dict[str, dict[str, Any]]:
+    """Destroy actors whose recorded reference trajectory has ended.
+
+    nuScenes annotations stop when an agent leaves the labeled range; freezing
+    the actor at its final recorded pose fabricates a permanent obstacle the
+    recorded ego never faced (scene-0061: the lead vehicle's annotation ends at
+    t=14.15s parked on the ego lane the recorded ego crosses at t=18s). Opt-in
+    via ``plan["despawn_actors_on_reference_exhausted"]``; replay semantics are
+    unchanged when the flag is absent.
+    """
+    despawned: dict[str, dict[str, Any]] = {}
+    for actor in actors:
+        actor_id = str(actor.get("actor_id", "actor"))
+        entity = actor_vehicles.get(actor_id)
+        if entity is None:
+            continue
+        timed = [
+            float(point["t_sec"])
+            for point in actor.get("reference_trajectory") or []
+            if isinstance(point, dict) and point.get("t_sec") is not None
+        ]
+        if not timed:
+            continue
+        reference_end = max(timed)
+        if simulation_time_sec <= reference_end + grace_sec:
+            continue
+        destroyed = False
+        try:
+            if hasattr(entity, "destroy"):
+                entity.destroy()
+                destroyed = True
+        except RuntimeError:
+            destroyed = False
+        actor_vehicles.pop(actor_id, None)
+        despawned[actor_id] = {
+            "reason": "reference_trajectory_exhausted",
+            "reference_end_t_sec": reference_end,
+            "despawn_time_sec": float(simulation_time_sec),
+            "destroyed": destroyed,
+        }
+    return despawned
 
 
 def _apply_scripted_actor_controls(
