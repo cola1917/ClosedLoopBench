@@ -78,6 +78,10 @@ def run_nurec_closed_loop(
         concurrency=max(1, int(nurec_concurrency)),
         extra_targets=list(nurec_extra_targets or []),
         max_attempts=max(1, int(nurec_max_attempts)),
+        # A closed-loop drive legitimately outlives the recorded scan
+        # coverage; render those frames at their logical window and record
+        # status=out_of_native_scan_range instead of aborting the run.
+        native_scan_alignment_required=False,
     )
 
     plan = build_basic_agent_plan(

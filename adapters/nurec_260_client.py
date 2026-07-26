@@ -615,6 +615,7 @@ def build_nurec_260_handler(
     concurrency: int = 1,
     extra_targets: list[str] | None = None,
     max_attempts: int = 1,
+    native_scan_alignment_required: bool = True,
 ) -> Any:
     """Triplicate sensor-handler factory configured by ``nurec_runtime``."""
 
@@ -624,6 +625,7 @@ def build_nurec_260_handler(
     client = build_nurec_260_client(run_config)
     client.concurrency = max(1, int(concurrency))
     client.max_attempts = max(1, int(max_attempts))
+    client.native_scan_alignment_required = bool(native_scan_alignment_required)
     if extra_targets:
         client.add_render_targets(list(extra_targets))
     client._payload_output_dir = Path(attempt_dir) / "algorithm_sensor_payloads"
