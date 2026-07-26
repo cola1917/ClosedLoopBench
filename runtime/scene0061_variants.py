@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from copy import deepcopy
 from hashlib import sha256
+from pathlib import Path
 from typing import Any, Mapping
 
+
+COUNTERFACTUAL_MATRIX_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "configs"
+    / "scene0061_counterfactual_matrix.v1.json"
+)
 
 VEHICLE_TRACK = "c1958768d48640948f6053d04cffd35b"
 PEDESTRIAN_TRACK = "71603dd1a2ba4e9daf095535e38310ac"
@@ -36,12 +44,73 @@ class Scene0061VariantError(ValueError):
     """Raised when a light edit would leave the recorded actor corridor."""
 
 
+_KPI_GATE_PATTERN = re.compile(r"^(\w+?)(==|!=|>=|<=|>|<)(-?\d+(?:\.\d+)?)$")
+
+
+def kpi_gate_criteria(kpi_gate: list[str]) -> list[dict[str, Any]]:
+    """Translate a counterfactual-matrix ``kpi_gate`` into evaluation criteria.
+
+    ``"<metric><op><number>"`` entries become threshold criteria and
+    ``"<metric>_available"`` entries become availability gates (the metric
+    must have been sampled; e.g. S2's ``min_ttc_available`` — a hard-brake
+    case intentionally produces a low TTC, so the base ``min_ttc>=1.0``
+    threshold must NOT apply).
+    """
+
+    criteria: list[dict[str, Any]] = []
+    for entry in kpi_gate:
+        text = str(entry).strip()
+        if text.endswith("_available"):
+            metric = text[: -len("_available")]
+            if not metric:
+                raise Scene0061VariantError(f"invalid kpi_gate entry: {entry!r}")
+            criteria.append(
+                {"name": text, "metric": metric, "op": "available", "value": True}
+            )
+            continue
+        match = _KPI_GATE_PATTERN.match(text)
+        if match is None:
+            raise Scene0061VariantError(f"unsupported kpi_gate entry: {entry!r}")
+        metric, op, value = match.groups()
+        criteria.append(
+            {
+                "name": metric,
+                "metric": metric,
+                "op": op,
+                "value": float(value) if "." in value else int(value),
+            }
+        )
+    if not criteria:
+        raise Scene0061VariantError("kpi_gate produced no evaluation criteria")
+    return criteria
+
+
+def _matrix_kpi_gate(case_id: str, matrix_path: Path) -> list[str]:
+    if not matrix_path.is_file():
+        raise Scene0061VariantError(
+            f"counterfactual matrix not found: {matrix_path}"
+        )
+    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+    for case in matrix.get("cases") or []:
+        if case.get("case_id") == case_id:
+            gate = case.get("kpi_gate")
+            if not isinstance(gate, list) or not gate:
+                raise Scene0061VariantError(
+                    f"matrix case {case_id} has no kpi_gate"
+                )
+            return [str(item) for item in gate]
+    raise Scene0061VariantError(
+        f"case {case_id} not present in counterfactual matrix {matrix_path}"
+    )
+
+
 def build_scene0061_variant(
     run_config: Mapping[str, Any],
     *,
     case_id: str,
     seed: int,
     event_timestamp_sec: float | None = None,
+    matrix_path: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if case_id not in SUPPORTED_CASES:
         raise Scene0061VariantError(f"unsupported focused TF++ case: {case_id}")
@@ -68,6 +137,19 @@ def build_scene0061_variant(
     carla = dict(result.get("carla") or {})
     carla["seed"] = seed
     result["carla"] = carla
+    # Replace the base evaluation with the case's own kpi_gate so a focused
+    # case is judged by its declared contract (e.g. S2 requires min_ttc to be
+    # AVAILABLE, not >= the nominal-following threshold it deliberately
+    # violates). Fail-closed: a case without a matrix kpi_gate cannot build.
+    case_kpi_gate = _matrix_kpi_gate(
+        case_id, matrix_path or COUNTERFACTUAL_MATRIX_PATH
+    )
+    result["evaluation"] = {"criteria": kpi_gate_criteria(case_kpi_gate)}
+    result["evaluation_provenance"] = {
+        "source": "scene_counterfactual_matrix.v1",
+        "case_id": case_id,
+        "kpi_gate": list(case_kpi_gate),
+    }
 
     delta: dict[str, Any] = {
         "case_id": case_id,

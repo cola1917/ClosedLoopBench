@@ -69,6 +69,11 @@ def _normalize_criterion(criterion: Any) -> dict[str, Any]:
     normalized["metric"] = str(metric)
     normalized.setdefault("name", str(metric))
     normalized.setdefault("op", _default_operator(str(metric)))
+    if normalized["op"] == "available":
+        # Availability gates assert the metric was actually sampled (e.g. the
+        # counterfactual kpi_gate entry "min_ttc_available"); no threshold.
+        normalized.setdefault("value", True)
+        return normalized
     if "value" not in normalized:
         raise ValueError(f"evaluation criterion {normalized['name']} requires a value")
     return normalized
@@ -111,6 +116,14 @@ def _criterion_result(
     metric_rows: list[dict[str, Any]],
     status: str,
 ) -> str:
+    if op == "available":
+        # The gate itself decides pass/fail on availability, so an unsampled
+        # metric is a hard FAIL here rather than UNKNOWN.
+        return (
+            PASS
+            if _is_metric_known(metric, actual, metric_rows, status)
+            else FAIL
+        )
     if not _is_metric_known(metric, actual, metric_rows, status):
         return UNKNOWN
     if not isinstance(actual, (int, float)) or not isinstance(expected, (int, float)):
