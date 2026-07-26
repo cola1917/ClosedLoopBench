@@ -1,0 +1,13 @@
+{
+  "status": "interactive_closed_loop",
+  "reason": null,
+  "detail": null,
+  "ticks": 330,
+  "route_progress": 0.9954997940542957,
+  "collision_count": 0,
+  "termination_reason": "route_complete",
+  "frame_trace_count": 330,
+  "cleanup_succeeded": true,
+  "report_path": "/home/cwadmin/workspace/ClosedLoopBench/outputs/s2_hardbrake_native/r1/closed_loop_report.json",
+  "output_dir": "/home/cwadmin/workspace/ClosedLoopBench/outputs/s2_hardbrake_native/r1"
+}
