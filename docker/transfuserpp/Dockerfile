@@ -5,13 +5,6 @@ RUN apt-get update \
        libgl1 libglib2.0-0 python3-colcon-common-extensions python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# The official CARLA Garage checkout is mounted read-only from the host.  Its
-# host UID need not match the container user, so Git otherwise rejects the
-# checkout before the runtime can verify its pinned revision, origin, clean
-# worktree, and content hash.  Trust only this fixed, read-only mount path; do
-# not use a wildcard safe.directory.
-RUN git config --system --add safe.directory /opt/algorithm/carla_garage
-
 COPY docker/transfuserpp/requirements.runtime.txt /tmp/requirements.runtime.txt
 RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.runtime.txt
 
@@ -39,6 +32,15 @@ COPY docker/compose.transfuserpp.yml ./docker/
 COPY docker/algorithm/entrypoint.sh ./docker/algorithm/
 COPY docker/algorithm/entrypoint.sh /usr/local/bin/closed-loop-algorithm-entrypoint
 RUN chmod +x /usr/local/bin/closed-loop-algorithm-entrypoint
+
+# The official CARLA Garage checkout is mounted read-only from the host.  Its
+# host UID need not match the container user, so Git otherwise rejects the
+# checkout before the runtime can verify its pinned revision, origin, clean
+# worktree, and content hash.  Trust only this fixed, read-only mount path; do
+# not use a wildcard safe.directory.  Keep this terminal layer so that a
+# rebuild can reuse the previously verified dependency layers rather than
+# accepting a changed package under the same pinned requirement.
+RUN git config --system --add safe.directory /opt/algorithm/carla_garage
 
 ENTRYPOINT ["/usr/local/bin/closed-loop-algorithm-entrypoint"]
 CMD ["run"]
