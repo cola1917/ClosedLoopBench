@@ -118,6 +118,11 @@ class NuRec260Client:
         self.concurrency: int = 1
         # Per-request retry budget for transient RPC failures on long runs.
         self.max_attempts: int = 1
+        # Sample RGB renders at the logical window midpoint (+1us) instead of
+        # integrating the whole tick window across the temporal Gaussian
+        # field. Matches NVIDIA's replay integration; the wide-window path is
+        # kept only for reproducing historical evidence.
+        self.rgb_instant_sampling: bool = True
         self._grpc_options = [
             ("grpc.max_send_message_length", int(max_message_bytes)),
             ("grpc.max_receive_message_length", int(max_message_bytes)),
@@ -311,13 +316,26 @@ class NuRec260Client:
         # it to the percent value consumed by this deployed service boundary.
         wire_image_quality = image_quality * 100.0
         frame_start_us, frame_end_us = self._time_window_us(payload)
+        if self.rgb_instant_sampling:
+            # The 40k reconstruction is a TEMPORAL Gaussian field. Rendering
+            # with the full logical tick window (e.g. 50ms) integrates every
+            # dynamic Gaussian's motion across that window and produces the
+            # debris-cloud artifacts seen in r22/M2 frames. NVIDIA's own CARLA
+            # replay integration renders with frame_end_us = frame_start_us+1
+            # ("important that these are not identical"), i.e. an
+            # instantaneous sample. Keep the logical window for temporal
+            # alignment/evidence; sample the render at the window midpoint.
+            midpoint_us = (frame_start_us + frame_end_us) // 2
+            wire_start_us, wire_end_us = midpoint_us, midpoint_us + 1
+        else:
+            wire_start_us, wire_end_us = frame_start_us, frame_end_us
         request = self._pb.RGBRenderRequest(
             scene_id=self.runtime_scene_id,
             resolution_h=height,
             resolution_w=width,
             camera_intrinsics=camera_spec,
-            frame_start_us=frame_start_us,
-            frame_end_us=frame_end_us,
+            frame_start_us=wire_start_us,
+            frame_end_us=wire_end_us,
             sensor_pose=self._pose_pair(sensor["pose_pair"]),
             dynamic_objects=self._dynamic_objects(payload["dynamic_objects"]),
             image_format=self._pb.JPEG,
