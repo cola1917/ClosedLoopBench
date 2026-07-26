@@ -6,6 +6,7 @@ import json
 import re
 import struct
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -111,10 +112,53 @@ class NuRec260Client:
             max_midpoint_error_us=native_scan_max_midpoint_error_us,
         )
         self._active_temporal_alignment: dict[str, Any] | None = None
+        # Per-frame sensor request fan-out. 1 keeps the historical serial
+        # behaviour; the closed-loop runners raise it so the 6 RGB + LiDAR
+        # requests overlap instead of paying every RPC round-trip in sequence.
+        self.concurrency: int = 1
+        # Per-request retry budget for transient RPC failures on long runs.
+        self.max_attempts: int = 1
+        self._grpc_options = [
+            ("grpc.max_send_message_length", int(max_message_bytes)),
+            ("grpc.max_receive_message_length", int(max_message_bytes)),
+        ]
+        self._extra_channels: list[Any] = []
+        self._render_stubs: list[Any] = [self.stub]
+        self._render_stub_lock = threading.Lock()
+        self._render_stub_index = 0
+
+    def add_render_targets(self, targets: list[str]) -> None:
+        """Fan render RPCs out across extra identical NRE service instances.
+
+        The NRE SensorsimService is stateless per request (every render call
+        carries scene_id, poses and the full dynamic-object set), so identical
+        instances loaded with the same artifact can serve requests
+        interchangeably. Round-robin assignment spreads a frame's parallel
+        requests across single-queue server instances.
+        """
+
+        grpc = importlib.import_module("grpc")
+        stub_module = importlib.import_module("nre.grpc.protos.sensorsim_pb2_grpc")
+        for target in targets:
+            value = str(target).strip()
+            if not value:
+                continue
+            channel = grpc.insecure_channel(value, options=self._grpc_options)
+            self._extra_channels.append(channel)
+            self._render_stubs.append(stub_module.SensorsimServiceStub(channel))
+
+    def _next_render_stub(self) -> Any:
+        with self._render_stub_lock:
+            stub = self._render_stubs[self._render_stub_index % len(self._render_stubs)]
+            self._render_stub_index += 1
+            return stub
 
     def close(self) -> None:
         if self._channel is not None and hasattr(self._channel, "close"):
             self._channel.close()
+        for channel in self._extra_channels:
+            if hasattr(channel, "close"):
+                channel.close()
 
     def dispatch_frame(self, frame: Mapping[str, Any]) -> dict[str, Any]:
         if self._active_temporal_alignment is not None:
@@ -130,6 +174,8 @@ class NuRec260Client:
                 render_lidar=self.render_lidar,
                 response_bytes=self.response_bytes,
                 response_inspector=self.inspect_response,
+                concurrency=int(getattr(self, "concurrency", 1) or 1),
+                max_attempts=int(getattr(self, "max_attempts", 1) or 1),
             )
         finally:
             self._active_temporal_alignment = None
@@ -301,10 +347,10 @@ class NuRec260Client:
         return self._encoded(payload, request)
 
     def render_rgb(self, request: Any) -> Any:
-        return self.stub.render_rgb(request, timeout=self.timeout_sec)
+        return self._next_render_stub().render_rgb(request, timeout=self.timeout_sec)
 
     def render_lidar(self, request: Any) -> Any:
-        return self.stub.render_lidar(request, timeout=self.timeout_sec)
+        return self._next_render_stub().render_lidar(request, timeout=self.timeout_sec)
 
     @staticmethod
     def response_bytes(response: Any) -> bytes:
@@ -397,10 +443,17 @@ class NuRec260Client:
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{sensor_id}{suffix}"
         if target.exists():
-            raise NuRecMultimodalError(
-                f"refusing to overwrite materialized NuRec payload: {target}"
-            )
-        target.write_bytes(data)
+            # Idempotent retry support: a prior attempt of the SAME request may
+            # have materialized this payload before failing later in the
+            # pipeline. Re-materializing identical bytes is safe; anything else
+            # is still a hard refusal (tamper/overwrite protection unchanged).
+            existing = target.read_bytes()
+            if existing != data:
+                raise NuRecMultimodalError(
+                    f"refusing to overwrite materialized NuRec payload: {target}"
+                )
+        else:
+            target.write_bytes(data)
         result = {
             "path": str(target),
             "sha256": hashlib.sha256(data).hexdigest(),
@@ -512,7 +565,12 @@ def build_nurec_260_client(
 
 
 def build_nurec_260_handler(
-    run_config: Mapping[str, Any], attempt_dir: Path
+    run_config: Mapping[str, Any],
+    attempt_dir: Path,
+    *,
+    concurrency: int = 1,
+    extra_targets: list[str] | None = None,
+    max_attempts: int = 1,
 ) -> Any:
     """Triplicate sensor-handler factory configured by ``nurec_runtime``."""
 
@@ -520,6 +578,10 @@ def build_nurec_260_handler(
     if not isinstance(config, Mapping):
         raise NuRecMultimodalError("run config requires nurec_runtime")
     client = build_nurec_260_client(run_config)
+    client.concurrency = max(1, int(concurrency))
+    client.max_attempts = max(1, int(max_attempts))
+    if extra_targets:
+        client.add_render_targets(list(extra_targets))
     client._payload_output_dir = Path(attempt_dir) / "algorithm_sensor_payloads"
     # The sidecar mounts the triplicate output root once at /sim-data. Keep
     # each attempt directory in the relative path so repeated CARLA frame IDs
