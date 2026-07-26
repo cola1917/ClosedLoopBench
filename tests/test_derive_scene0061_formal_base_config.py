@@ -87,6 +87,23 @@ class FormalBaseDerivationTests(unittest.TestCase):
         snapshot.write_bytes(base_path.read_bytes())
         validation = output_root / "live_tick_validation.json"
         validation.write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+        execution_commit = "a" * 40
+        environment = output_root / "runtime_environment.json"
+        environment.write_text(
+            json.dumps(
+                {
+                    "schema_version": "scene0061_live_tick_environment.v2",
+                    "status": "passed",
+                    "run_id": "formal-live",
+                    "git_commit": execution_commit,
+                    "execution_code_commit": execution_commit,
+                    "config": _identity(base_path),
+                    "runtime_config": _identity(snapshot),
+                    "opendrive": _identity(execution["runtime_opendrive"]),
+                }
+            ),
+            encoding="utf-8",
+        )
         evidence_path = output_root / "lidar_axis_evidence.json"
         evidence = {
             "schema_version": "scene0061_lidar_coordinate_validation.v1",
@@ -101,8 +118,14 @@ class FormalBaseDerivationTests(unittest.TestCase):
             "axis_validation": {"status": "passed"},
             "gate_replay": {"status": "passed"},
             "live_tick_provenance": {
-                "schema_version": "scene0061_lidar_live_tick_provenance.v1",
+                "schema_version": "scene0061_lidar_live_tick_provenance.v2",
                 "run_id": "formal-live",
+                "execution_code_commit": execution_commit,
+                "runtime_environment": {
+                    **_identity(environment),
+                    "status": "passed",
+                    "execution_code_commit": execution_commit,
+                },
                 "selected_config": _identity(base_path),
                 "runtime_config": _identity(snapshot),
                 "opendrive": _identity(execution["runtime_opendrive"]),
@@ -129,6 +152,28 @@ class FormalBaseDerivationTests(unittest.TestCase):
             self.assertNotIn("lidar_coordinate_validation", actual["nurec_runtime"])
             self.assertEqual(actual["formal_base_derivation"]["source_run_config"]["sha256"], _sha(source_path))
             self.assertEqual({row["role"] for row in actual["formal_base_derivation"]["runtime_execution_inputs"]}, set(execution))
+
+    def test_derivation_renames_legacy_code_commit_as_source_lineage(self):
+        from runners.derive_scene0061_formal_base_config import derive_formal_base_file
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            matrix, paths, execution, source = _fixture(root)
+            source["experiment"]["identity"]["code_commit"] = "b" * 40
+            source_path, matrix_path, output = root / "source.json", root / "matrix.json", root / "formal.json"
+            source_path.write_text(json.dumps(source), encoding="utf-8")
+            matrix_path.write_text(json.dumps(matrix), encoding="utf-8")
+            with patch("runners.derive_scene0061_formal_base_config.validate_scene0061_counterfactual_matrix"):
+                derive_formal_base_file(
+                    source_config=source_path, matrix=matrix_path, immutable_paths=paths,
+                    execution_paths=execution, formal_run_id="formal-live", output=output
+                )
+            actual = json.loads(output.read_text(encoding="utf-8"))
+            identity = actual["experiment"]["identity"]
+            self.assertNotIn("code_commit", identity)
+            self.assertNotIn("execution_code_commit", identity)
+            self.assertEqual(identity["source_code_commit"], "b" * 40)
+            self.assertIn("source_code_commit_is_config_lineage", identity["code_identity_semantics"])
 
     def test_refuses_input_hash_drift_without_output(self):
         from runners.derive_scene0061_formal_base_config import Scene0061FormalBaseError, derive_formal_base_file
@@ -240,6 +285,27 @@ class FormalBaseDerivationTests(unittest.TestCase):
                     lidar_evidence=evidence_path,
                     bound_run_id="formal-bound",
                     output=root / "must-not-exist.json",
+                )
+            self.assertFalse((root / "must-not-exist.json").exists())
+
+    def test_evidence_binding_rejects_tampered_runtime_environment(self):
+        from runners.derive_scene0061_formal_base_config import (
+            Scene0061FormalBaseError,
+            bind_lidar_evidence_file,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            base_path, evidence_path, evidence, _ = self._fresh_evidence_fixture(root)
+            environment_path = Path(evidence["live_tick_provenance"]["runtime_environment"]["path"])
+            environment = json.loads(environment_path.read_text(encoding="utf-8"))
+            environment["git_commit"] = "c" * 40
+            environment_path.write_text(json.dumps(environment), encoding="utf-8")
+
+            with self.assertRaisesRegex(Scene0061FormalBaseError, "runtime environment identity no longer matches"):
+                bind_lidar_evidence_file(
+                    base_config=base_path, lidar_evidence=evidence_path,
+                    bound_run_id="formal-bound", output=root / "must-not-exist.json"
                 )
             self.assertFalse((root / "must-not-exist.json").exists())
 

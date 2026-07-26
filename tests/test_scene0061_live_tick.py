@@ -463,6 +463,8 @@ class Scene0061LiveTickTests(unittest.TestCase):
             validation_path = root / "live_tick_validation.json"
             validation = {"status": "passed", "frame_trace_count": 1}
             validation_path.write_text(json.dumps(validation), encoding="utf-8")
+            execution_commit = "a" * 40
+            environment_path = root / "runtime_environment.json"
 
             def identity(path: Path) -> dict:
                 return {
@@ -471,16 +473,23 @@ class Scene0061LiveTickTests(unittest.TestCase):
                     "byte_count": path.stat().st_size,
                 }
 
+            environment = {
+                "schema_version": "scene0061_live_tick_environment.v2",
+                "status": "passed",
+                "run_id": "formal-live",
+                "git_commit": execution_commit,
+                "execution_code_commit": execution_commit,
+                "config": identity(config),
+                "runtime_config": identity(snapshot),
+                "opendrive": identity(opendrive),
+            }
+            environment_path.write_text(json.dumps(environment), encoding="utf-8")
             result = _bind_axis_evidence_to_live_tick(
                 {"status": "passed"},
-                environment={
-                    "run_id": "formal-live",
-                    "config": identity(config),
-                    "runtime_config": identity(snapshot),
-                    "opendrive": identity(opendrive),
-                },
+                environment=environment,
                 validation=validation,
                 validation_path=validation_path,
+                environment_path=environment_path,
             )
 
             provenance = result["live_tick_provenance"]
@@ -488,10 +497,59 @@ class Scene0061LiveTickTests(unittest.TestCase):
             self.assertEqual(provenance["selected_config"], identity(config))
             self.assertEqual(provenance["runtime_config"], identity(snapshot))
             self.assertEqual(provenance["opendrive"], identity(opendrive))
+            self.assertEqual(provenance["execution_code_commit"], execution_commit)
+            self.assertEqual(
+                provenance["runtime_environment"]["sha256"],
+                identity(environment_path)["sha256"],
+            )
             self.assertEqual(provenance["live_tick_validation"]["status"], "passed")
             self.assertEqual(
                 provenance["live_tick_validation"]["sha256"], identity(validation_path)["sha256"]
             )
+
+    def test_axis_evidence_refuses_environment_without_execution_commit(self):
+        from runners.scene0061_live_tick import (
+            Scene0061LiveTickError,
+            _bind_axis_evidence_to_live_tick,
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = root / "formal.json"
+            config.write_text("{}\n", encoding="utf-8")
+            snapshot = root / "runtime_run_config.json"
+            snapshot.write_bytes(config.read_bytes())
+            opendrive = root / "road.xodr"
+            opendrive.write_text("<OpenDRIVE/>\n", encoding="utf-8")
+            validation_path = root / "live_tick_validation.json"
+            validation_path.write_text(json.dumps({"status": "passed"}), encoding="utf-8")
+            environment_path = root / "runtime_environment.json"
+
+            def identity(path: Path) -> dict:
+                return {
+                    "path": str(path.resolve()),
+                    "sha256": __import__("hashlib").sha256(path.read_bytes()).hexdigest(),
+                    "byte_count": path.stat().st_size,
+                }
+
+            environment = {
+                "schema_version": "scene0061_live_tick_environment.v2",
+                "status": "passed",
+                "run_id": "formal-live",
+                "git_commit": "a" * 40,
+                "config": identity(config),
+                "runtime_config": identity(snapshot),
+                "opendrive": identity(opendrive),
+            }
+            environment_path.write_text(json.dumps(environment), encoding="utf-8")
+            with self.assertRaisesRegex(Scene0061LiveTickError, "execution environment commit"):
+                _bind_axis_evidence_to_live_tick(
+                    {"status": "passed"},
+                    environment=environment,
+                    validation={"status": "passed"},
+                    validation_path=validation_path,
+                    environment_path=environment_path,
+                )
 
     def test_result_validation_rejects_empty_or_failed_persisted_evidence(self):
         from runners.scene0061_live_tick import validate_live_tick_result

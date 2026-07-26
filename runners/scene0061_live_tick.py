@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -52,6 +53,11 @@ class Scene0061LiveTickError(RuntimeError):
     """Raised when a one-tick diagnostic cannot prove its own provenance."""
 
 
+_GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+LIVE_TICK_ENVIRONMENT_SCHEMA = "scene0061_live_tick_environment.v2"
+LIDAR_LIVE_TICK_PROVENANCE_SCHEMA = "scene0061_lidar_live_tick_provenance.v2"
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -87,6 +93,64 @@ def _git_commit(project_root: Path = PROJECT_ROOT) -> str | None:
         return None
     commit = completed.stdout.strip()
     return commit or None
+
+
+def _execution_git_commit(project_root: Path = PROJECT_ROOT) -> str:
+    """Return the immutable commit that owns this execution.
+
+    A live physical run without an identifiable checkout cannot provide an
+    auditable execution identity.  In particular, a commit inherited from an
+    older configuration is not a substitute for the commit executing CARLA.
+    """
+
+    commit = _git_commit(project_root)
+    if not isinstance(commit, str) or _GIT_COMMIT_RE.fullmatch(commit) is None:
+        raise Scene0061LiveTickError(
+            "live-tick execution requires a lowercase 40-character Git commit"
+        )
+    return commit
+
+
+def _bind_plan_execution_identity(
+    plan: dict[str, Any], execution_commit: str
+) -> str | None:
+    """Separate inherited source identity from the current execution."""
+
+    experiment = plan.setdefault("experiment", {})
+    identity = experiment.setdefault("identity", {})
+    if not isinstance(identity, dict):
+        raise Scene0061LiveTickError("experiment.identity must be an object")
+    legacy_source = identity.pop("code_commit", None)
+    explicit_source = identity.get("source_code_commit")
+    if legacy_source is not None:
+        if (
+            not isinstance(legacy_source, str)
+            or _GIT_COMMIT_RE.fullmatch(legacy_source) is None
+        ):
+            raise Scene0061LiveTickError(
+                "experiment.identity.code_commit is not a valid source commit"
+            )
+        if explicit_source is not None and explicit_source != legacy_source:
+            raise Scene0061LiveTickError(
+                "legacy and explicit source code commits disagree"
+            )
+        identity["source_code_commit"] = legacy_source
+        explicit_source = legacy_source
+    if explicit_source is not None and (
+        not isinstance(explicit_source, str)
+        or _GIT_COMMIT_RE.fullmatch(explicit_source) is None
+    ):
+        raise Scene0061LiveTickError(
+            "experiment.identity.source_code_commit is invalid"
+        )
+    # A prepared config may contain a prior run's execution field.  It must
+    # never survive into the new report as though it were current.
+    identity["execution_code_commit"] = execution_commit
+    identity["code_identity_semantics"] = (
+        "source_code_commit_is_config_lineage;"
+        "execution_code_commit_is_runtime_environment_bound"
+    )
+    return explicit_source
 
 
 def _python_runtime_identity() -> dict[str, Any]:
@@ -298,6 +362,8 @@ _EVIDENCE_ARTIFACTS = (
     "metrics_trace.jsonl",
     "cleanup_audit.json",
     "closed_loop_report.json",
+    "live_tick_validation.json",
+    "runtime_environment.json",
     "lidar_axis_evidence.json",
 )
 
@@ -305,9 +371,9 @@ _EVIDENCE_ARTIFACTS = (
 def _write_artifact_manifest(output_dir: Path) -> dict[str, Any]:
     """Write a non-circular inventory of every required diagnostic output.
 
-    The environment and the manifest are deliberately excluded from this list:
-    both are updated after execution, so adding either would create a mutable
-    self-hash.  The environment records the manifest identity instead.
+    The manifest itself is deliberately excluded.  The runtime environment is
+    finalized before LiDAR evidence is bound, so both can be hashed here
+    without a mutable self-hash cycle.
     """
 
     root = output_dir.expanduser().resolve()
@@ -553,6 +619,7 @@ def prepare_live_tick(
         raise Scene0061LiveTickError("run_id must be non-empty")
     if not isinstance(capture_native_lidar, bool):
         raise Scene0061LiveTickError("capture_native_lidar must be a boolean")
+    execution_commit = _execution_git_commit()
     source_config = config_path.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
     xodr = opendrive_path.expanduser().resolve()
@@ -604,6 +671,7 @@ def prepare_live_tick(
     # an execution identity, not an unrecorded mutation of user configuration.
     plan["run_id"] = str(run_id)
     plan.setdefault("experiment", {})["run_id"] = str(run_id)
+    source_code_commit = _bind_plan_execution_identity(plan, execution_commit)
     if carla_basic_agent is not None:
         plan.setdefault("runtime", {})["carla_python_api_path"] = carla_basic_agent[
             "python_api_path"
@@ -618,6 +686,7 @@ def prepare_live_tick(
         "runtime_config_path": runtime_config_identity["path"],
         "runtime_config_sha256": runtime_config_identity["sha256"],
         "capture_native_lidar_requested": capture_native_lidar,
+        "execution_code_commit": execution_commit,
         **(
             {"carla_basic_agent": carla_basic_agent}
             if carla_basic_agent is not None
@@ -628,11 +697,15 @@ def prepare_live_tick(
     _write_json(plan_path, plan)
 
     environment: dict[str, Any] = {
-        "schema_version": "scene0061_live_tick_environment.v1",
+        "schema_version": LIVE_TICK_ENVIRONMENT_SCHEMA,
         "status": "prepared",
         "prepared_at_utc": _utc_now(),
         "run_id": str(run_id),
-        "git_commit": _git_commit(),
+        # git_commit remains as a compatibility alias; execution_code_commit
+        # is the unambiguous field consumed by new binders.
+        "git_commit": execution_commit,
+        "execution_code_commit": execution_commit,
+        "source_code_commit": source_code_commit,
         "python_runtime": _python_runtime_identity(),
         "config": config_identity,
         "runtime_config": runtime_config_identity,
@@ -668,8 +741,18 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
     root = output_dir.expanduser().resolve()
     environment_path = root / "runtime_environment.json"
     environment = _load_object(environment_path)
-    if environment.get("schema_version") != "scene0061_live_tick_environment.v1":
+    if environment.get("schema_version") != LIVE_TICK_ENVIRONMENT_SCHEMA:
         raise Scene0061LiveTickError("unsupported runtime_environment schema")
+    execution_commit = environment.get("execution_code_commit")
+    if (
+        not isinstance(execution_commit, str)
+        or _GIT_COMMIT_RE.fullmatch(execution_commit) is None
+        or environment.get("git_commit") != execution_commit
+        or _execution_git_commit() != execution_commit
+    ):
+        raise Scene0061LiveTickError(
+            "prepared execution commit does not match the executing checkout"
+        )
     prepared_python = environment.get("python_runtime")
     current_python = _python_runtime_identity()
     if prepared_python != current_python:
@@ -744,6 +827,18 @@ def verify_prepared_live_tick(output_dir: Path) -> dict[str, Any]:
     plan_path = Path(str((environment.get("artifacts") or {}).get("basic_agent_plan") or ""))
     plan = _load_object(plan_path)
     provenance = ((plan.get("runtime") or {}).get("provenance") or {})
+    plan_identity = ((plan.get("experiment") or {}).get("identity") or {})
+    if (
+        provenance.get("execution_code_commit") != execution_commit
+        or not isinstance(plan_identity, Mapping)
+        or plan_identity.get("execution_code_commit") != execution_commit
+        or environment.get("source_code_commit")
+        != plan_identity.get("source_code_commit")
+        or "code_commit" in plan_identity
+    ):
+        raise Scene0061LiveTickError(
+            "basic_agent_plan execution commit does not match runtime_environment"
+        )
     if (
         provenance.get("runtime_config_path") != runtime_config.get("path")
         or provenance.get("runtime_config_sha256") != runtime_config.get("sha256")
@@ -1027,6 +1122,7 @@ def _bind_axis_evidence_to_live_tick(
     environment: Mapping[str, Any],
     validation: Mapping[str, Any],
     validation_path: Path,
+    environment_path: Path,
 ) -> dict[str, Any]:
     """Bind a coordinate result to the exact prepared config and live-tick gate.
 
@@ -1043,12 +1139,30 @@ def _bind_axis_evidence_to_live_tick(
         raise Scene0061LiveTickError("LiDAR evidence provenance lacks prepared input identities")
     if validation.get("status") != "passed":
         return dict(evidence)
+    execution_commit = environment.get("execution_code_commit")
+    if (
+        not isinstance(execution_commit, str)
+        or _GIT_COMMIT_RE.fullmatch(execution_commit) is None
+        or environment.get("git_commit") != execution_commit
+        or environment.get("status") != "passed"
+    ):
+        raise Scene0061LiveTickError(
+            "LiDAR evidence provenance requires a passed execution environment commit"
+        )
     validation_identity = _file_identity(validation_path, required=True)
+    environment_identity = _file_identity(environment_path, required=True)
     assert validation_identity is not None
+    assert environment_identity is not None
     result = dict(evidence)
     result["live_tick_provenance"] = {
-        "schema_version": "scene0061_lidar_live_tick_provenance.v1",
+        "schema_version": LIDAR_LIVE_TICK_PROVENANCE_SCHEMA,
         "run_id": environment["run_id"],
+        "execution_code_commit": execution_commit,
+        "runtime_environment": {
+            **environment_identity,
+            "status": environment["status"],
+            "execution_code_commit": execution_commit,
+        },
         "selected_config": dict(required["config"]),
         "runtime_config": dict(required["runtime_config"]),
         "opendrive": dict(required["opendrive"]),
@@ -1124,31 +1238,21 @@ def execute_live_tick(
     )
     validation = validate_live_tick_result(result, root)
     _write_json(validation_path, validation)
+    # Finalize the environment before hashing it into LiDAR provenance.  It is
+    # intentionally not rewritten after this point.
+    environment["status"] = validation["status"]
+    environment["execution_finished_at_utc"] = _utc_now()
+    environment["validation"] = validation
+    _write_json(environment_path, environment)
     axis_evidence = _bind_axis_evidence_to_live_tick(
         axis_evidence,
         environment=environment,
         validation=validation,
         validation_path=validation_path,
+        environment_path=environment_path,
     )
     _write_json(root / "lidar_axis_evidence.json", axis_evidence)
-    environment["status"] = validation["status"]
-    environment["execution_finished_at_utc"] = _utc_now()
-    environment["validation"] = validation
-    environment["lidar_axis_evidence"] = {
-        **_file_identity(root / "lidar_axis_evidence.json", required=True),
-        "status": axis_evidence["status"],
-    }
-    _write_json(environment_path, environment)
     manifest = _write_artifact_manifest(root)
-    manifest_path = root / "artifact_manifest.json"
-    manifest_identity = _file_identity(manifest_path, required=True)
-    assert manifest_identity is not None
-    environment["artifact_manifest"] = {
-        **manifest_identity,
-        "status": manifest["status"],
-        "missing_artifacts": manifest["missing_artifacts"],
-    }
-    _write_json(environment_path, environment)
     return {
         "environment": environment,
         "result": result,

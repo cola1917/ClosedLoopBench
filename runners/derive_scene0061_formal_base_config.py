@@ -43,6 +43,9 @@ EXECUTION_ROLES = {
     "runtime_opendrive",
 }
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_GIT_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+LIVE_TICK_PROVENANCE_SCHEMA = "scene0061_lidar_live_tick_provenance.v2"
+LIVE_TICK_ENVIRONMENT_SCHEMA = "scene0061_live_tick_environment.v2"
 
 
 class Scene0061FormalBaseError(ValueError):
@@ -76,6 +79,48 @@ def _require_hash(value: Any, label: str) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
         raise Scene0061FormalBaseError(f"{label} must be a lowercase SHA-256")
     return value
+
+
+def _normalize_source_code_identity(identity: dict[str, Any]) -> dict[str, str | None]:
+    """Make source/config lineage explicit before a new formal run exists.
+
+    ``code_commit`` was historically overloaded: r21 showed that a commit
+    inherited with the source configuration could be read as the commit which
+    executed the physical tick.  A derived formal config is not itself an
+    execution, so it keeps only source lineage here; a live tick later adds
+    ``execution_code_commit`` to its plan and runtime environment.
+    """
+
+    legacy = identity.pop("code_commit", None)
+    source = identity.get("source_code_commit")
+    inherited_execution = identity.pop("execution_code_commit", None)
+    identity.pop("code_identity_semantics", None)
+    for name, value in (
+        ("legacy code_commit", legacy),
+        ("source_code_commit", source),
+        ("inherited execution_code_commit", inherited_execution),
+    ):
+        if value is not None and (
+            not isinstance(value, str) or _GIT_COMMIT.fullmatch(value) is None
+        ):
+            raise Scene0061FormalBaseError(f"{name} must be a lowercase Git commit")
+    if legacy is not None and source is not None and legacy != source:
+        raise Scene0061FormalBaseError(
+            "legacy code_commit and source_code_commit disagree"
+        )
+    source = source if source is not None else legacy
+    if source is not None:
+        identity["source_code_commit"] = source
+    else:
+        identity.pop("source_code_commit", None)
+    identity["code_identity_semantics"] = (
+        "source_code_commit_is_config_lineage;"
+        "execution_code_commit_must_be_bound_by_live_tick"
+    )
+    return {
+        "source_code_commit": source,
+        "source_execution_code_commit": inherited_execution,
+    }
 
 
 def _matrix_contract(matrix: Mapping[str, Any]) -> tuple[Mapping[str, Any], dict[str, str]]:
@@ -247,6 +292,7 @@ def derive_formal_base(
         "immutable_matrix_sha256": matrix["immutable_matrix_sha256"],
     })
     nested = dict(experiment.get("identity") or {})
+    source_code_identity = _normalize_source_code_identity(nested)
     nested.update({name: experiment[name] for name in ("artifact_sha256", "scene_package_sha256", "scenario_ir_sha256", "immutable_matrix_sha256")})
     experiment["identity"] = nested
     result["experiment"] = experiment
@@ -265,6 +311,7 @@ def derive_formal_base(
         "formal_matrix": dict(matrix_identity),
         "immutable_inputs": records,
         "runtime_execution_inputs": execution_records,
+        "source_code_identity": source_code_identity,
         "physical_evidence_status": "pending_new_formal_identity_live_tick",
         "prohibited": [
             "inherit_preformal_lidar_coordinate_evidence",
@@ -338,11 +385,54 @@ def _validate_formal_evidence(
         raise Scene0061FormalBaseError("LiDAR evidence lacks a passing production gate replay")
     provenance = evidence.get("live_tick_provenance")
     if not isinstance(provenance, Mapping) or provenance.get("schema_version") != (
-        "scene0061_lidar_live_tick_provenance.v1"
+        LIVE_TICK_PROVENANCE_SCHEMA
     ):
         raise Scene0061FormalBaseError("LiDAR evidence lacks live-tick provenance")
     if provenance.get("run_id") != experiment.get("run_id"):
         raise Scene0061FormalBaseError("LiDAR evidence run_id does not match formal base")
+    identity = experiment.get("identity")
+    if not isinstance(identity, Mapping) or "code_commit" in identity or (
+        "execution_code_commit" in identity
+    ):
+        raise Scene0061FormalBaseError(
+            "formal base code identity is ambiguous; derive a new formal config"
+        )
+    execution_commit = provenance.get("execution_code_commit")
+    if not isinstance(execution_commit, str) or _GIT_COMMIT.fullmatch(execution_commit) is None:
+        raise Scene0061FormalBaseError(
+            "LiDAR evidence execution_code_commit is invalid"
+        )
+    environment = _validate_bound_file_identity(
+        provenance.get("runtime_environment"), "runtime environment"
+    )
+    if provenance.get("runtime_environment", {}).get("status") != "passed":
+        raise Scene0061FormalBaseError(
+            "LiDAR evidence runtime environment is not passed"
+        )
+    if provenance.get("runtime_environment", {}).get("execution_code_commit") != execution_commit:
+        raise Scene0061FormalBaseError(
+            "LiDAR evidence runtime environment execution commit does not match"
+        )
+    try:
+        environment_payload = strict_json_loads(
+            Path(environment["path"]).read_text(encoding="utf-8")
+        )
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
+        raise Scene0061FormalBaseError(
+            f"cannot read strict runtime environment: {exc}"
+        ) from exc
+    if not isinstance(environment_payload, Mapping):
+        raise Scene0061FormalBaseError("runtime environment must be an object")
+    if (
+        environment_payload.get("schema_version") != LIVE_TICK_ENVIRONMENT_SCHEMA
+        or environment_payload.get("status") != "passed"
+        or environment_payload.get("run_id") != provenance.get("run_id")
+        or environment_payload.get("execution_code_commit") != execution_commit
+        or environment_payload.get("git_commit") != execution_commit
+    ):
+        raise Scene0061FormalBaseError(
+            "runtime environment does not match passed live-tick execution identity"
+        )
     selected = _validate_bound_file_identity(
         provenance.get("selected_config"), "selected config"
     )
@@ -378,6 +468,21 @@ def _validate_formal_evidence(
         raise Scene0061FormalBaseError("LiDAR evidence runtime config is not from the same output directory")
     if validation["path"] != str((output_root / "live_tick_validation.json").resolve()):
         raise Scene0061FormalBaseError("LiDAR evidence validation is not from the same output directory")
+    if environment["path"] != str((output_root / "runtime_environment.json").resolve()):
+        raise Scene0061FormalBaseError("LiDAR evidence runtime environment is not from the same output directory")
+    for name, expected_identity in (
+        ("config", selected),
+        ("runtime_config", snapshot),
+        ("opendrive", opendrive),
+    ):
+        actual_identity = environment_payload.get(name)
+        if not isinstance(actual_identity, Mapping) or any(
+            actual_identity.get(field) != expected_identity.get(field)
+            for field in ("path", "sha256", "byte_count")
+        ):
+            raise Scene0061FormalBaseError(
+                f"runtime environment {name} does not match LiDAR evidence"
+            )
     rows = derivation.get("runtime_execution_inputs")
     declared_opendrive = [
         row for row in rows or []
