@@ -83,7 +83,7 @@ class Scene0061TransFuserPPRemoteTests(unittest.TestCase):
             prepare_scene0061_transfuserpp_remote_run,
         )
 
-        run, runtime, bundle = prepare_scene0061_transfuserpp_remote_run(
+        run, runtime, bundle, _frozen = prepare_scene0061_transfuserpp_remote_run(
             _base(),
             {
                 "repo_path": "/opt/algorithm/carla_garage",

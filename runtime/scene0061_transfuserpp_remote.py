@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import math
 import re
 from copy import deepcopy
@@ -34,6 +37,57 @@ class Scene0061TransFuserPPRemoteError(ValueError):
     """Raised when a remote run bundle would rely on an unverified binding."""
 
 
+def freeze_actor_binding_set_for_case(
+    binding_set: Mapping[str, Any], case_id: str
+) -> dict[str, Any]:
+    """Freeze an actor binding-set file to a focused case's control modes.
+
+    ``build_scene0061_variant`` freezes the per-actor binding blocks embedded
+    in the run config, but the sidecar binding-set FILE the NuRec handler
+    cross-checks against kept its interactive defaults — the first live
+    S-case run failed on exactly that contract mismatch. The frozen file must
+    agree with the embedded contract: replay actors render at scenario-IR
+    poses (source_track_frame), scripted actors at CARLA runtime poses.
+    """
+
+    if case_id not in CASE_ACTOR_CONTROL_MODES:
+        raise Scene0061TransFuserPPRemoteError(f"unsupported focused case: {case_id}")
+    expected_modes = CASE_ACTOR_CONTROL_MODES[case_id]
+    frozen = deepcopy(dict(binding_set))
+    bindings = frozen.get("bindings")
+    if not isinstance(bindings, list) or not bindings:
+        raise Scene0061TransFuserPPRemoteError("actor binding set has no bindings")
+    interactive_count = 0
+    for item in bindings:
+        track_id = str(item.get("source_track_id") or item.get("actor_id") or "")
+        if track_id not in expected_modes:
+            raise Scene0061TransFuserPPRemoteError(
+                f"binding set track is not part of the focused case: {track_id}"
+            )
+        mode = expected_modes[track_id]
+        control = dict(item.get("control") or {})
+        control["mode"] = mode
+        control["ego_responsive"] = mode == "scripted"
+        item["control"] = control
+        sync = dict(item.get("sensor_sync") or {})
+        if mode == "scripted":
+            interactive_count += 1
+            sync["pose_source"] = "carla_runtime_actor_pose"
+            sync["pose_reference"] = (
+                "carla_bounding_box_bottom"
+                if str(item.get("actor_type")) == "pedestrian"
+                else "carla_bounding_box_center"
+            )
+        else:
+            sync["pose_source"] = "scenario_ir_reference_trajectory"
+            sync["pose_reference"] = "source_track_frame"
+        item["sensor_sync"] = sync
+    summary = dict(frozen.get("summary") or {})
+    summary["interactive_count"] = interactive_count
+    frozen["summary"] = summary
+    return frozen
+
+
 def prepare_scene0061_transfuserpp_remote_run(
     base_run_config: Mapping[str, Any],
     runtime_template: Mapping[str, Any],
@@ -43,7 +97,9 @@ def prepare_scene0061_transfuserpp_remote_run(
     seed: int,
     event_timestamp_sec: float | None,
     container_payload_root: str = "/sim-data",
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    base_actor_bindings: Mapping[str, Any] | None = None,
+    actor_bindings_out_path: str | None = None,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any] | None]:
     frozen_matrix = deepcopy(dict(matrix))
     validate_scene0061_counterfactual_matrix(frozen_matrix)
     if case_id not in SUPPORTED_CASES:
@@ -84,6 +140,29 @@ def prepare_scene0061_transfuserpp_remote_run(
         event_timestamp_sec=event_timestamp_sec,
     )
     _validate_actor_control_contract(variant, case_id, expected_case_mode)
+    frozen_actor_bindings: dict[str, Any] | None = None
+    if base_actor_bindings is not None:
+        if not actor_bindings_out_path:
+            raise Scene0061TransFuserPPRemoteError(
+                "freezing the actor binding set requires actor_bindings_out_path"
+            )
+        frozen = freeze_actor_binding_set_for_case(base_actor_bindings, case_id)
+        # The runtime handler re-hashes the binding-set FILE BYTES
+        # (nurec_260_client), so hash the exact serialization the caller
+        # must write to actor_bindings_out_path.
+        frozen_bytes = (
+            json.dumps(frozen, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        ).encode("utf-8")
+        frozen_actor_bindings = {
+            "binding_set": frozen,
+            "file_bytes_b64": base64.b64encode(frozen_bytes).decode("ascii"),
+            "file_sha256": hashlib.sha256(frozen_bytes).hexdigest(),
+            "path": str(actor_bindings_out_path),
+        }
+        variant_nurec = dict(variant.get("nurec_runtime") or {})
+        variant_nurec["actor_bindings"] = str(actor_bindings_out_path)
+        variant_nurec["actor_bindings_sha256"] = frozen_actor_bindings["file_sha256"]
+        variant["nurec_runtime"] = variant_nurec
     event_evidence = variant.get("counterfactual_event_evidence") or {}
     if (
         event_evidence.get("case_id") != case_id
@@ -269,7 +348,7 @@ def prepare_scene0061_transfuserpp_remote_run(
             "multimodal_closed_loop_passed",
         ],
     }
-    return variant, runtime_config, bundle
+    return variant, runtime_config, bundle, frozen_actor_bindings
 
 
 def _validate_formal_base_identity(
