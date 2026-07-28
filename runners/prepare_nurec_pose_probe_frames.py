@@ -48,12 +48,17 @@ def prepare_probe_frames(
     render_width: int = 400,
     render_height: int = 225,
     delta_m: float = 1.0,
+    moved_target_distance_m: float | None = None,
     runtime_scene_start_us: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     if actor_type not in {"vehicle", "pedestrian", "two_wheeler", "object"}:
         raise ValueError(f"unsupported actor_type: {actor_type}")
     if not math.isfinite(delta_m) or delta_m < 0.05:
         raise ValueError("delta_m must be finite and at least 0.05")
+    if moved_target_distance_m is not None and (
+        not math.isfinite(moved_target_distance_m) or moved_target_distance_m < 0.05
+    ):
+        raise ValueError("moved_target_distance_m must be finite and at least 0.05")
     if render_width < 1 or render_height < 1:
         raise ValueError("render dimensions must be positive")
 
@@ -170,7 +175,13 @@ def prepare_probe_frames(
         "scene_id": str(scene["token"]),
         "frame_id": sample_index,
         "simulation_time_sec": simulation_time_sec,
-        "pose_interval_sec": {"start": simulation_time_sec, "end": simulation_time_sec},
+        # NuRec 26.04 rejects a zero-width logical transaction. The sampled
+        # poses remain instantaneous and identical at both endpoints; only the
+        # enclosing render interval is the runtime's standard 50 ms tick.
+        "pose_interval_sec": {
+            "start": max(0.0, simulation_time_sec - 0.05),
+            "end": simulation_time_sec,
+        },
         "coordinate_frame": {
             "input": "scene_local_ego_start",
             "render": "nuscenes_global",
@@ -192,8 +203,16 @@ def prepare_probe_frames(
     validate_nurec_multimodal_frame(baseline)
 
     moved = deepcopy(baseline)
+    moved_position = _moved_probe_position(
+        actor_pose["position_m"],
+        lidar_evidence["global_sensor_pose"]["position_m"],
+        delta_m=delta_m,
+        target_distance_m=moved_target_distance_m,
+    )
     for endpoint in ("start", "end"):
-        moved["shared_dynamic_objects"][0]["pose_pair"][endpoint]["position_m"]["x"] += delta_m
+        moved["shared_dynamic_objects"][0]["pose_pair"][endpoint]["position_m"] = dict(
+            moved_position
+        )
     moved_digest = _digest(moved["shared_dynamic_objects"])
     moved["shared_dynamic_object_sha256"] = moved_digest
     for modality in ("rgb", "lidar"):
@@ -217,10 +236,50 @@ def prepare_probe_frames(
         "actor_ego_distance_m": _actor_ego_distance(
             selected, sample, lidar_channel, sample_data, ego_poses, sample_channels
         ),
-        "pose_delta_global_x_m": delta_m,
+        "moved_pose_strategy": (
+            "same_bearing_to_lidar_target_distance"
+            if moved_target_distance_m is not None
+            else "global_x_delta"
+        ),
+        "moved_target_distance_m": moved_target_distance_m,
+        "pose_delta_global_x_m": (
+            float(moved_position["x"]) - float(actor_pose["position_m"]["x"])
+        ),
+        "pose_delta_m": math.sqrt(
+            sum(
+                (float(moved_position[axis]) - float(actor_pose["position_m"][axis])) ** 2
+                for axis in ("x", "y", "z")
+            )
+        ),
         "calibrations": calibration_evidence,
     }
     return baseline, moved, context
+
+
+def _moved_probe_position(
+    actor_position: dict[str, Any],
+    lidar_position: dict[str, Any],
+    *,
+    delta_m: float,
+    target_distance_m: float | None,
+) -> dict[str, float]:
+    """Return the AB pose, optionally bringing it into a LiDAR-visible range."""
+
+    original = {axis: float(actor_position[axis]) for axis in ("x", "y", "z")}
+    if target_distance_m is None:
+        return {**original, "x": original["x"] + float(delta_m)}
+    sensor_x = float(lidar_position["x"])
+    sensor_y = float(lidar_position["y"])
+    dx = original["x"] - sensor_x
+    dy = original["y"] - sensor_y
+    norm = math.hypot(dx, dy)
+    if norm < 1e-6:
+        dx, dy, norm = 1.0, 0.0, 1.0
+    return {
+        "x": sensor_x + dx / norm * float(target_distance_m),
+        "y": sensor_y + dy / norm * float(target_distance_m),
+        "z": original["z"],
+    }
 
 
 def _sensor_request(
@@ -432,6 +491,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--render-height", type=int, default=225)
     parser.add_argument("--delta-m", type=float, default=1.0)
     parser.add_argument(
+        "--moved-target-distance-m",
+        type=float,
+        help="Move B to this same-bearing distance from the recorded LiDAR sensor.",
+    )
+    parser.add_argument(
         "--runtime-scene-start-us",
         type=int,
         help="Measured NRE frame-start timestamp; defaults to the first nuScenes sample timestamp.",
@@ -456,6 +520,7 @@ def main(argv: list[str] | None = None) -> int:
             render_width=args.render_width,
             render_height=args.render_height,
             delta_m=args.delta_m,
+            moved_target_distance_m=args.moved_target_distance_m,
             runtime_scene_start_us=args.runtime_scene_start_us,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:

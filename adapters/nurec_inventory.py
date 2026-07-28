@@ -12,6 +12,122 @@ class NuRecInventoryError(ValueError):
     """Raised when runtime track discovery/probe evidence is malformed."""
 
 
+def audit_registry_source_content(
+    registry: Mapping[str, Any],
+    inventory: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Join the full object registry to loaded NuRec RGB/LiDAR probe evidence.
+
+    Missing or failed probes are retained as explicit failures.  In particular,
+    an object absent from the loaded artifact is not treated as background
+    geometry merely because CARLA has a physical actor for it.
+    """
+
+    if registry.get("schema_version") != "scene_object_registry.v1":
+        raise NuRecInventoryError("registry must use scene_object_registry.v1")
+    if inventory.get("schema_version") != "nurec_runtime_track_inventory.v1":
+        raise NuRecInventoryError(
+            "inventory must use nurec_runtime_track_inventory.v1"
+        )
+    scene_id = str(registry.get("scene_id") or "")
+    if not scene_id:
+        raise NuRecInventoryError("registry scene_id is required")
+    records = registry.get("records")
+    tracks = inventory.get("tracks")
+    if not isinstance(records, list) or not isinstance(tracks, list):
+        raise NuRecInventoryError("registry.records and inventory.tracks must be lists")
+    by_track: dict[str, Mapping[str, Any]] = {}
+    for track in tracks:
+        if not isinstance(track, Mapping):
+            raise NuRecInventoryError("inventory tracks must be objects")
+        track_id = str(track.get("track_id") or "")
+        if not track_id or track_id in by_track:
+            raise NuRecInventoryError("inventory track IDs must be unique and non-empty")
+        by_track[track_id] = track
+
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise NuRecInventoryError("registry records must be objects")
+        object_id = str(record.get("object_id") or "")
+        if not object_id:
+            raise NuRecInventoryError("registry object_id is required")
+        if record.get("role") == "road_boundary":
+            rows.append(
+                {
+                    "object_id": object_id,
+                    "role": "road_boundary",
+                    "status": "not_applicable",
+                    "issues": [],
+                }
+            )
+            continue
+        nurec = record.get("nurec")
+        track_id = str(nurec.get("track_id") or "") if isinstance(nurec, Mapping) else ""
+        if record.get("role") == "static_obstacle" or not track_id:
+            rows.append(
+                {
+                    "object_id": object_id,
+                    "role": str(record.get("role") or ""),
+                    "status": "unverified",
+                    "issues": ["static_source_content_evidence_missing"],
+                }
+            )
+            continue
+        track = by_track.get(track_id)
+        if track is None:
+            rows.append(
+                {
+                    "object_id": object_id,
+                    "track_id": track_id,
+                    "role": str(record.get("role") or ""),
+                    "status": "missing_from_artifact",
+                    "issues": ["track_missing_from_loaded_nurec_artifact"],
+                }
+            )
+            continue
+        issues = [str(issue) for issue in (track.get("issues") or [])]
+        verified = track.get("dynamic_object_pose_verified") is True and not issues
+        rows.append(
+            {
+                "object_id": object_id,
+                "track_id": track_id,
+                "role": str(record.get("role") or ""),
+                "status": "verified" if verified else "unverified",
+                "issues": issues or ([] if verified else ["dynamic_multimodal_probe_failed"]),
+            }
+        )
+
+    required = [row for row in rows if row["status"] != "not_applicable"]
+    failed = [row for row in required if row["status"] != "verified"]
+    return {
+        "schema_version": "nurec_source_content_audit.v1",
+        "scene_id": scene_id,
+        "registry_schema_version": registry.get("schema_version"),
+        "inventory_schema_version": inventory.get("schema_version"),
+        "records": rows,
+        "summary": {
+            "registry_required_count": len(required),
+            "verified_count": sum(row["status"] == "verified" for row in required),
+            "unverified_count": sum(row["status"] == "unverified" for row in required),
+            "missing_from_artifact_count": sum(
+                row["status"] == "missing_from_artifact" for row in required
+            ),
+            "not_applicable_count": sum(row["status"] == "not_applicable" for row in rows),
+        },
+        "issues": [
+            {
+                "object_id": row["object_id"],
+                "track_id": row.get("track_id"),
+                "status": row["status"],
+                "issues": row["issues"],
+            }
+            for row in failed
+        ],
+        "status": "passed" if not failed else "failed",
+    }
+
+
 _TRACK_TOKEN = re.compile(r"^[0-9a-f]{32}$")
 
 

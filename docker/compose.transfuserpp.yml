@@ -21,6 +21,11 @@ services:
       FASTDDS_BUILTIN_TRANSPORTS: "${FASTDDS_BUILTIN_TRANSPORTS:-UDPv4}"
       CONTROL_TOPIC: "${CONTROL_TOPIC:-/carla/ego_vehicle/vehicle_control_cmd}"
       OBSERVATION_TOPIC: "${OBSERVATION_TOPIC:-/closed_loop/ego/observation}"
+      # timm resolves the ImageNet backbone through huggingface_hub at model
+      # construction; hosts without direct HF reach set a mirror endpoint and
+      # a persistent cache under the sim-data mount.
+      HF_ENDPOINT: "${HF_ENDPOINT:-}"
+      HF_HOME: "${HF_HOME_CONTAINER:-/sim-data/hf_home}"
     volumes:
       - "${SIM_DATA_HOST_PATH:?Set SIM_DATA_HOST_PATH}:/sim-data"
       - "${TFPP_REPO_HOST_PATH:?Set TFPP_REPO_HOST_PATH}:/opt/algorithm/carla_garage:ro"

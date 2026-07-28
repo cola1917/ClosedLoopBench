@@ -3,9 +3,11 @@ from __future__ import annotations
 import importlib
 import hashlib
 import json
+import math
 import re
 import struct
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -52,6 +54,9 @@ class NuRec260Client:
         native_scan_manifest: Mapping[str, Any] | None = None,
         native_scan_manifest_sha256: str | None = None,
         native_scan_max_midpoint_error_us: int = 25_000,
+        dynamic_object_render_mode: str = "nre_dynamic_override",
+        nre_from_log_transform: list[float] | None = None,
+        lidar_instant_sampling: bool = False,
     ) -> None:
         if not target or not runtime_scene_id:
             raise NuRecMultimodalError("NRE target and runtime_scene_id are required")
@@ -110,11 +115,97 @@ class NuRec260Client:
             scene_start_us=self.scene_start_us,
             max_midpoint_error_us=native_scan_max_midpoint_error_us,
         )
+        if dynamic_object_render_mode not in {
+            "nre_dynamic_override",
+            "source_replay_embedded",
+        }:
+            raise NuRecMultimodalError(
+                "unsupported NRE dynamic-object render mode: "
+                f"{dynamic_object_render_mode!r}"
+            )
+        self.dynamic_object_render_mode = dynamic_object_render_mode
+        self.lidar_instant_sampling = bool(lidar_instant_sampling)
+        self._nre_from_log_transform = _validated_rigid_transform(
+            nre_from_log_transform or _identity_transform(),
+            "nurec_runtime.nre_from_log_transform",
+        )
         self._active_temporal_alignment: dict[str, Any] | None = None
+        # Per-frame sensor request fan-out. 1 keeps the historical serial
+        # behaviour; the closed-loop runners raise it so the 6 RGB + LiDAR
+        # requests overlap instead of paying every RPC round-trip in sequence.
+        self.concurrency: int = 1
+        # Per-request retry budget for transient RPC failures on long runs.
+        self.max_attempts: int = 1
+        # Sample RGB renders at the logical window midpoint (+1us) instead of
+        # integrating the whole tick window across the temporal Gaussian
+        # field. Matches NVIDIA's replay integration; the wide-window path is
+        # kept only for reproducing historical evidence.
+        self.rgb_instant_sampling: bool = True
+        # Fail-closed on native-scan alignment by default (formal one-tick
+        # evidence semantics). Closed-loop runs that legitimately outlive the
+        # recorded scan coverage set this False: frames beyond coverage render
+        # at their logical window and the evidence records
+        # status=out_of_native_scan_range instead of killing the drive.
+        self.native_scan_alignment_required: bool = True
+        self._grpc_options = [
+            ("grpc.max_send_message_length", int(max_message_bytes)),
+            ("grpc.max_receive_message_length", int(max_message_bytes)),
+        ]
+        self._extra_channels: list[Any] = []
+        self._render_stubs: list[Any] = [self.stub]
+        self._render_stub_lock = threading.Lock()
+        self._render_stub_index = 0
+
+    def add_render_targets(self, targets: list[str]) -> None:
+        """Fan render RPCs out across extra identical NRE service instances.
+
+        The NRE SensorsimService is stateless per request (every render call
+        carries scene_id, poses and the full dynamic-object set), so identical
+        instances loaded with the same artifact can serve requests
+        interchangeably. Round-robin assignment spreads a frame's parallel
+        requests across single-queue server instances.
+        """
+
+        grpc = importlib.import_module("grpc")
+        stub_module = importlib.import_module("nre.grpc.protos.sensorsim_pb2_grpc")
+        for target in targets:
+            value = str(target).strip()
+            if not value:
+                continue
+            channel = grpc.insecure_channel(value, options=self._grpc_options)
+            self._extra_channels.append(channel)
+            self._render_stubs.append(stub_module.SensorsimServiceStub(channel))
+
+    def _next_render_stub(self) -> Any:
+        with self._render_stub_lock:
+            stub = self._render_stubs[self._render_stub_index % len(self._render_stubs)]
+            self._render_stub_index += 1
+            return stub
 
     def close(self) -> None:
-        if self._channel is not None and hasattr(self._channel, "close"):
-            self._channel.close()
+        # Some grpcio builds can block indefinitely in Channel.close() after
+        # a completed concurrent render fan-out. The caller must still be
+        # able to persist CARLA/NuRec evidence and exit; process teardown will
+        # reclaim a channel whose best-effort close remains in flight.
+        for channel in [self._channel, *self._extra_channels]:
+            if channel is not None and hasattr(channel, "close"):
+                self._close_channel_bounded(channel)
+
+    @staticmethod
+    def _close_channel_bounded(channel: Any, timeout_sec: float = 2.0) -> None:
+        error: list[BaseException] = []
+
+        def close_channel() -> None:
+            try:
+                channel.close()
+            except BaseException as exc:  # preserve close errors when immediate
+                error.append(exc)
+
+        worker = threading.Thread(target=close_channel, daemon=True)
+        worker.start()
+        worker.join(timeout=max(0.0, float(timeout_sec)))
+        if error:
+            raise error[0]
 
     def dispatch_frame(self, frame: Mapping[str, Any]) -> dict[str, Any]:
         if self._active_temporal_alignment is not None:
@@ -130,6 +221,8 @@ class NuRec260Client:
                 render_lidar=self.render_lidar,
                 response_bytes=self.response_bytes,
                 response_inspector=self.inspect_response,
+                concurrency=int(getattr(self, "concurrency", 1) or 1),
+                max_attempts=int(getattr(self, "max_attempts", 1) or 1),
             )
         finally:
             self._active_temporal_alignment = None
@@ -167,13 +260,33 @@ class NuRec260Client:
         midpoint_error = abs((wire_start + wire_end) // 2 - logical_midpoint)
         max_error = config["max_midpoint_error_us"]
         if midpoint_error > max_error:
-            raise NuRecMultimodalError(
-                "nearest native LiDAR scan exceeds midpoint threshold: "
-                f"error_us={midpoint_error}, max_us={max_error}"
-            )
+            if self.native_scan_alignment_required:
+                raise NuRecMultimodalError(
+                    "nearest native LiDAR scan exceeds midpoint threshold: "
+                    f"error_us={midpoint_error}, max_us={max_error}"
+                )
+            # The drive has legitimately outlived the recorded scan coverage
+            # (e.g. the ego finishes the route after the source scene ends).
+            # Render at the logical window and record the honest status
+            # instead of aborting the whole closed loop.
+            return {
+                "policy": "nearest_native_lidar_scan_midpoint",
+                "source": "hashed_native_scan_manifest",
+                "status": "out_of_native_scan_range",
+                "manifest_sha256": config["manifest_sha256"],
+                "artifact_sha256": config["artifact_sha256"],
+                "native_scan_index": index,
+                "logical_start_us": logical_start,
+                "logical_end_us": logical_end,
+                "wire_start_us": logical_start,
+                "wire_end_us": max(logical_start + 1, logical_end),
+                "midpoint_error_us": midpoint_error,
+                "max_midpoint_error_us": max_error,
+            }
         return {
             "policy": "nearest_native_lidar_scan_midpoint",
             "source": "hashed_native_scan_manifest",
+            "status": "aligned",
             "manifest_sha256": config["manifest_sha256"],
             "artifact_sha256": config["artifact_sha256"],
             "native_scan_index": index,
@@ -265,15 +378,28 @@ class NuRec260Client:
         # it to the percent value consumed by this deployed service boundary.
         wire_image_quality = image_quality * 100.0
         frame_start_us, frame_end_us = self._time_window_us(payload)
+        if self.rgb_instant_sampling:
+            # The 40k reconstruction is a TEMPORAL Gaussian field. Rendering
+            # with the full logical tick window (e.g. 50ms) integrates every
+            # dynamic Gaussian's motion across that window and produces the
+            # debris-cloud artifacts seen in r22/M2 frames. NVIDIA's own CARLA
+            # replay integration renders with frame_end_us = frame_start_us+1
+            # ("important that these are not identical"), i.e. an
+            # instantaneous sample. Keep the logical window for temporal
+            # alignment/evidence; sample the render at the window midpoint.
+            midpoint_us = (frame_start_us + frame_end_us) // 2
+            wire_start_us, wire_end_us = midpoint_us, midpoint_us + 1
+        else:
+            wire_start_us, wire_end_us = frame_start_us, frame_end_us
         request = self._pb.RGBRenderRequest(
             scene_id=self.runtime_scene_id,
             resolution_h=height,
             resolution_w=width,
             camera_intrinsics=camera_spec,
-            frame_start_us=frame_start_us,
-            frame_end_us=frame_end_us,
-            sensor_pose=self._pose_pair(sensor["pose_pair"]),
-            dynamic_objects=self._dynamic_objects(payload["dynamic_objects"]),
+            frame_start_us=wire_start_us,
+            frame_end_us=wire_end_us,
+            sensor_pose=self._wire_pose_pair(sensor["pose_pair"]),
+            dynamic_objects=self._render_dynamic_objects(payload),
             image_format=self._pb.JPEG,
             image_quality=wire_image_quality,
         )
@@ -288,6 +414,12 @@ class NuRec260Client:
                 "NRE 26.04 LiDAR supports only PANDAR128 or AT128"
             )
         frame_start_us, frame_end_us = self._time_window_us(payload)
+        if self.lidar_instant_sampling:
+            # A/B probe only.  Some temporal-field builds return a sparse or
+            # locally collapsed cloud for a full tick window; retain the
+            # declared logical window in evidence but request its midpoint.
+            midpoint_us = (frame_start_us + frame_end_us) // 2
+            frame_start_us, frame_end_us = midpoint_us, midpoint_us + 1
         request = self._pb.LidarRenderRequest(
             scene_id=self.runtime_scene_id,
             lidar_config=self._pb.LidarSpec(
@@ -295,16 +427,16 @@ class NuRec260Client:
             ),
             frame_start_us=frame_start_us,
             frame_end_us=frame_end_us,
-            sensor_pose=self._pose_pair(sensor["pose_pair"]),
-            dynamic_objects=self._dynamic_objects(payload["dynamic_objects"]),
+            sensor_pose=self._wire_pose_pair(sensor["pose_pair"]),
+            dynamic_objects=self._render_dynamic_objects(payload),
         )
         return self._encoded(payload, request)
 
     def render_rgb(self, request: Any) -> Any:
-        return self.stub.render_rgb(request, timeout=self.timeout_sec)
+        return self._next_render_stub().render_rgb(request, timeout=self.timeout_sec)
 
     def render_lidar(self, request: Any) -> Any:
-        return self.stub.render_lidar(request, timeout=self.timeout_sec)
+        return self._next_render_stub().render_lidar(request, timeout=self.timeout_sec)
 
     @staticmethod
     def response_bytes(response: Any) -> bytes:
@@ -397,10 +529,17 @@ class NuRec260Client:
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{sensor_id}{suffix}"
         if target.exists():
-            raise NuRecMultimodalError(
-                f"refusing to overwrite materialized NuRec payload: {target}"
-            )
-        target.write_bytes(data)
+            # Idempotent retry support: a prior attempt of the SAME request may
+            # have materialized this payload before failing later in the
+            # pipeline. Re-materializing identical bytes is safe; anything else
+            # is still a hard refusal (tamper/overwrite protection unchanged).
+            existing = target.read_bytes()
+            if existing != data:
+                raise NuRecMultimodalError(
+                    f"refusing to overwrite materialized NuRec payload: {target}"
+                )
+        else:
+            target.write_bytes(data)
         result = {
             "path": str(target),
             "sha256": hashlib.sha256(data).hexdigest(),
@@ -455,18 +594,45 @@ class NuRec260Client:
         return [
             self._pb.DynamicObject(
                 track_id=str(item["track_id"]),
-                pose_pair=self._pose_pair(item["pose_pair"]),
+                pose_pair=self._wire_pose_pair(item["pose_pair"]),
             )
             for item in objects
         ]
 
-    @staticmethod
-    def _encoded(payload: Mapping[str, Any], request: Any) -> dict[str, Any]:
+    def _wire_pose_pair(self, pair: Mapping[str, Any]) -> Any:
+        return self._pose_pair(
+            _transform_render_pose_pair(pair, self._nre_from_log_transform)
+        )
+
+    def _render_dynamic_objects(self, payload: Mapping[str, Any]) -> list[Any]:
+        if self._render_dynamic_object_mode(payload) == "source_replay_embedded":
+            return []
+        return self._dynamic_objects(payload["dynamic_objects"])
+
+    def _render_dynamic_object_mode(self, payload: Mapping[str, Any]) -> str:
+        """Return the actual per-modality representation sent to NRE.
+
+        S0 RGB originates from a temporal reconstruction which already contains
+        its source actors, so replaying them as RGB overrides creates duplicate
+        Gaussian geometry. NRE 26.04 LiDAR, however, returns an empty response
+        without the dynamic-object request payload. Retain that payload only
+        for LiDAR and record the difference in each evidence record.
+        """
+        if (
+            self.dynamic_object_render_mode == "source_replay_embedded"
+            and payload["modality"] == "rgb"
+        ):
+            return "source_replay_embedded"
+        return "nre_dynamic_override"
+
+    def _encoded(self, payload: Mapping[str, Any], request: Any) -> dict[str, Any]:
         return {
             "wire_request": request,
             "frame_id": payload["frame_id"],
             "modality": payload["modality"],
             "dynamic_object_sha256": payload["dynamic_object_sha256"],
+            "render_dynamic_object_mode": self._render_dynamic_object_mode(payload),
+            "render_dynamic_object_count": len(request.dynamic_objects),
         }
 
 
@@ -508,18 +674,47 @@ def build_nurec_260_client(
         native_scan_manifest=manifest,
         native_scan_manifest_sha256=manifest_sha256,
         native_scan_max_midpoint_error_us=max_midpoint_error_us,
+        dynamic_object_render_mode=str(
+            config.get("dynamic_object_render_mode") or "nre_dynamic_override"
+        ),
+        nre_from_log_transform=(
+            list(config["nre_from_log_transform"])
+            if isinstance(config.get("nre_from_log_transform"), list)
+            else None
+        ),
+        lidar_instant_sampling=bool(config.get("lidar_instant_sampling", False)),
     )
 
 
 def build_nurec_260_handler(
-    run_config: Mapping[str, Any], attempt_dir: Path
+    run_config: Mapping[str, Any],
+    attempt_dir: Path,
+    *,
+    concurrency: int = 1,
+    extra_targets: list[str] | None = None,
+    max_attempts: int = 1,
+    native_scan_alignment_required: bool = True,
 ) -> Any:
     """Triplicate sensor-handler factory configured by ``nurec_runtime``."""
 
     config = run_config.get("nurec_runtime")
     if not isinstance(config, Mapping):
         raise NuRecMultimodalError("run config requires nurec_runtime")
+    render_mode = str(
+        config.get("dynamic_object_render_mode") or "nre_dynamic_override"
+    )
+    if render_mode == "source_replay_embedded":
+        experiment = run_config.get("experiment") or {}
+        if experiment.get("case_id") != "S0_original_replay":
+            raise NuRecMultimodalError(
+                "source_replay_embedded requires experiment.case_id=S0_original_replay"
+            )
     client = build_nurec_260_client(run_config)
+    client.concurrency = max(1, int(concurrency))
+    client.max_attempts = max(1, int(max_attempts))
+    client.native_scan_alignment_required = bool(native_scan_alignment_required)
+    if extra_targets:
+        client.add_render_targets(list(extra_targets))
     client._payload_output_dir = Path(attempt_dir) / "algorithm_sensor_payloads"
     # The sidecar mounts the triplicate output root once at /sim-data. Keep
     # each attempt directory in the relative path so repeated CARLA frame IDs
@@ -701,6 +896,83 @@ def _validate_native_scan_manifest(
 
 def _is_sha256(value: str) -> bool:
     return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+def _identity_transform() -> list[float]:
+    return [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+
+def _validated_rigid_transform(values: list[Any], label: str) -> list[float]:
+    if len(values) != 16:
+        raise NuRecMultimodalError(f"{label} must contain 16 values")
+    try:
+        matrix = [float(value) for value in values]
+    except (TypeError, ValueError) as exc:
+        raise NuRecMultimodalError(f"{label} must be numeric") from exc
+    if not all(math.isfinite(value) for value in matrix):
+        raise NuRecMultimodalError(f"{label} must be finite")
+    if any(abs(matrix[index] - expected) > 1e-6 for index, expected in zip((12, 13, 14, 15), (0.0, 0.0, 0.0, 1.0))):
+        raise NuRecMultimodalError(f"{label} must be a rigid homogeneous transform")
+    rotation = [[matrix[row * 4 + column] for column in range(3)] for row in range(3)]
+    for row in range(3):
+        for column in range(3):
+            dot = sum(rotation[row][index] * rotation[column][index] for index in range(3))
+            if abs(dot - (1.0 if row == column else 0.0)) > 1e-4:
+                raise NuRecMultimodalError(f"{label} rotation is not orthonormal")
+    return matrix
+
+
+def _transform_render_pose_pair(pair: Mapping[str, Any], transform: list[float]) -> dict[str, Any]:
+    return {
+        "start": _transform_render_pose(pair["start"], transform),
+        "end": _transform_render_pose(pair["end"], transform),
+    }
+
+
+def _transform_render_pose(pose: Mapping[str, Any], transform: list[float]) -> dict[str, Any]:
+    position = pose["position_m"]
+    orientation = pose["orientation_xyzw"]
+    quaternion = [float(orientation[name]) for name in ("x", "y", "z", "w")]
+    norm = math.sqrt(sum(value * value for value in quaternion))
+    if norm <= 1e-12 or not math.isfinite(norm):
+        raise NuRecMultimodalError("render pose quaternion is invalid")
+    x, y, z, w = (value / norm for value in quaternion)
+    pose_matrix = [
+        1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w), float(position["x"]),
+        2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w), float(position["y"]),
+        2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y), float(position["z"]),
+        0.0, 0.0, 0.0, 1.0,
+    ]
+    result = [
+        sum(transform[row * 4 + index] * pose_matrix[index * 4 + column] for index in range(4))
+        for row in range(4)
+        for column in range(4)
+    ]
+    rx, ry, rz, rw = _rotation_to_quaternion(result)
+    return {
+        "position_m": {"x": result[3], "y": result[7], "z": result[11]},
+        "orientation_xyzw": {"x": rx, "y": ry, "z": rz, "w": rw},
+    }
+
+
+def _rotation_to_quaternion(matrix: list[float]) -> tuple[float, float, float, float]:
+    trace = matrix[0] + matrix[5] + matrix[10]
+    if trace > 0.0:
+        scale = math.sqrt(trace + 1.0) * 2.0
+        return ((matrix[9] - matrix[6]) / scale, (matrix[2] - matrix[8]) / scale, (matrix[4] - matrix[1]) / scale, 0.25 * scale)
+    if matrix[0] > matrix[5] and matrix[0] > matrix[10]:
+        scale = math.sqrt(1.0 + matrix[0] - matrix[5] - matrix[10]) * 2.0
+        return (0.25 * scale, (matrix[1] + matrix[4]) / scale, (matrix[2] + matrix[8]) / scale, (matrix[9] - matrix[6]) / scale)
+    if matrix[5] > matrix[10]:
+        scale = math.sqrt(1.0 + matrix[5] - matrix[0] - matrix[10]) * 2.0
+        return ((matrix[1] + matrix[4]) / scale, 0.25 * scale, (matrix[6] + matrix[9]) / scale, (matrix[2] - matrix[8]) / scale)
+    scale = math.sqrt(1.0 + matrix[10] - matrix[0] - matrix[5]) * 2.0
+    return ((matrix[2] + matrix[8]) / scale, (matrix[6] + matrix[9]) / scale, 0.25 * scale, (matrix[4] - matrix[1]) / scale)
 
 
 def _pose_mapping(pose: Mapping[str, Any]) -> dict[str, Any]:

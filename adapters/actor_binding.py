@@ -187,6 +187,7 @@ def bind_carla_run_config(
         actor["binding"] = {
             "schema_version": "actor_runtime_binding.v1",
             "nurec_track_id": binding["nurec"]["track_id"],
+            "effective_control_mode": expected_closure,
             "sensor_pose_source": binding["sensor_sync"]["pose_source"],
             "sensor_pose_reference": binding["sensor_sync"]["pose_reference"],
             "required_modalities": list(binding["sensor_sync"]["required_modalities"]),

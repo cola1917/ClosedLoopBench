@@ -2,6 +2,8 @@ import hashlib
 import json
 import struct
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -181,10 +183,12 @@ class NuRec260ClientTests(unittest.TestCase):
 
         rgb = stub.calls[0][1]
         lidar = stub.calls[1][1]
-        self.assertEqual((rgb.frame_start_us, rgb.frame_end_us), (3_050_000, 3_100_000))
+        # RGB samples the temporal Gaussian field instantaneously at the
+        # logical-window midpoint (NVIDIA replay-integration semantics);
+        # LiDAR keeps the full scan window.
+        self.assertEqual((rgb.frame_start_us, rgb.frame_end_us), (3_075_000, 3_075_001))
         self.assertEqual(
-            (lidar.frame_start_us, lidar.frame_end_us),
-            (rgb.frame_start_us, rgb.frame_end_us),
+            (lidar.frame_start_us, lidar.frame_end_us), (3_050_000, 3_100_000)
         )
         self.assertEqual(rgb.scene_id, "scene-0061")
         self.assertEqual(lidar.scene_id, "scene-0061")
@@ -204,6 +208,34 @@ class NuRec260ClientTests(unittest.TestCase):
             ),
             (3_000_000, 3_000_001),
         )
+
+    def test_close_does_not_block_evidence_persistence_on_a_stuck_grpc_channel(self):
+        class BlockingChannel:
+            def __init__(self):
+                self.started = threading.Event()
+                self.release = threading.Event()
+
+            def close(self):
+                self.started.set()
+                self.release.wait()
+
+        client = self._client()
+        channel = BlockingChannel()
+        client._channel = channel
+        started = time.monotonic()
+        client.close()
+        self.assertLess(time.monotonic() - started, 2.5)
+        self.assertTrue(channel.started.is_set())
+        channel.release.set()
+
+    def test_lidar_instant_sampling_uses_midpoint_without_changing_rgb_contract(self):
+        stub = _Stub()
+        client = self._client(stub, lidar_instant_sampling=True)
+
+        client.dispatch_frame(_frame())
+
+        lidar = stub.calls[1][1]
+        self.assertEqual((lidar.frame_start_us, lidar.frame_end_us), (3_075_000, 3_075_001))
 
     def test_hashed_native_scan_alignment_is_shared_by_rgb_and_lidar(self):
         stub = _Stub()
@@ -229,12 +261,15 @@ class NuRec260ClientTests(unittest.TestCase):
         alignment = evidence["dispatch"]["temporal_alignment"]
         self.assertEqual(alignment["native_scan_index"], 0)
         self.assertEqual(alignment["midpoint_error_us"], 10_000)
-        self.assertTrue(
-            all(
-                (request.frame_start_us, request.frame_end_us)
-                == (3_040_000, 3_090_000)
-                for _, request, _ in stub.calls
-            )
+        rgb = stub.calls[0][1]
+        lidar = stub.calls[1][1]
+        # Both modalities share the hashed native-scan wire window; RGB then
+        # samples instantaneously at that window's midpoint.
+        self.assertEqual(
+            (lidar.frame_start_us, lidar.frame_end_us), (3_040_000, 3_090_000)
+        )
+        self.assertEqual(
+            (rgb.frame_start_us, rgb.frame_end_us), (3_065_000, 3_065_001)
         )
 
     def test_native_scan_alignment_fails_closed_above_threshold(self):

@@ -1,0 +1,25 @@
+{
+  "nurec_runtime": {
+    "python_api_path": "/home/cwadmin/sim-env/data/CARLA_0.9.16/PythonAPI/examples/nvidia/nurec",
+    "target": "127.0.0.1:46447",
+    "health_target": "127.0.0.1:46448",
+    "runtime_scene_id": "scene-0061",
+    "scene_start_us": 1532402927598150,
+    "timeout_sec": 120,
+    "artifact_source": "/home/cwadmin/workspace/NeuralSceneBridge/outputs/nurec_scene0061_m8_verified_track_smoke_attempt_006/G7bsCsL4RXNUhufRoK65XV/artifacts/last.usdz",
+    "artifact_sha256": "6145eb736ca6f4541419b3878480aefb29a403e5286010c7f09aa0d1554ad83a",
+    "nre_from_log_transform": [
+      -0.34555292628073736, -0.9383381109871731, -0.010712824456953518, 1250.201725985941,
+      0.9382579894742809, -0.3452803054762253, -0.021294502528291005, 21.828987803859093,
+      0.016282515975798058, -0.01740977079891561, 0.999715849406335, 13.86196794866898,
+      0.0, 0.0, 0.0, 1.0
+    ],
+    "nre_from_log_transform_identity": {
+      "schema_version": "nurec_artifact_coordinate_transform.v1",
+      "direction": "nre_render_from_log_world",
+      "source_member": "rig_trajectories.json:T_world_base_inverse",
+      "artifact_path": "/home/cwadmin/workspace/NeuralSceneBridge/outputs/nurec_scene0061_m8_verified_track_smoke_attempt_006/G7bsCsL4RXNUhufRoK65XV/artifacts/last.usdz",
+      "artifact_sha256": "6145eb736ca6f4541419b3878480aefb29a403e5286010c7f09aa0d1554ad83a"
+    }
+  }
+}

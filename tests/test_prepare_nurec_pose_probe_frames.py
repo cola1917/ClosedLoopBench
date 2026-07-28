@@ -103,6 +103,23 @@ class PrepareNuRecPoseProbeFramesTests(unittest.TestCase):
                 delta_m=0.01,
             )
 
+    def test_can_move_probe_target_to_declared_lidar_distance(self):
+        baseline, moved, context = prepare_probe_frames(
+            self.root,
+            version="v1.0-mini",
+            scene_name="scene-0061",
+            track_id=VEHICLE_TRACK,
+            actor_type="vehicle",
+            camera_channels=["CAM_FRONT"],
+            moved_target_distance_m=8.0,
+        )
+        baseline_position = baseline["shared_dynamic_objects"][0]["pose_pair"]["end"]["position_m"]
+        moved_position = moved["shared_dynamic_objects"][0]["pose_pair"]["end"]["position_m"]
+        self.assertEqual(context["moved_pose_strategy"], "same_bearing_to_lidar_target_distance")
+        self.assertAlmostEqual(context["moved_target_distance_m"], 8.0)
+        self.assertAlmostEqual(moved_position["x"], 18.0)
+        self.assertNotEqual(baseline_position, moved_position)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,7 +28,7 @@ def _source_config() -> dict:
 class DeriveScene0061LiDARAxisConfigTests(unittest.TestCase):
     def test_derives_validated_axis_contract_and_source_identity(self):
         from runners.derive_scene0061_lidar_axis_config import (
-            R18_RESPONSE_TO_SENSOR,
+            RAW_RESPONSE_TO_SENSOR,
             derive_lidar_axis_config_file,
         )
 
@@ -45,7 +45,7 @@ class DeriveScene0061LiDARAxisConfigTests(unittest.TestCase):
             self.assertEqual(derived["run_id"], "r18-source")
             self.assertNotIn("lidar_axis_normalization", _source_config()["nurec_runtime"])
             contract = derived["nurec_runtime"]["lidar_axis_normalization"]
-            self.assertEqual(contract["response_to_sensor"], R18_RESPONSE_TO_SENSOR)
+            self.assertEqual(contract["response_to_sensor"], RAW_RESPONSE_TO_SENSOR)
             self.assertEqual(contract["source_coordinate_frame"], "nre_26_04_lidar_sensor")
             self.assertEqual(contract["target_axis_convention"], "carla_sensor")
             self.assertEqual(len(contract["response_to_sensor_sha256"]), 64)
@@ -77,6 +77,38 @@ class DeriveScene0061LiDARAxisConfigTests(unittest.TestCase):
             derive_lidar_axis_config(
                 source, source_path=Path("r18.json"), source_sha256="a" * 64, source_byte_count=1
             )
+
+    def test_preserves_non_axis_parent_derivation(self):
+        from runners.derive_scene0061_lidar_axis_config import derive_lidar_axis_config
+
+        source = _source_config()
+        source["config_derivation"] = {"schema_version": "scene0061_m8_safety_config_derivation.v1"}
+        derived = derive_lidar_axis_config(
+            source, source_path=Path("m8.json"), source_sha256="a" * 64, source_byte_count=1
+        )
+        self.assertEqual(
+            derived["config_derivation"]["parent_config_derivation"], source["config_derivation"]
+        )
+
+    def test_explicitly_supersedes_an_existing_axis_contract_with_provenance(self):
+        from runners.derive_scene0061_lidar_axis_config import (
+            derive_lidar_axis_config,
+            lidar_axis_normalization_contract,
+        )
+
+        source = _source_config()
+        previous = lidar_axis_normalization_contract()
+        source["nurec_runtime"]["lidar_axis_normalization"] = previous
+        derived = derive_lidar_axis_config(
+            source,
+            source_path=Path("m8.json"),
+            source_sha256="a" * 64,
+            source_byte_count=1,
+            supersede_existing_axis=True,
+        )
+        provenance = derived["config_derivation"]
+        self.assertEqual(provenance["superseded_lidar_axis_normalization"], previous)
+        self.assertEqual(provenance["kind"], "supersede_invalid_nre_26_04_lidar_response_axis")
 
     def test_cli_writes_once_and_refuses_an_existing_output(self):
         from runners.derive_scene0061_lidar_axis_config import main
@@ -154,7 +186,7 @@ class DeriveScene0061LiDARAxisConfigTests(unittest.TestCase):
             )
             self.assertEqual(
                 snapshot["nurec_runtime"]["lidar_axis_normalization"]["response_to_sensor"],
-                [-0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
             )
 
 

@@ -101,6 +101,27 @@ class BoundCarla(FakeCarlaModule):
 
 
 class NuRecRunnerIntegrationTests(unittest.TestCase):
+    def test_m8_rejects_active_physical_actor_missing_from_nurec_bindings(self):
+        from runners.run_carla_basic_agent import _build_sensor_frame_context
+
+        plan = _plan()
+        plan["runtime"]["m8_safety_audit_required"] = True
+        with self.assertRaisesRegex(
+            RuntimeError, "active physical actors are absent from NuRec bindings: unbound"
+        ):
+            _build_sensor_frame_context(
+                plan,
+                frame_id=1,
+                tick_index=0,
+                simulation_time_sec=0.05,
+                scenario_time_sec=0.05,
+                interval_start_sec=0.0,
+                ego_pose={"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+                previous_ego_pose={"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+                actor_states={"unbound": {}},
+                previous_actor_poses={},
+            )
+
     def test_pedestrian_bottom_render_pose_is_forwarded_to_nurec_context(self):
         from runners.run_carla_basic_agent import _build_sensor_frame_context
 
