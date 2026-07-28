@@ -291,11 +291,13 @@ def _apply_source_dynamic_support(
                 f"M8 frame {frame_id} dynamic object {object_id} has invalid source LiDAR counts"
             )
         source_expected = exact_hits > 0
-        if source_expected and not bool(item.get("expected_lidar_support")):
-            raise LidarWorldSupportError(
-                f"M8 frame {frame_id} dynamic object {object_id} is source-observed but CARLA-occluded"
-            )
-        item["expected_lidar_support"] = bool(item["expected_lidar_support"]) and source_expected
+        carla_expected = bool(item["expected_lidar_support"])
+        source_carla_conflict = source_expected and not carla_expected
+        # Preserve source/CARLA contradictions in the immutable expectation
+        # row so the four-stream audit can report the exact failing object and
+        # tick. Aborting here would discard collision/lane/visibility evidence
+        # and turn a measured geometry failure into an unavailable metric.
+        item["expected_lidar_support"] = carla_expected and source_expected
         item["source"] = "carla_physical_box_occlusion_and_ncore_same_tick_dynamic.v1"
         item["source_lidar_observability"] = {
             "kind": "ncore_same_tick_dynamic_cuboid",
@@ -303,6 +305,8 @@ def _apply_source_dynamic_support(
             "annotation_status": source.get("annotation_status"),
             "exact_box_hit_points": exact_hits,
             "padded_box_hit_points": padded_hits,
+            "status": "source_observed_carla_occluded" if source_carla_conflict else "available",
+            "issues": ["source_observed_carla_occluded"] if source_carla_conflict else [],
         }
 
 

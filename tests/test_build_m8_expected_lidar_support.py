@@ -47,6 +47,62 @@ def test_source_backed_expectation_requires_same_tick_source_support():
     assert rows[0]["source_lidar_alignment"]["wire_end_us"] == 1_050
 
 
+def test_dynamic_source_carla_occlusion_is_retained_for_audit():
+    from runners.build_m8_expected_lidar_support import build_expected_lidar_support
+
+    identity = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    manifest_sha = "a" * 64
+    config = {
+        "nurec_runtime": {
+            "lidar_specs": [{"sensor_id": "lidar_top", "sensor_to_ego": identity}],
+            "native_scan_manifest": {"sha256": manifest_sha},
+        },
+        "actors": [
+            {"actor_id": "near", "source_track_id": "source-near"},
+            {"actor_id": "far", "source_track_id": "source-far"},
+        ],
+        "static_obstacles": [],
+    }
+    runtime = [{
+        "frame_id": 10,
+        "simulation_time_sec": 0.05,
+        "ego_state": {"pose": {"x": 0, "y": 0, "z": 0, "yaw": 0}},
+        "object_states": [
+            {"object_id": "near", "carla_runtime_actor_id": 4, "pose": {"x": 5, "y": 0, "z": 0, "yaw": 0}, "extent_m": {"x": 1, "y": 1, "z": 1}},
+            {"object_id": "far", "carla_runtime_actor_id": 5, "pose": {"x": 10, "y": 0, "z": 0, "yaw": 0}, "extent_m": {"x": 1, "y": 1, "z": 1}},
+        ],
+    }]
+    nurec = [{
+        "frame_id": 10,
+        "status": "passed",
+        "dispatch": {"temporal_alignment": {"status": "aligned", "manifest_sha256": manifest_sha, "wire_start_us": 1_000, "wire_end_us": 1_050, "native_scan_index": 0, "midpoint_error_us": 0, "max_midpoint_error_us": 30_000}},
+    }]
+    source = {
+        "schema_version": "ncore_dynamic_lidar_support_audit.v2",
+        "source_lidar_frames": [{
+            "source_lidar_frame_end_us": 1_050,
+            "track_support": [
+                {"track_id": "source-near", "annotation_status": "annotated_source_cuboid", "source_cuboid_available": True, "exact_box_hit_points": 1, "padded_box_hit_points": 1},
+                {"track_id": "source-far", "annotation_status": "annotated_source_cuboid", "source_cuboid_available": True, "exact_box_hit_points": 1, "padded_box_hit_points": 1},
+            ],
+        }],
+    }
+
+    rows = build_expected_lidar_support(
+        runtime,
+        config,
+        nurec_rows=nurec,
+        source_lidar_support=source,
+        source_lidar_support_sha256="b" * 64,
+    )
+
+    by_id = {item["object_id"]: item for item in rows[0]["expected_world_objects"]}
+    assert by_id["near"]["expected_lidar_support"] is True
+    assert by_id["far"]["expected_lidar_support"] is False
+    assert by_id["far"]["source_lidar_observability"]["status"] == "source_observed_carla_occluded"
+    assert by_id["far"]["source_lidar_observability"]["issues"] == ["source_observed_carla_occluded"]
+
+
 def test_static_source_unavailability_disables_only_lidar_expectation():
     from runners.build_m8_expected_lidar_support import build_expected_lidar_support
 
