@@ -170,17 +170,25 @@ def prepare_probe_frames(
     )
     calibration_evidence.append(lidar_evidence)
 
+    # The first source sample is at t=0. NuRec rejects a zero-width logical
+    # transaction, so retain its instantaneous source poses while enclosing
+    # that sample in the first runtime tick.
+    runtime_simulation_time_sec = (
+        simulation_time_sec if simulation_time_sec > 0.0 else 0.05
+    )
+    pose_interval_start_sec = max(0.0, runtime_simulation_time_sec - 0.05)
+
     baseline = {
         "schema_version": "nurec_multimodal_frame.v1",
         "scene_id": str(scene["token"]),
         "frame_id": sample_index,
-        "simulation_time_sec": simulation_time_sec,
-        # NuRec 26.04 rejects a zero-width logical transaction. The sampled
-        # poses remain instantaneous and identical at both endpoints; only the
-        # enclosing render interval is the runtime's standard 50 ms tick.
+        "simulation_time_sec": runtime_simulation_time_sec,
+        # The sampled poses remain instantaneous and identical at both
+        # endpoints; only the enclosing render interval is the runtime's
+        # standard 50 ms tick.
         "pose_interval_sec": {
-            "start": max(0.0, simulation_time_sec - 0.05),
-            "end": simulation_time_sec,
+            "start": pose_interval_start_sec,
+            "end": runtime_simulation_time_sec,
         },
         "coordinate_frame": {
             "input": "scene_local_ego_start",
@@ -232,7 +240,8 @@ def prepare_probe_frames(
         "scene_start_us": runtime_start_us,
         "sample_time_origin_us": first_timestamp_us,
         "sample_timestamp_us": sample_timestamp_us,
-        "simulation_time_sec": simulation_time_sec,
+        "simulation_time_sec": runtime_simulation_time_sec,
+        "source_simulation_time_sec": simulation_time_sec,
         "actor_ego_distance_m": _actor_ego_distance(
             selected, sample, lidar_channel, sample_data, ego_poses, sample_channels
         ),

@@ -103,6 +103,30 @@ class PrepareNuRecPoseProbeFramesTests(unittest.TestCase):
                 delta_m=0.01,
             )
 
+    def test_first_sample_uses_a_positive_logical_window(self):
+        self._write(
+            "sample_annotation",
+            [
+                {"token": "a0", "sample_token": "s0", "instance_token": VEHICLE_TRACK, "translation": [5, 0, 0], "rotation": [1, 0, 0, 0]},
+                {"token": "a1", "sample_token": "s1", "instance_token": VEHICLE_TRACK, "translation": [50, 0, 0], "rotation": [1, 0, 0, 0]},
+            ],
+        )
+        baseline, _, context = prepare_probe_frames(
+            self.root,
+            version="v1.0-mini",
+            scene_name="scene-0061",
+            track_id=VEHICLE_TRACK,
+            actor_type="vehicle",
+            camera_channels=["CAM_FRONT"],
+        )
+        self.assertEqual(context["sample_index"], 0)
+        self.assertEqual(context["source_simulation_time_sec"], 0.0)
+        self.assertEqual(context["simulation_time_sec"], 0.05)
+        self.assertEqual(baseline["simulation_time_sec"], 0.05)
+        self.assertEqual(
+            baseline["pose_interval_sec"], {"start": 0.0, "end": 0.05}
+        )
+
     def test_can_move_probe_target_to_declared_lidar_distance(self):
         baseline, moved, context = prepare_probe_frames(
             self.root,
