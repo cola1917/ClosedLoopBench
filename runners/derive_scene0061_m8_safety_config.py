@@ -23,6 +23,7 @@ def _m8_actor_type(actor: Mapping[str, Any]) -> str:
 def _bind_all_m8_dynamic_replay_actors(config: dict[str, Any]) -> None:
     """Bind each physical replay actor to the identically named NuRec track."""
 
+    actors_by_id: dict[str, dict[str, Any]] = {}
     for actor in config.get("actors") or []:
         if not isinstance(actor, dict):
             raise ValueError("M8 actor configuration must contain objects")
@@ -63,6 +64,22 @@ def _bind_all_m8_dynamic_replay_actors(config: dict[str, Any]) -> None:
         control_contract["sensor_pose_source"] = "carla_runtime_actor_pose"
         control_contract["sensor_pose_reference"] = "carla_bounding_box_center"
         actor["control_mode_contract"] = control_contract
+        actors_by_id[actor_id] = actor
+
+    # The aggregate contract is consumed by the remote TF++ runtime in
+    # addition to CARLA's per-actor preflight. Its pose declaration must use
+    # the same reference as the binding and per-actor control contract.
+    aggregate_contract = config.get("actor_control_contract")
+    if isinstance(aggregate_contract, dict):
+        for row in aggregate_contract.get("actors") or []:
+            if not isinstance(row, dict):
+                continue
+            actor = actors_by_id.get(str(row.get("actor_id") or ""))
+            if actor is None:
+                continue
+            binding = actor["binding"]
+            row["sensor_pose_source"] = binding["sensor_pose_source"]
+            row["sensor_pose_reference"] = binding["sensor_pose_reference"]
 
 
 def build_m8_actor_binding_manifest(config: Mapping[str, Any]) -> dict[str, Any]:
