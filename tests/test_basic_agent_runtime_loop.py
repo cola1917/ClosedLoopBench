@@ -327,6 +327,27 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         vehicle = FakeVehicle(events, transforms=[transform])
         self.assertEqual(_vehicle_pose(vehicle), scene_pose)
 
+    def test_m8_static_obstacle_lifecycle_is_preserved_in_runtime_plan(self):
+        from runners.run_carla_basic_agent import build_basic_agent_plan
+
+        plan = build_basic_agent_plan(
+            {
+                "scenario_id": "scene-m8-static-lifecycle",
+                "carla": {"map": "Town04"},
+                "ego": {"initial_state": {}, "reference_trajectory": []},
+                "runtime": {
+                    "m8_safety_audit_required": True,
+                    "dynamic_actor_lifecycle": "source_annotation_window",
+                    "static_obstacle_lifecycle": "source_annotation_window",
+                },
+            }
+        )
+
+        self.assertEqual(
+            plan["runtime"]["static_obstacle_lifecycle"],
+            "source_annotation_window",
+        )
+
     def _plan(self):
         from runners.run_carla_basic_agent import build_basic_agent_plan
 

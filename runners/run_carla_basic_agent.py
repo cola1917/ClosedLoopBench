@@ -188,6 +188,9 @@ def build_basic_agent_plan(
             "dynamic_actor_lifecycle": (
                 (run_config.get("runtime") or {}).get("dynamic_actor_lifecycle")
             ),
+            "static_obstacle_lifecycle": (
+                (run_config.get("runtime") or {}).get("static_obstacle_lifecycle")
+            ),
             "actor_vertical_alignment_max_error_m": float(
                 (run_config.get("runtime") or {}).get(
                     "actor_vertical_alignment_max_error_m", 0.25
