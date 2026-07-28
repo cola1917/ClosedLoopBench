@@ -8,6 +8,20 @@ class DeriveM8SafetyConfigTests(unittest.TestCase):
         source = {
             "schema_version": "carla_run_config.mvp.v0",
             "runtime": {"m7_actor_pose_audit_required": True},
+            "actor_control_contract": {
+                "actors": [
+                    {
+                        "actor_id": "vehicle",
+                        "sensor_pose_source": "scenario_ir_reference_trajectory",
+                        "sensor_pose_reference": "source_track_frame",
+                    },
+                    {
+                        "actor_id": "pedestrian",
+                        "sensor_pose_source": "scenario_ir_reference_trajectory",
+                        "sensor_pose_reference": "source_track_frame",
+                    },
+                ]
+            },
             "actors": [
                 {
                     "actor_id": "vehicle",
@@ -51,6 +65,9 @@ class DeriveM8SafetyConfigTests(unittest.TestCase):
                 actor["control_mode_contract"]["sensor_pose_reference"],
                 "carla_bounding_box_center",
             )
+        for row in derived["actor_control_contract"]["actors"]:
+            self.assertEqual(row["sensor_pose_source"], "carla_runtime_actor_pose")
+            self.assertEqual(row["sensor_pose_reference"], "carla_bounding_box_center")
 
 
 if __name__ == "__main__":
