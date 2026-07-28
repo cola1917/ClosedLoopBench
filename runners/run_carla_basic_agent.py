@@ -3999,7 +3999,11 @@ def _actor_runtime_binding_evidence(
         str(actor.get("actor_id", "actor")): actor
         for actor in plan.get("actors") or []
     }
-    if not selected:
+    if bool((plan.get("runtime") or {}).get("m8_safety_audit_required", False)):
+        # M8 proves the full physical/replay registry, while the smaller
+        # selected actor set remains the later M10 control surface.
+        selected = sorted(actor_by_id)
+    elif not selected:
         selected = [
             actor_id
             for actor_id, actor in actor_by_id.items()

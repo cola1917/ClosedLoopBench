@@ -142,9 +142,32 @@ class SceneSafetyAuditTests(unittest.TestCase):
             self.assertEqual(rows[0]["occupancy"][0]["point_count"], 1)
 
     def test_m8_config_derivation_preserves_replay_and_requires_m7(self):
-        from runners.derive_scene0061_m8_safety_config import derive_m8_safety_config
+        from runners.derive_scene0061_m8_safety_config import (
+            build_m8_actor_binding_manifest,
+            derive_m8_safety_config,
+        )
 
-        source = {"schema_version": "carla_run_config.mvp.v0", "run_id": "base", "runtime": {"m7_actor_pose_audit_required": True}, "actors": [{"actor_id": "car", "closed_loop_level": "replay"}]}
+        source = {
+            "schema_version": "carla_run_config.mvp.v0",
+            "run_id": "base",
+            "scenario_id": "scene-m8",
+            "runtime": {"m7_actor_pose_audit_required": True},
+            "actor_binding": {"selected_actor_ids": ["car"]},
+            "actors": [
+                {
+                    "actor_id": "car",
+                    "source_track_id": "car",
+                    "type": "vehicle",
+                    "closed_loop_level": "replay",
+                },
+                {
+                    "actor_id": "walker",
+                    "source_track_id": "walker",
+                    "type": "pedestrian",
+                    "closed_loop_level": "replay",
+                },
+            ],
+        }
         derived = derive_m8_safety_config(source)
         self.assertTrue(derived["runtime"]["m8_safety_audit_required"])
         self.assertEqual(
@@ -157,6 +180,20 @@ class SceneSafetyAuditTests(unittest.TestCase):
         )
         self.assertEqual(derived["actors"][0]["closed_loop_level"], "replay")
         self.assertFalse(derived["nurec_runtime"]["lidar_instant_sampling"])
+        bindings = {
+            row["actor_id"]: row
+            for row in build_m8_actor_binding_manifest(derived)["bindings"]
+        }
+        self.assertEqual(set(bindings), {"car", "walker"})
+        self.assertEqual(bindings["car"]["nurec_track_id"], "car")
+        self.assertEqual(
+            bindings["car"]["sensor_pose_reference"],
+            "carla_bounding_box_center",
+        )
+        self.assertEqual(
+            bindings["walker"]["sensor_pose_reference"],
+            "carla_bounding_box_bottom",
+        )
 
     def test_m8_runtime_adapter_retains_physical_box_state(self):
         from runners.build_m8_expected_visibility import physical_frames_from_m8_runtime
