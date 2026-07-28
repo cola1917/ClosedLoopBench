@@ -382,6 +382,24 @@ support for every CARLA object declared observable, or explicitly remove those
 objects from the physical registry before the run. A client-side axis change
 or a relaxed occupancy tolerance is not an admissible repair.
 
+### M8 Full-Registry Reconstruction Candidate (2026-07-28)
+
+The M8 repair is now running as NuRec attempt 021 under
+`NeuralSceneBridge/outputs/nurec_scene0061_m8_ncore_eligible_registry_formal_attempt_021/`.
+Its leaf recipe explicitly selects the NCore-eligible `EXTERNAL` vehicle and
+pedestrian classes, initializes all 87 selected dynamic tracks with
+`step_frame=1`, and trains the six-camera plus `lidar_top` scene for 40,000
+steps. The independent registry closure records 87/87 dynamic-track matches;
+the complete M8 registry remains 228 objects: 87 dynamic objects, 140 static
+collision obstacles, and one road-boundary representation.
+
+This is a source-scene repair candidate only. Neither a successful launch nor
+a completed USDZ closes M8. After the artifact is complete, a new immutable
+CARLA/NuRec same-tick run must regenerate all four audit streams and pass each
+one: collision, lane, calibrated expected visibility, and occlusion-aware
+LiDAR-to-world support. The existing failure evidence remains authoritative
+until that new run is available.
+
 ## M9: Consistent Replay TF++ Baseline
 
 **Objective:** repeat the M2-M5 baseline only after M6-M8 close the scene
