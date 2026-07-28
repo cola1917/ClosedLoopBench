@@ -215,6 +215,7 @@ class SceneSafetyAuditTests(unittest.TestCase):
             _advance_static_obstacle_temporal_lifecycle,
             _initialize_static_obstacle_temporal_lifecycle,
             _static_obstacle_runtime_evidence,
+            _static_obstacle_windows_fit_requested_horizon,
         )
         from tests.test_basic_agent_runtime_loop import FakeCarlaModule, FakeWorld
 
@@ -241,6 +242,18 @@ class SceneSafetyAuditTests(unittest.TestCase):
         )
         self.assertEqual(lifecycle["source-singleton"]["state"], "active")
         self.assertIn("source-singleton", spawned)
+        incomplete = _static_obstacle_runtime_evidence(
+            {"static_obstacles": [obstacle]}, spawned,
+            temporal_lifecycle=lifecycle,
+            require_window_entered=True,
+            require_window_completed=True,
+            observed_horizon_sec=1.0,
+        )
+        self.assertEqual(incomplete["status"], "failed")
+        self.assertIn(
+            "source-singleton:source_annotation_window_not_completed",
+            incomplete["issues"],
+        )
 
         _advance_static_obstacle_temporal_lifecycle(
             FakeCarlaModule(events), FakeWorld(events), [obstacle], spawned, lifecycle,
@@ -250,9 +263,50 @@ class SceneSafetyAuditTests(unittest.TestCase):
         self.assertFalse(spawned)
         audit = _static_obstacle_runtime_evidence(
             {"static_obstacles": [obstacle]}, spawned,
-            temporal_lifecycle=lifecycle, require_window_entered=True,
+            temporal_lifecycle=lifecycle,
+            require_window_entered=True,
+            require_window_completed=True,
+            observed_horizon_sec=2.01,
         )
         self.assertEqual(audit["status"], "passed")
+        self.assertFalse(
+            _static_obstacle_windows_fit_requested_horizon(
+                [obstacle], requested_horizon_sec=0.15,
+            )
+        )
+        self.assertTrue(
+            _static_obstacle_windows_fit_requested_horizon(
+                [obstacle], requested_horizon_sec=2.01,
+            )
+        )
+
+    def test_static_obstacle_short_horizon_defers_future_source_window(self):
+        from runners.run_carla_basic_agent import (
+            _initialize_static_obstacle_temporal_lifecycle,
+            _static_obstacle_runtime_evidence,
+        )
+
+        obstacle = {
+            "object_id": "future-static",
+            "placement": {"x": 2.0, "y": 1.0, "z": 0.0, "yaw": 0.0},
+            "blueprint": "static.prop.*",
+            "collision_policy": "required",
+            "time_interval": {"start_sec": 1.0, "end_sec": 2.0},
+        }
+        lifecycle = _initialize_static_obstacle_temporal_lifecycle([obstacle])
+        audit = _static_obstacle_runtime_evidence(
+            {"static_obstacles": [obstacle]},
+            {},
+            temporal_lifecycle=lifecycle,
+            observed_horizon_sec=0.15,
+        )
+
+        self.assertEqual(audit["status"], "passed")
+        self.assertEqual(audit["records"][0]["status"], "deferred")
+        self.assertEqual(
+            audit["records"][0]["source_annotation_window_requirement"],
+            "deferred_outside_observed_horizon",
+        )
 
     def test_replay_executor_is_explicitly_not_required_before_source_window(self):
         from runners.run_carla_basic_agent import _actor_control_execution_evidence

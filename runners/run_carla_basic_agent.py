@@ -1282,11 +1282,21 @@ def _run_basic_agent_loop(
             if actor_id in interactive_actor_ids
         }
         status = "interactive_closed_loop" if physical_actor_evidence else "ego_closed_loop"
+        full_static_obstacle_window_requested = (
+            bool(runtime_options.get("m8_safety_audit_required", False))
+            and static_obstacle_lifecycle == "source_annotation_window"
+            and _static_obstacle_windows_fit_requested_horizon(
+                plan.get("static_obstacles") or [],
+                requested_horizon_sec=max_ticks * dt_sec,
+            )
+        )
         static_obstacle_runtime_evidence = _static_obstacle_runtime_evidence(
             plan,
             static_obstacle_actors,
             temporal_lifecycle=static_obstacle_temporal_lifecycle_evidence,
-            require_window_entered=static_obstacle_lifecycle == "source_annotation_window",
+            require_window_entered=full_static_obstacle_window_requested,
+            require_window_completed=full_static_obstacle_window_requested,
+            observed_horizon_sec=len(frame_trace) * dt_sec,
         )
         report = build_closed_loop_report(runtime_config, tick_metrics=rows, status=status)
         report["summary"]["control_timeout_count"] = int(
@@ -2301,12 +2311,37 @@ def _spawn_static_obstacles(
             obstacle["_runtime_blueprint_filter"] = effective_filter
 
 
+def _static_obstacle_windows_fit_requested_horizon(
+    obstacles: list[Mapping[str, Any]], *, requested_horizon_sec: float
+) -> bool:
+    """Whether a requested M8 run can observe every finite static-object window.
+
+    A short smoke validates objects that should already be present, while a
+    full replay must prove that every source annotation window is entered and
+    completed. This keeps short-horizon smoke results meaningful without
+    weakening the formal full-window gate.
+    """
+    if not obstacles or requested_horizon_sec < 0.0:
+        return False
+    for obstacle in obstacles:
+        window = _static_obstacle_annotation_window(obstacle)
+        if (
+            window is None
+            or math.isinf(window[1])
+            or window[1] > requested_horizon_sec + 1e-9
+        ):
+            return False
+    return True
+
+
 def _static_obstacle_runtime_evidence(
     plan: Mapping[str, Any],
     spawned: Mapping[str, Any],
     *,
     temporal_lifecycle: Mapping[str, Mapping[str, Any]] | None = None,
     require_window_entered: bool = False,
+    require_window_completed: bool = False,
+    observed_horizon_sec: float | None = None,
 ) -> dict[str, Any]:
     declared = plan.get("static_obstacles") or []
     if not declared:
@@ -2318,6 +2353,11 @@ def _static_obstacle_runtime_evidence(
         }
     records = []
     issues = []
+    observed_horizon = (
+        None
+        if observed_horizon_sec is None
+        else max(0.0, float(observed_horizon_sec))
+    )
     for obstacle in declared:
         object_id = str(obstacle.get("object_id") or "")
         entity = spawned.get(object_id)
@@ -2325,15 +2365,46 @@ def _static_obstacle_runtime_evidence(
         lifecycle_state = lifecycle.get("state")
         events = lifecycle.get("events") or []
         spawn_events = [event for event in events if event.get("event") == "spawned"]
+        despawn_events = [event for event in events if event.get("event") == "despawned"]
         runtime_actor_id = getattr(entity, "id", None) if entity is not None else (
             spawn_events[-1].get("carla_runtime_actor_id") if spawn_events else None
         )
         record_issues = []
+        source_window = lifecycle.get("source_annotation_window") or {}
+        source_start = source_window.get("start_sec")
+        source_end = source_window.get("end_sec")
+        entry_required = require_window_entered
+        if temporal_lifecycle is None:
+            window_requirement = "not_applicable"
+        elif require_window_completed:
+            window_requirement = "full_source_annotation_window"
+        elif observed_horizon is not None and source_start is not None:
+            if float(source_start) <= observed_horizon + 1e-9:
+                entry_required = True
+                window_requirement = "entered_within_observed_horizon"
+            else:
+                window_requirement = "deferred_outside_observed_horizon"
+        else:
+            window_requirement = "not_required"
         lifecycle_active = temporal_lifecycle is None or lifecycle_state == "active"
         if lifecycle_active and entity is None:
             record_issues.append("runtime_actor_missing")
-        if require_window_entered and temporal_lifecycle is not None and not spawn_events:
+        if entry_required and temporal_lifecycle is not None and not spawn_events:
             record_issues.append("source_annotation_window_never_entered")
+        if (
+            require_window_completed
+            and temporal_lifecycle is not None
+            and source_end is not None
+            and lifecycle_state != "despawned"
+        ):
+            record_issues.append("source_annotation_window_not_completed")
+        if (
+            require_window_completed
+            and temporal_lifecycle is not None
+            and source_end is not None
+            and not despawn_events
+        ):
+            record_issues.append("source_annotation_window_never_completed")
         if str(obstacle.get("collision_policy") or "") != "required":
             record_issues.append("collision_policy_not_required")
         record = {
@@ -2347,7 +2418,14 @@ def _static_obstacle_runtime_evidence(
             "carla_runtime_actor_id": runtime_actor_id,
             "temporal_lifecycle_state": lifecycle_state,
             "temporal_lifecycle_events": [dict(event) for event in events],
-            "status": "passed" if not record_issues else "failed",
+            "source_annotation_window_requirement": window_requirement,
+            "status": (
+                "failed"
+                if record_issues
+                else "deferred"
+                if window_requirement == "deferred_outside_observed_horizon"
+                else "passed"
+            ),
             "issues": record_issues,
         }
         records.append(record)
@@ -2355,6 +2433,8 @@ def _static_obstacle_runtime_evidence(
     return {
         "schema_version": "static_obstacle_runtime_evidence.v1",
         "status": "passed" if not issues else "failed",
+        "observed_horizon_sec": observed_horizon,
+        "full_source_annotation_window_required": require_window_completed,
         "records": records,
         "issues": sorted(issues),
     }
