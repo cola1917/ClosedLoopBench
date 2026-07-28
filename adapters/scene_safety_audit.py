@@ -161,6 +161,12 @@ def audit_lidar_world_tick(tick: Mapping[str, Any]) -> dict[str, Any]:
         point_count = observed.get("point_count") if isinstance(observed, Mapping) else None
         valid = isinstance(point_count, int) and not isinstance(point_count, bool) and point_count > 0
         row_issues = []
+        observability = item.get("source_lidar_observability")
+        if isinstance(observability, Mapping):
+            source_issues = observability.get("issues")
+            if isinstance(source_issues, list):
+                row_issues.extend(str(issue) for issue in source_issues if issue)
+                issues.extend(f"{issue}:{object_id}" for issue in row_issues)
         if required and not valid:
             row_issues.append("missing_lidar_world_occupancy")
             issues.append(f"missing_lidar_world_occupancy:{object_id}")

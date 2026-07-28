@@ -67,6 +67,25 @@ class SceneSafetyAuditTests(unittest.TestCase):
         base["lidar_occupancy"] = [{"object_id": "truck", "point_count": 3}]
         self.assertEqual(audit_lidar_world_tick(base)["status"], "passed")
 
+    def test_lidar_world_rejects_source_carla_observability_conflict(self):
+        from adapters.scene_safety_audit import audit_lidar_world_tick
+
+        tick = {
+            "frame_id": 10,
+            "simulation_time_sec": 0.5,
+            "expected_world_objects": [{
+                "object_id": "truck",
+                "expected_lidar_support": False,
+                "source_lidar_observability": {
+                    "issues": ["source_observed_carla_occluded"],
+                },
+            }],
+            "lidar_occupancy": [{"object_id": "truck", "point_count": 0}],
+        }
+        result = audit_lidar_world_tick(tick)
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("source_observed_carla_occluded:truck", result["issues"])
+
     def test_runner_writes_four_immutable_tick_streams(self):
         from runners.audit_scene_safety import audit_m8_evidence, write_m8_evidence
 
