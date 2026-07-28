@@ -221,6 +221,11 @@ def build_basic_agent_plan(
                 if output
                 else None
             ),
+            "nurec_multimodal_frame_trace": (
+                str(Path(output).with_name("nurec_multimodal_frame_trace.jsonl"))
+                if output
+                else None
+            ),
             "m8_runtime_trace": (
                 str(Path(output).with_name("m8_runtime_trace.jsonl"))
                 if output
@@ -449,6 +454,7 @@ def _run_basic_agent_loop(
     frame_trace: list[dict[str, Any]] = []
     multimodal_trace: list[dict[str, Any]] = []
     pose_request_trace: list[dict[str, Any]] = []
+    render_frame_trace: list[dict[str, Any]] = []
     m8_runtime_trace: list[dict[str, Any]] = []
     cleanup_audit: list[dict[str, Any]] = []
     result: dict[str, Any] | None = None
@@ -1091,6 +1097,14 @@ def _run_basic_agent_loop(
                     pose_request_trace.append(dict(pose_request))
                 elif bool(runtime_options.get("m7_actor_pose_audit_required", False)):
                     raise RuntimeError("M7 requires a NuRec handler with request-pose evidence")
+                handler_frame_trace = getattr(sensor_frame_handler, "render_frame_trace", None)
+                if isinstance(handler_frame_trace, list):
+                    if not handler_frame_trace:
+                        raise RuntimeError("NuRec sensor handler did not retain pre-dispatch frame evidence")
+                    render_frame = handler_frame_trace[-1]
+                    if not isinstance(render_frame, Mapping) or render_frame.get("frame_id") != world_frame:
+                        raise RuntimeError("NuRec pre-dispatch frame evidence frame mismatch")
+                    render_frame_trace.append(dict(render_frame))
                 if hasattr(ego_driver, "receive_multimodal_evidence"):
                     ego_driver.receive_multimodal_evidence(
                         evidence,
@@ -1530,6 +1544,7 @@ def _run_basic_agent_loop(
             result["frame_trace"] = frame_trace
             result["nurec_multimodal_trace"] = multimodal_trace
             result["nurec_pose_request_trace"] = pose_request_trace
+            result["nurec_multimodal_frame_trace"] = render_frame_trace
             result["m8_runtime_trace"] = m8_runtime_trace
             result["cleanup_audit"] = cleanup_audit
             result["cleanup_succeeded"] = cleanup_ok
@@ -1550,6 +1565,7 @@ def _run_basic_agent_loop(
             cleanup_audit,
             multimodal_trace,
             pose_request_trace,
+            render_frame_trace,
             m8_runtime_trace,
         )
 
@@ -4637,6 +4653,7 @@ def _write_runtime_evidence(
     cleanup_audit: list[dict[str, Any]],
     multimodal_trace: list[dict[str, Any]],
     pose_request_trace: list[dict[str, Any]],
+    render_frame_trace: list[dict[str, Any]],
     m8_runtime_trace: list[dict[str, Any]],
 ) -> None:
     artifacts = plan.get("artifacts") or {}
@@ -4645,6 +4662,7 @@ def _write_runtime_evidence(
         ("metrics_trace", metrics_trace),
         ("nurec_multimodal_trace", multimodal_trace),
         ("nurec_pose_request_trace", pose_request_trace),
+        ("nurec_multimodal_frame_trace", render_frame_trace),
         ("m8_runtime_trace", m8_runtime_trace),
     ):
         target = artifacts.get(name)

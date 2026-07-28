@@ -34,6 +34,7 @@ def make_nurec_sensor_frame_handler(
     if record_pose_request is not None and not callable(record_pose_request):
         raise NuRecMultimodalError("record_pose_request must be callable")
     pose_request_trace: list[dict[str, Any]] = []
+    render_frame_trace: list[dict[str, Any]] = []
     alignment = scene_package.get("alignment") or {}
     carla_to_nurec_global = _invert_rigid_transform(alignment.get("sim_from_log_transform"))
 
@@ -56,6 +57,9 @@ def make_nurec_sensor_frame_handler(
             actor_samples=context.get("actor_samples") or {},
             require_runtime_validated_alignment=require_runtime_validated_alignment,
         )
+        # Preserve the exact SDK-neutral request before dispatch so a failed
+        # full-batch render can be reproduced without re-running CARLA.
+        render_frame_trace.append(deepcopy(frame))
         pose_request = build_nurec_dynamic_pose_request_record(
             context,
             frame,
@@ -78,6 +82,7 @@ def make_nurec_sensor_frame_handler(
         "dynamic_objects": "actor_binding_set.v1",
     }
     handle.pose_request_trace = pose_request_trace  # type: ignore[attr-defined]
+    handle.render_frame_trace = render_frame_trace  # type: ignore[attr-defined]
     return handle
 
 

@@ -99,6 +99,11 @@ class NuRecRuntimeHandlerTests(unittest.TestCase):
         self.assertEqual(request["schema_version"], "nurec_dynamic_pose_request.v1")
         self.assertEqual(request["frame_id"], 7)
         self.assertEqual(request["actor_pose_pairs"][0]["nurec_track_id"], VEHICLE_TRACK)
+        self.assertEqual(handler.render_frame_trace[0]["frame_id"], 7)
+        self.assertEqual(
+            handler.render_frame_trace[0]["shared_dynamic_object_sha256"],
+            evidence["dynamic_object_sha256"],
+        )
 
     def test_requires_explicit_sensor_calibration_and_scene_identity(self):
         from adapters.nurec_multimodal import NuRecMultimodalError
