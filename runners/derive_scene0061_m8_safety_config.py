@@ -56,6 +56,13 @@ def _bind_all_m8_dynamic_replay_actors(config: dict[str, Any]) -> None:
             }
         )
         actor["binding"] = binding
+        # The control-mode preflight compares the runtime binding to this
+        # per-actor contract. Keep both declarations on the same physical
+        # reference whenever M8 replaces the render-pose source.
+        control_contract = dict(actor.get("control_mode_contract") or {})
+        control_contract["sensor_pose_source"] = "carla_runtime_actor_pose"
+        control_contract["sensor_pose_reference"] = "carla_bounding_box_center"
+        actor["control_mode_contract"] = control_contract
 
 
 def build_m8_actor_binding_manifest(config: Mapping[str, Any]) -> dict[str, Any]:
