@@ -90,6 +90,13 @@ def _case_dynamic_actor_ids(
     for requested in requested_sizes:
         if requested == "full":
             case_name, ids = f"full_{len(full_ids):03d}", list(full_ids)
+        elif requested == "each":
+            for index, actor_id in enumerate(priority_ids, start=1):
+                case_name = f"source_single_{index:03d}_{actor_id[:8]}"
+                if case_name not in seen:
+                    seen.add(case_name)
+                    result.append((case_name, [actor_id]))
+            continue
         else:
             size = int(requested)
             if size < 1 or size > len(priority_ids):
@@ -263,7 +270,7 @@ def _parse_sizes(value: str) -> list[int | str]:
         normalized = item.strip().lower()
         if not normalized:
             continue
-        result.append("full" if normalized == "full" else int(normalized))
+        result.append(normalized if normalized in {"full", "each"} else int(normalized))
     if not result:
         raise ValueError("--batch-sizes must contain at least one size")
     return result
