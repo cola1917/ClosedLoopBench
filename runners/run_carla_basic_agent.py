@@ -740,6 +740,15 @@ def _run_basic_agent_loop(
 
         max_ticks = int(limits.get("max_ticks", 600))
         dt_sec = float(world_config.get("fixed_delta_seconds", 0.05))
+        full_static_obstacle_window_requested = (
+            bool(runtime_options.get("m8_safety_audit_required", False))
+            and static_obstacle_lifecycle == "source_annotation_window"
+            and _static_obstacle_windows_fit_requested_horizon(
+                plan.get("static_obstacles") or [],
+                requested_horizon_sec=max_ticks * dt_sec,
+            )
+        )
+        route_completed_before_static_window_horizon = False
         scenario_clock_origin_sec = _snapshot_elapsed_seconds(world)
         previous_speed_mps: float | None = None
         previous_acceleration_mps2: float | None = None
@@ -757,8 +766,14 @@ def _run_basic_agent_loop(
         )
         for tick_index in range(max_ticks):
             if hasattr(ego_driver, "done") and ego_driver.done():
-                termination_reason = "route_complete"
-                break
+                if not full_static_obstacle_window_requested:
+                    termination_reason = "route_complete"
+                    break
+                # M8 must cover every declared static source window. Continue
+                # synchronous observation after a short topology route ends;
+                # CARLA state remains the authoritative render pose each tick.
+                route_completed_before_static_window_horizon = True
+                termination_reason = "source_annotation_window_horizon"
             run_time_sec = (tick_index + 1) * dt_sec
             if dynamic_actor_lifecycle == "source_annotation_window":
                 lifecycle_events = _advance_actor_temporal_lifecycle(
@@ -1282,14 +1297,6 @@ def _run_basic_agent_loop(
             if actor_id in interactive_actor_ids
         }
         status = "interactive_closed_loop" if physical_actor_evidence else "ego_closed_loop"
-        full_static_obstacle_window_requested = (
-            bool(runtime_options.get("m8_safety_audit_required", False))
-            and static_obstacle_lifecycle == "source_annotation_window"
-            and _static_obstacle_windows_fit_requested_horizon(
-                plan.get("static_obstacles") or [],
-                requested_horizon_sec=max_ticks * dt_sec,
-            )
-        )
         static_obstacle_runtime_evidence = _static_obstacle_runtime_evidence(
             plan,
             static_obstacle_actors,
@@ -1298,6 +1305,13 @@ def _run_basic_agent_loop(
             require_window_completed=full_static_obstacle_window_requested,
             observed_horizon_sec=len(frame_trace) * dt_sec,
         )
+        m8_failure_reason = None
+        if (
+            bool(runtime_options.get("m8_safety_audit_required", False))
+            and static_obstacle_runtime_evidence["status"] != "passed"
+        ):
+            m8_failure_reason = "m8_static_obstacle_source_window_incomplete"
+            status = "failed"
         report = build_closed_loop_report(runtime_config, tick_metrics=rows, status=status)
         report["summary"]["control_timeout_count"] = int(
             driver_diagnostics.get("fallback_count", 0)
@@ -1325,6 +1339,10 @@ def _run_basic_agent_loop(
             ),
             "frame_trace_count": len(frame_trace),
             "termination_reason": termination_reason,
+            "route_completed_before_static_window_horizon": (
+                route_completed_before_static_window_horizon
+            ),
+            "m8_failure_reason": m8_failure_reason,
             "ego_driver_diagnostics": driver_diagnostics,
             "actor_behavior_plugin": (
                 (plan.get("actor_control") or {}).get("behavior_plugin")
@@ -1334,6 +1352,12 @@ def _run_basic_agent_loop(
         _write_report_if_requested(plan, report)
         result = {
             "status": status,
+            "reason": m8_failure_reason,
+            "detail": (
+                ", ".join(static_obstacle_runtime_evidence["issues"])
+                if m8_failure_reason is not None
+                else None
+            ),
             "scenario_id": plan.get("scenario_id"),
             "summary": {
                 "ticks": ticks_completed,

@@ -348,6 +348,92 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
             "source_annotation_window",
         )
 
+    def test_m8_full_static_window_continues_after_route_completion(self):
+        from runners.run_carla_basic_agent import run_basic_agent
+
+        class ImmediatelyDoneAgent(FakeBasicAgent):
+            def done(self):
+                return True
+
+        class FakeSensor:
+            def listen(self, _callback):
+                pass
+
+            def stop(self):
+                pass
+
+            def destroy(self):
+                pass
+
+        class SensorBlueprintLibrary(FakeBlueprintLibrary):
+            def find(self, _pattern):
+                return FakeBlueprint()
+
+        class SensorWorld(FakeWorld):
+            def get_blueprint_library(self):
+                return SensorBlueprintLibrary()
+
+            def spawn_actor(self, blueprint, transform, attach_to=None):
+                if attach_to is not None:
+                    return FakeSensor()
+                return super().spawn_actor(blueprint, transform)
+
+        class SensorClient(FakeClient):
+            def __init__(self, events, host, port):
+                super().__init__(events, host, port)
+                self.world = SensorWorld(events)
+
+        class SensorCarla(FakeCarlaModule):
+            def __init__(self, events):
+                super().__init__(events)
+                self.Transform = lambda location=None, rotation=None: FakeTransform(
+                    location or FakeLocation(), rotation or FakeRotation()
+                )
+
+            def Client(self, host, port):
+                return SensorClient(self.events, host, port)
+
+        plan = self._plan()
+        plan["limits"]["max_ticks"] = 1
+        plan["runtime"].update(
+            {
+                "m8_safety_audit_required": True,
+                "dynamic_actor_lifecycle": "source_annotation_window",
+                "static_obstacle_lifecycle": "source_annotation_window",
+            }
+        )
+        plan["static_obstacles"] = [
+            {
+                "object_id": "full-window-static",
+                "placement": {"x": 2.0, "y": 1.0, "z": 0.0, "yaw": 0.0},
+                "blueprint": "static.prop.*",
+                "collision_policy": "required",
+                "time_interval": {"start_sec": 0.0, "end_sec": 0.0},
+            }
+        ]
+
+        result = run_basic_agent(
+            plan,
+            carla_module=SensorCarla([]),
+            agent_module=ImmediatelyDoneAgent,
+        )
+
+        self.assertEqual(result["status"], "ego_closed_loop")
+        self.assertEqual(result["summary"]["ticks"], 1)
+        self.assertEqual(
+            result["report"]["runtime"]["termination_reason"],
+            "source_annotation_window_horizon",
+        )
+        self.assertTrue(
+            result["report"]["runtime"][
+                "route_completed_before_static_window_horizon"
+            ]
+        )
+        self.assertEqual(
+            result["report"]["runtime"]["static_obstacle_runtime"]["status"],
+            "passed",
+        )
+
     def _plan(self):
         from runners.run_carla_basic_agent import build_basic_agent_plan
 
