@@ -18,3 +18,10 @@ def test_case_dynamic_actor_ids_prioritize_source_observed_actors():
         ("source_prefix_002", ["source-a", "source-b"]),
         ("full_003", ["background", "source-a", "source-b"]),
     ]
+    reversed_cases = _case_dynamic_actor_ids(
+        frame,
+        {"source-a", "source-b"},
+        [1],
+        reverse_source_priority=True,
+    )
+    assert reversed_cases == [("source_prefix_001", ["source-b"])]

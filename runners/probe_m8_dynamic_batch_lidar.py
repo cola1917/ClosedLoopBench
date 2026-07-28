@@ -71,6 +71,8 @@ def _case_dynamic_actor_ids(
     frame: Mapping[str, Any],
     source_expected_ids: set[str],
     requested_sizes: list[int | str],
+    *,
+    reverse_source_priority: bool = False,
 ) -> list[tuple[str, list[str]]]:
     dynamic = frame.get("shared_dynamic_objects")
     if not isinstance(dynamic, list):
@@ -81,6 +83,8 @@ def _case_dynamic_actor_ids(
     priority_ids = [actor_id for actor_id in full_ids if actor_id in source_expected_ids]
     if not set(priority_ids) == source_expected_ids:
         raise ValueError("source-observed dynamic objects are absent from the NuRec frame")
+    if reverse_source_priority:
+        priority_ids.reverse()
     result = []
     seen = set()
     for requested in requested_sizes:
@@ -160,6 +164,7 @@ def run_probe(
     source_expected_row: Mapping[str, Any],
     output_dir: Path,
     requested_sizes: list[int | str],
+    reverse_source_priority: bool = False,
 ) -> dict[str, Any]:
     from adapters.lidar_world_support import (
         lidar_occupancy_from_xyzi,
@@ -178,7 +183,12 @@ def run_probe(
     if not isinstance(object_states, list) or not isinstance(ego_state, Mapping):
         raise ValueError("M8 runtime row lacks physical object states or ego state")
     source_expected_ids = _source_expected_dynamic_ids(source_expected_row)
-    cases = _case_dynamic_actor_ids(full_frame, source_expected_ids, requested_sizes)
+    cases = _case_dynamic_actor_ids(
+        full_frame,
+        source_expected_ids,
+        requested_sizes,
+        reverse_source_priority=reverse_source_priority,
+    )
     state_by_id = {
         str(item.get("object_id") or ""): item
         for item in object_states
@@ -237,6 +247,7 @@ def run_probe(
         "frame_id": frame_id,
         "full_dynamic_actor_count": len(full_frame["shared_dynamic_objects"]),
         "source_expected_dynamic_count": len(source_expected_ids),
+        "source_priority_order": "reverse" if reverse_source_priority else "forward",
         "cases": rows,
         "summary": {
             "case_count": len(rows),
@@ -266,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-expected-lidar", required=True, type=Path)
     parser.add_argument("--frame-id", required=True, type=int)
     parser.add_argument("--batch-sizes", default="1,4,8,16,full")
+    parser.add_argument("--reverse-source-priority", action="store_true")
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
@@ -281,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
             source_expected_row=_unique_frame(_load_jsonl(args.source_expected_lidar), args.frame_id, "source expected LiDAR"),
             output_dir=output_dir,
             requested_sizes=sizes,
+            reverse_source_priority=args.reverse_source_priority,
         )
         (output_dir / "batch_summary.v1.json").write_text(
             json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
