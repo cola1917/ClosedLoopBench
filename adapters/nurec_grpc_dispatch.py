@@ -63,6 +63,7 @@ def dispatch_nurec_multimodal_frame(
         payload_sha256 = None
         error = None
         attempts_used = 0
+        encoded: Mapping[str, Any] | None = None
         for attempt in range(1, attempts_allowed + 1):
             attempts_used = attempt
             inspection = None
@@ -107,6 +108,13 @@ def dispatch_nurec_multimodal_frame(
             response_record["error"] = error
         if inspection is not None:
             response_record["response_metadata"] = dict(inspection)
+        if isinstance(encoded, Mapping) and "render_dynamic_object_mode" in encoded:
+            response_record["render_dynamic_object_mode"] = encoded[
+                "render_dynamic_object_mode"
+            ]
+            response_record["render_dynamic_object_count"] = int(
+                encoded.get("render_dynamic_object_count") or 0
+            )
         return response_record
 
     workers = max(1, int(concurrency))

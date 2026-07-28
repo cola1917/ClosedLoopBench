@@ -2,6 +2,8 @@ import hashlib
 import json
 import struct
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -206,6 +208,34 @@ class NuRec260ClientTests(unittest.TestCase):
             ),
             (3_000_000, 3_000_001),
         )
+
+    def test_close_does_not_block_evidence_persistence_on_a_stuck_grpc_channel(self):
+        class BlockingChannel:
+            def __init__(self):
+                self.started = threading.Event()
+                self.release = threading.Event()
+
+            def close(self):
+                self.started.set()
+                self.release.wait()
+
+        client = self._client()
+        channel = BlockingChannel()
+        client._channel = channel
+        started = time.monotonic()
+        client.close()
+        self.assertLess(time.monotonic() - started, 2.5)
+        self.assertTrue(channel.started.is_set())
+        channel.release.set()
+
+    def test_lidar_instant_sampling_uses_midpoint_without_changing_rgb_contract(self):
+        stub = _Stub()
+        client = self._client(stub, lidar_instant_sampling=True)
+
+        client.dispatch_frame(_frame())
+
+        lidar = stub.calls[1][1]
+        self.assertEqual((lidar.frame_start_us, lidar.frame_end_us), (3_075_000, 3_075_001))
 
     def test_hashed_native_scan_alignment_is_shared_by_rgb_and_lidar(self):
         stub = _Stub()

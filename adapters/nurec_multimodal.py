@@ -257,6 +257,9 @@ def build_nurec_multimodal_evidence(
         else:
             if response.get("status") != "ok":
                 record["issues"].append("rpc_status_not_ok")
+                rpc_error = response.get("error")
+                if isinstance(rpc_error, str) and rpc_error:
+                    record["rpc_error"] = rpc_error
             if response.get("frame_id") != frame["frame_id"]:
                 record["issues"].append("frame_id_mismatch")
             if response.get("dynamic_object_sha256") != digest:
@@ -279,6 +282,25 @@ def build_nurec_multimodal_evidence(
                     record["issues"].append("response_metadata_invalid")
                 else:
                     record["response_metadata"] = deepcopy(dict(metadata))
+            render_mode = response.get("render_dynamic_object_mode")
+            render_count = response.get("render_dynamic_object_count")
+            if render_mode is not None or render_count is not None:
+                if render_mode not in {
+                    "nre_dynamic_override",
+                    "source_replay_embedded",
+                }:
+                    record["issues"].append("render_dynamic_object_mode_invalid")
+                elif not isinstance(render_count, int) or isinstance(render_count, bool) or render_count < 0:
+                    record["issues"].append("render_dynamic_object_count_invalid")
+                elif render_mode == "source_replay_embedded" and render_count != 0:
+                    record["issues"].append("embedded_render_mode_has_overrides")
+                elif render_mode == "nre_dynamic_override" and render_count != len(
+                    frame["shared_dynamic_objects"]
+                ):
+                    record["issues"].append("dynamic_override_count_mismatch")
+                else:
+                    record["render_dynamic_object_mode"] = render_mode
+                    record["render_dynamic_object_count"] = render_count
         if not record["issues"]:
             record["status"] = "passed"
         else:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import hashlib
 import json
+import math
 import re
 import struct
 import sys
@@ -53,6 +54,9 @@ class NuRec260Client:
         native_scan_manifest: Mapping[str, Any] | None = None,
         native_scan_manifest_sha256: str | None = None,
         native_scan_max_midpoint_error_us: int = 25_000,
+        dynamic_object_render_mode: str = "nre_dynamic_override",
+        nre_from_log_transform: list[float] | None = None,
+        lidar_instant_sampling: bool = False,
     ) -> None:
         if not target or not runtime_scene_id:
             raise NuRecMultimodalError("NRE target and runtime_scene_id are required")
@@ -111,6 +115,20 @@ class NuRec260Client:
             scene_start_us=self.scene_start_us,
             max_midpoint_error_us=native_scan_max_midpoint_error_us,
         )
+        if dynamic_object_render_mode not in {
+            "nre_dynamic_override",
+            "source_replay_embedded",
+        }:
+            raise NuRecMultimodalError(
+                "unsupported NRE dynamic-object render mode: "
+                f"{dynamic_object_render_mode!r}"
+            )
+        self.dynamic_object_render_mode = dynamic_object_render_mode
+        self.lidar_instant_sampling = bool(lidar_instant_sampling)
+        self._nre_from_log_transform = _validated_rigid_transform(
+            nre_from_log_transform or _identity_transform(),
+            "nurec_runtime.nre_from_log_transform",
+        )
         self._active_temporal_alignment: dict[str, Any] | None = None
         # Per-frame sensor request fan-out. 1 keeps the historical serial
         # behaviour; the closed-loop runners raise it so the 6 RGB + LiDAR
@@ -165,11 +183,29 @@ class NuRec260Client:
             return stub
 
     def close(self) -> None:
-        if self._channel is not None and hasattr(self._channel, "close"):
-            self._channel.close()
-        for channel in self._extra_channels:
-            if hasattr(channel, "close"):
+        # Some grpcio builds can block indefinitely in Channel.close() after
+        # a completed concurrent render fan-out. The caller must still be
+        # able to persist CARLA/NuRec evidence and exit; process teardown will
+        # reclaim a channel whose best-effort close remains in flight.
+        for channel in [self._channel, *self._extra_channels]:
+            if channel is not None and hasattr(channel, "close"):
+                self._close_channel_bounded(channel)
+
+    @staticmethod
+    def _close_channel_bounded(channel: Any, timeout_sec: float = 2.0) -> None:
+        error: list[BaseException] = []
+
+        def close_channel() -> None:
+            try:
                 channel.close()
+            except BaseException as exc:  # preserve close errors when immediate
+                error.append(exc)
+
+        worker = threading.Thread(target=close_channel, daemon=True)
+        worker.start()
+        worker.join(timeout=max(0.0, float(timeout_sec)))
+        if error:
+            raise error[0]
 
     def dispatch_frame(self, frame: Mapping[str, Any]) -> dict[str, Any]:
         if self._active_temporal_alignment is not None:
@@ -362,8 +398,8 @@ class NuRec260Client:
             camera_intrinsics=camera_spec,
             frame_start_us=wire_start_us,
             frame_end_us=wire_end_us,
-            sensor_pose=self._pose_pair(sensor["pose_pair"]),
-            dynamic_objects=self._dynamic_objects(payload["dynamic_objects"]),
+            sensor_pose=self._wire_pose_pair(sensor["pose_pair"]),
+            dynamic_objects=self._render_dynamic_objects(payload),
             image_format=self._pb.JPEG,
             image_quality=wire_image_quality,
         )
@@ -378,6 +414,12 @@ class NuRec260Client:
                 "NRE 26.04 LiDAR supports only PANDAR128 or AT128"
             )
         frame_start_us, frame_end_us = self._time_window_us(payload)
+        if self.lidar_instant_sampling:
+            # A/B probe only.  Some temporal-field builds return a sparse or
+            # locally collapsed cloud for a full tick window; retain the
+            # declared logical window in evidence but request its midpoint.
+            midpoint_us = (frame_start_us + frame_end_us) // 2
+            frame_start_us, frame_end_us = midpoint_us, midpoint_us + 1
         request = self._pb.LidarRenderRequest(
             scene_id=self.runtime_scene_id,
             lidar_config=self._pb.LidarSpec(
@@ -385,8 +427,8 @@ class NuRec260Client:
             ),
             frame_start_us=frame_start_us,
             frame_end_us=frame_end_us,
-            sensor_pose=self._pose_pair(sensor["pose_pair"]),
-            dynamic_objects=self._dynamic_objects(payload["dynamic_objects"]),
+            sensor_pose=self._wire_pose_pair(sensor["pose_pair"]),
+            dynamic_objects=self._render_dynamic_objects(payload),
         )
         return self._encoded(payload, request)
 
@@ -552,18 +594,45 @@ class NuRec260Client:
         return [
             self._pb.DynamicObject(
                 track_id=str(item["track_id"]),
-                pose_pair=self._pose_pair(item["pose_pair"]),
+                pose_pair=self._wire_pose_pair(item["pose_pair"]),
             )
             for item in objects
         ]
 
-    @staticmethod
-    def _encoded(payload: Mapping[str, Any], request: Any) -> dict[str, Any]:
+    def _wire_pose_pair(self, pair: Mapping[str, Any]) -> Any:
+        return self._pose_pair(
+            _transform_render_pose_pair(pair, self._nre_from_log_transform)
+        )
+
+    def _render_dynamic_objects(self, payload: Mapping[str, Any]) -> list[Any]:
+        if self._render_dynamic_object_mode(payload) == "source_replay_embedded":
+            return []
+        return self._dynamic_objects(payload["dynamic_objects"])
+
+    def _render_dynamic_object_mode(self, payload: Mapping[str, Any]) -> str:
+        """Return the actual per-modality representation sent to NRE.
+
+        S0 RGB originates from a temporal reconstruction which already contains
+        its source actors, so replaying them as RGB overrides creates duplicate
+        Gaussian geometry. NRE 26.04 LiDAR, however, returns an empty response
+        without the dynamic-object request payload. Retain that payload only
+        for LiDAR and record the difference in each evidence record.
+        """
+        if (
+            self.dynamic_object_render_mode == "source_replay_embedded"
+            and payload["modality"] == "rgb"
+        ):
+            return "source_replay_embedded"
+        return "nre_dynamic_override"
+
+    def _encoded(self, payload: Mapping[str, Any], request: Any) -> dict[str, Any]:
         return {
             "wire_request": request,
             "frame_id": payload["frame_id"],
             "modality": payload["modality"],
             "dynamic_object_sha256": payload["dynamic_object_sha256"],
+            "render_dynamic_object_mode": self._render_dynamic_object_mode(payload),
+            "render_dynamic_object_count": len(request.dynamic_objects),
         }
 
 
@@ -605,6 +674,15 @@ def build_nurec_260_client(
         native_scan_manifest=manifest,
         native_scan_manifest_sha256=manifest_sha256,
         native_scan_max_midpoint_error_us=max_midpoint_error_us,
+        dynamic_object_render_mode=str(
+            config.get("dynamic_object_render_mode") or "nre_dynamic_override"
+        ),
+        nre_from_log_transform=(
+            list(config["nre_from_log_transform"])
+            if isinstance(config.get("nre_from_log_transform"), list)
+            else None
+        ),
+        lidar_instant_sampling=bool(config.get("lidar_instant_sampling", False)),
     )
 
 
@@ -622,6 +700,15 @@ def build_nurec_260_handler(
     config = run_config.get("nurec_runtime")
     if not isinstance(config, Mapping):
         raise NuRecMultimodalError("run config requires nurec_runtime")
+    render_mode = str(
+        config.get("dynamic_object_render_mode") or "nre_dynamic_override"
+    )
+    if render_mode == "source_replay_embedded":
+        experiment = run_config.get("experiment") or {}
+        if experiment.get("case_id") != "S0_original_replay":
+            raise NuRecMultimodalError(
+                "source_replay_embedded requires experiment.case_id=S0_original_replay"
+            )
     client = build_nurec_260_client(run_config)
     client.concurrency = max(1, int(concurrency))
     client.max_attempts = max(1, int(max_attempts))
@@ -809,6 +896,83 @@ def _validate_native_scan_manifest(
 
 def _is_sha256(value: str) -> bool:
     return len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+
+
+def _identity_transform() -> list[float]:
+    return [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ]
+
+
+def _validated_rigid_transform(values: list[Any], label: str) -> list[float]:
+    if len(values) != 16:
+        raise NuRecMultimodalError(f"{label} must contain 16 values")
+    try:
+        matrix = [float(value) for value in values]
+    except (TypeError, ValueError) as exc:
+        raise NuRecMultimodalError(f"{label} must be numeric") from exc
+    if not all(math.isfinite(value) for value in matrix):
+        raise NuRecMultimodalError(f"{label} must be finite")
+    if any(abs(matrix[index] - expected) > 1e-6 for index, expected in zip((12, 13, 14, 15), (0.0, 0.0, 0.0, 1.0))):
+        raise NuRecMultimodalError(f"{label} must be a rigid homogeneous transform")
+    rotation = [[matrix[row * 4 + column] for column in range(3)] for row in range(3)]
+    for row in range(3):
+        for column in range(3):
+            dot = sum(rotation[row][index] * rotation[column][index] for index in range(3))
+            if abs(dot - (1.0 if row == column else 0.0)) > 1e-4:
+                raise NuRecMultimodalError(f"{label} rotation is not orthonormal")
+    return matrix
+
+
+def _transform_render_pose_pair(pair: Mapping[str, Any], transform: list[float]) -> dict[str, Any]:
+    return {
+        "start": _transform_render_pose(pair["start"], transform),
+        "end": _transform_render_pose(pair["end"], transform),
+    }
+
+
+def _transform_render_pose(pose: Mapping[str, Any], transform: list[float]) -> dict[str, Any]:
+    position = pose["position_m"]
+    orientation = pose["orientation_xyzw"]
+    quaternion = [float(orientation[name]) for name in ("x", "y", "z", "w")]
+    norm = math.sqrt(sum(value * value for value in quaternion))
+    if norm <= 1e-12 or not math.isfinite(norm):
+        raise NuRecMultimodalError("render pose quaternion is invalid")
+    x, y, z, w = (value / norm for value in quaternion)
+    pose_matrix = [
+        1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w), float(position["x"]),
+        2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w), float(position["y"]),
+        2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y), float(position["z"]),
+        0.0, 0.0, 0.0, 1.0,
+    ]
+    result = [
+        sum(transform[row * 4 + index] * pose_matrix[index * 4 + column] for index in range(4))
+        for row in range(4)
+        for column in range(4)
+    ]
+    rx, ry, rz, rw = _rotation_to_quaternion(result)
+    return {
+        "position_m": {"x": result[3], "y": result[7], "z": result[11]},
+        "orientation_xyzw": {"x": rx, "y": ry, "z": rz, "w": rw},
+    }
+
+
+def _rotation_to_quaternion(matrix: list[float]) -> tuple[float, float, float, float]:
+    trace = matrix[0] + matrix[5] + matrix[10]
+    if trace > 0.0:
+        scale = math.sqrt(trace + 1.0) * 2.0
+        return ((matrix[9] - matrix[6]) / scale, (matrix[2] - matrix[8]) / scale, (matrix[4] - matrix[1]) / scale, 0.25 * scale)
+    if matrix[0] > matrix[5] and matrix[0] > matrix[10]:
+        scale = math.sqrt(1.0 + matrix[0] - matrix[5] - matrix[10]) * 2.0
+        return (0.25 * scale, (matrix[1] + matrix[4]) / scale, (matrix[2] + matrix[8]) / scale, (matrix[9] - matrix[6]) / scale)
+    if matrix[5] > matrix[10]:
+        scale = math.sqrt(1.0 + matrix[5] - matrix[0] - matrix[10]) * 2.0
+        return ((matrix[1] + matrix[4]) / scale, 0.25 * scale, (matrix[6] + matrix[9]) / scale, (matrix[2] - matrix[8]) / scale)
+    scale = math.sqrt(1.0 + matrix[10] - matrix[0] - matrix[5]) * 2.0
+    return ((matrix[2] + matrix[8]) / scale, (matrix[6] + matrix[9]) / scale, 0.25 * scale, (matrix[4] - matrix[1]) / scale)
 
 
 def _pose_mapping(pose: Mapping[str, Any]) -> dict[str, Any]:

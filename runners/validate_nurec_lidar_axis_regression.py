@@ -1,9 +1,8 @@
 """Multi-frame LiDAR axis-provenance regression for NuRec closed-loop runs.
 
-The one-tick G0 acceptance (r22) proved the NRE->CARLA LiDAR axis
-normalization against an independent same-frame CARLA native capture and
-froze the verified transform (``response_to_sensor`` matrix, identified by
-its sha256). Multi-tick runs do not carry the heavyweight same-frame probe,
+The coordinate-fixed M8 diagnosis established that the raw NRE response is
+already in the calibrated sensor-local basis. Multi-tick runs do not carry a
+same-frame physical probe,
 so this regression re-verifies, for EVERY frame of a run:
 
 1. the frame's ``axis_normalization`` declares the exact transform matrix
@@ -34,10 +33,11 @@ from runtime.scene0061_lidar_axis_normalization import (  # noqa: E402
     normalize_lidar_xyzi,
 )
 
-# The transform matrix verified by the r22 same-frame physical gate
-# (lidar_axis_evidence.json axis_normalization.response_to_sensor_sha256).
-R22_VERIFIED_MATRIX_SHA256 = (
-    "8277ba837a2779bf041c9a1ee8a8f78f8c912192d06b74082a01a1706d96d925"
+# The identity raw-response-to-sensor transform selected by the coordinate-fixed
+# M8 occupancy diagnosis. A later physical gate may replace this only with new
+# payload-bound evidence and a corresponding explicit CLI argument.
+RAW_RESPONSE_TO_SENSOR_SHA256 = (
+    "bec390d7d89d2fd82783a1022dedab9c79736c27fe490d2a0462e8c3443843eb"
 )
 
 
@@ -128,7 +128,7 @@ def validate_run(
         "status": status,
         "run_dir": str(run_dir),
         "expected_matrix_sha256": expected_matrix_sha256,
-        "matrix_provenance": "r22 same-frame physical gate (lidar_axis_evidence.json)",
+        "matrix_provenance": "coordinate-fixed M8 raw-response occupancy diagnosis",
         "lidar_frames_checked": frames_checked,
         "lidar_frames_passed": frames_passed,
         "lidar_frames_unrendered": frames_unrendered,
@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument(
-        "--expected-matrix-sha256", default=R22_VERIFIED_MATRIX_SHA256
+        "--expected-matrix-sha256", default=RAW_RESPONSE_TO_SENSOR_SHA256
     )
     args = parser.parse_args(argv)
 

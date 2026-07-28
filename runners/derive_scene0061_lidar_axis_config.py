@@ -33,13 +33,16 @@ from runtime.scene0061_lidar_axis_normalization import (
 
 DERIVATION_SCHEMA = "scene0061_lidar_axis_config_derivation.v1"
 
-# Candidate established by the read-only r18 analysis.  It is not accepted as
-# a coordinate proof by itself: the subsequent fresh live run must replay it
-# against the raw and normalised payloads plus same-frame CARLA anchors.
-R18_RESPONSE_TO_SENSOR = [
-    0.0, 0.0, -1.0, 0.0,
-    0.0, -1.0, 0.0, 0.0,
-    -1.0, 0.0, 0.0, 0.0,
+# Coordinate-fixed M8 payloads demonstrate that the NuRec response is already
+# in the calibrated sensor-local basis.  The earlier R18 rotation was falsified
+# by all three frames: it yielded zero physical-box support while the raw basis
+# yielded consistent support.  A fresh live capture still has to establish the
+# physical-coordinate evidence; this contract only makes the chosen basis
+# explicit and replayable.
+RAW_RESPONSE_TO_SENSOR = [
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
     0.0, 0.0, 0.0, 1.0,
 ]
 
@@ -53,7 +56,7 @@ def _sha256_bytes(body: bytes) -> str:
 
 
 def lidar_axis_normalization_contract() -> dict[str, Any]:
-    """Return the fully validated NRE-response to CARLA-sensor contract."""
+    """Return the replayable raw-NRE-response to calibrated-sensor contract."""
 
     return validate_lidar_axis_normalization(
         {
@@ -62,7 +65,7 @@ def lidar_axis_normalization_contract() -> dict[str, Any]:
             "source_axis_convention": "nre_26_04_render_axes",
             "target_coordinate_frame": "sensor_local",
             "target_axis_convention": "carla_sensor",
-            "response_to_sensor": list(R18_RESPONSE_TO_SENSOR),
+            "response_to_sensor": list(RAW_RESPONSE_TO_SENSOR),
         }
     )
 
@@ -73,12 +76,14 @@ def derive_lidar_axis_config(
     source_path: Path,
     source_sha256: str,
     source_byte_count: int,
+    supersede_existing_axis: bool = False,
 ) -> dict[str, Any]:
     """Return a fresh config bound to the r18-measured axis declaration.
 
-    A source must be an original runtime config: if it already contains either
-    this derivation record or an axis declaration, creating another output
-    would obscure which declaration is authoritative.
+    A source may inherit an unrelated configuration derivation such as an M7
+    binding or M8 safety contract. A prior LiDAR-axis derivation or an existing
+    axis declaration is still rejected, so one output cannot hide a second axis
+    contract behind an arbitrary upstream provenance record.
     """
 
     if not isinstance(source_config, Mapping):
@@ -87,18 +92,31 @@ def derive_lidar_axis_config(
         raise Scene0061LiDARConfigDerivationError("source config SHA-256 must be lowercase hex")
     if not isinstance(source_byte_count, int) or isinstance(source_byte_count, bool) or source_byte_count < 1:
         raise Scene0061LiDARConfigDerivationError("source config byte count must be positive")
-    if source_config.get("config_derivation") is not None:
+    inherited_derivation = source_config.get("config_derivation")
+    if (
+        not supersede_existing_axis
+        and isinstance(inherited_derivation, Mapping)
+        and inherited_derivation.get("schema_version") == DERIVATION_SCHEMA
+    ):
         raise Scene0061LiDARConfigDerivationError(
-            "source config already contains a derivation record"
+            "source config already contains a LiDAR-axis derivation record"
         )
 
     runtime = source_config.get("nurec_runtime")
     if not isinstance(runtime, Mapping):
         raise Scene0061LiDARConfigDerivationError("source run config requires nurec_runtime")
-    if runtime.get("lidar_axis_normalization") is not None:
+    existing_axis = runtime.get("lidar_axis_normalization")
+    if existing_axis is not None and not supersede_existing_axis:
         raise Scene0061LiDARConfigDerivationError(
             "source config already declares lidar_axis_normalization"
         )
+    if existing_axis is not None:
+        try:
+            existing_axis = validate_lidar_axis_normalization(existing_axis)
+        except LiDARAxisNormalizationError as exc:
+            raise Scene0061LiDARConfigDerivationError(
+                f"source LiDAR axis contract is invalid: {exc}"
+            ) from exc
     lidar_specs = runtime.get("lidar_specs")
     matching_specs = [
         item
@@ -115,9 +133,13 @@ def derive_lidar_axis_config(
     normalization = lidar_axis_normalization_contract()
     result_runtime["lidar_axis_normalization"] = normalization
     result["nurec_runtime"] = result_runtime
-    result["config_derivation"] = {
+    derivation = {
         "schema_version": DERIVATION_SCHEMA,
-        "kind": "bind_nre_26_04_lidar_response_to_carla_sensor",
+        "kind": (
+            "supersede_invalid_nre_26_04_lidar_response_axis"
+            if supersede_existing_axis
+            else "bind_nre_26_04_lidar_response_to_carla_sensor"
+        ),
         "source_config": {
             "path": str(source_path.expanduser().resolve()),
             "sha256": source_sha256,
@@ -127,10 +149,20 @@ def derive_lidar_axis_config(
             "response_to_sensor_sha256"
         ],
     }
+    if inherited_derivation is not None:
+        derivation["parent_config_derivation"] = deepcopy(inherited_derivation)
+    if existing_axis is not None:
+        derivation["superseded_lidar_axis_normalization"] = existing_axis
+        derivation["supersession_reason"] = (
+            "coordinate_fixed_m8_raw_response_has_support_while_prior_axis_does_not"
+        )
+    result["config_derivation"] = derivation
     return result
 
 
-def derive_lidar_axis_config_file(source_path: Path, output_path: Path) -> dict[str, Any]:
+def derive_lidar_axis_config_file(
+    source_path: Path, output_path: Path, *, supersede_existing_axis: bool = False
+) -> dict[str, Any]:
     """Read a strict source document and write one new derived document."""
 
     source = source_path.expanduser().resolve()
@@ -153,6 +185,7 @@ def derive_lidar_axis_config_file(source_path: Path, output_path: Path) -> dict[
         source_path=source,
         source_sha256=_sha256_bytes(source_bytes),
         source_byte_count=len(source_bytes),
+        supersede_existing_axis=supersede_existing_axis,
     )
     encoded = (json.dumps(result, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -178,9 +211,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--source-config", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--supersede-existing-axis",
+        action="store_true",
+        help="Explicitly replace an existing, recorded LiDAR axis contract and retain it as provenance.",
+    )
     args = parser.parse_args(argv)
     try:
-        result = derive_lidar_axis_config_file(args.source_config, args.output)
+        result = derive_lidar_axis_config_file(
+            args.source_config,
+            args.output,
+            supersede_existing_axis=args.supersede_existing_axis,
+        )
     except (OSError, ValueError) as exc:
         print(json.dumps({"status": "failed", "detail": str(exc)}, ensure_ascii=False))
         return 2

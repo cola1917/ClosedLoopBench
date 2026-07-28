@@ -35,6 +35,8 @@ def _context():
                 "source": "carla_runtime_actor_pose",
                 "pose_reference": "carla_bounding_box_center",
                 "pose_pair": {"start": actor_start, "end": actor_end},
+                "carla_physical_pose_reference": "carla_bounding_box_center",
+                "carla_physical_pose_pair": {"start": actor_start, "end": actor_end},
             }
         },
         "clock": "carla_snapshot",
@@ -93,6 +95,10 @@ class NuRecRuntimeHandlerTests(unittest.TestCase):
         lidar_position = lidar["pose_pair"]["end"]["position_m"]
         self.assertAlmostEqual(camera_position["x"] - lidar_position["x"], 1.0)
         self.assertAlmostEqual(camera_position["z"] - lidar_position["z"], 1.5)
+        request = handler.pose_request_trace[0]
+        self.assertEqual(request["schema_version"], "nurec_dynamic_pose_request.v1")
+        self.assertEqual(request["frame_id"], 7)
+        self.assertEqual(request["actor_pose_pairs"][0]["nurec_track_id"], VEHICLE_TRACK)
 
     def test_requires_explicit_sensor_calibration_and_scene_identity(self):
         from adapters.nurec_multimodal import NuRecMultimodalError

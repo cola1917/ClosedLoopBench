@@ -109,6 +109,7 @@ def run_visualization(
     display: bool,
     overlay: bool,
     preview_camera_count: int,
+    include_dynamic_objects: bool = True,
 ) -> dict[str, Any]:
     if mode not in {"formal_acceptance", "preview_debug"}:
         raise ValueError(f"unsupported mode: {mode}")
@@ -180,6 +181,7 @@ def run_visualization(
                 height=height,
                 artifact=artifact,
                 selected_scan=selected_scan,
+                include_dynamic_objects=include_dynamic_objects,
                 cv2=cv2,
                 np=np,
             )
@@ -376,6 +378,7 @@ def _capture_cameras(
     height: int,
     artifact: Mapping[str, Any],
     selected_scan: Mapping[str, Any],
+    include_dynamic_objects: bool,
     cv2: Any,
     np: Any,
 ) -> tuple[
@@ -406,8 +409,12 @@ def _capture_cameras(
             "camera",
             camera_name,
         )
-        payload["dynamic_objects"] = _transform_dynamic_objects_to_nre(
-            payload["dynamic_objects"], artifact["nre_from_log"]
+        payload["dynamic_objects"] = (
+            _transform_dynamic_objects_to_nre(
+                payload["dynamic_objects"], artifact["nre_from_log"]
+            )
+            if include_dynamic_objects
+            else []
         )
         started = time.monotonic()
         encoded = client.encode_rgb(payload)
@@ -1141,6 +1148,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--overlay", action="store_true")
     parser.add_argument("--preview-camera-count", type=int, choices=(1, 3), default=3)
+    parser.add_argument(
+        "--exclude-dynamic-objects",
+        action="store_true",
+        help="Diagnostic-only A/B probe: render the same native poses without dynamic objects.",
+    )
     args = parser.parse_args(argv)
     try:
         report = run_visualization(
@@ -1163,6 +1175,7 @@ def main(argv: list[str] | None = None) -> int:
             display=not args.headless,
             overlay=args.overlay,
             preview_camera_count=args.preview_camera_count,
+            include_dynamic_objects=not args.exclude_dynamic_objects,
         )
     except (OSError, ValueError, RuntimeError, NuRecMultimodalError) as exc:
         print(json.dumps({"status": "failed", "detail": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
