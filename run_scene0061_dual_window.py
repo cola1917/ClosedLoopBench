@@ -1,0 +1,1198 @@
+from __future__ import annotations
+
+import argparse
+from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import hashlib
+import json
+import math
+from pathlib import Path
+import shutil
+import sys
+import time
+from typing import Any, Mapping
+import xml.etree.ElementTree as ET
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from adapters.nurec_260_client import build_nurec_260_client  # noqa: E402
+from adapters.nurec_multimodal import (  # noqa: E402
+    NuRecMultimodalError,
+    materialize_nurec_rpc_requests,
+    validate_nurec_multimodal_frame,
+)
+from runners.diagnose_nurec_260_lidar import (  # noqa: E402
+    _load_artifact_runtime,
+    _native_sensor_pose_pair,
+    _relative_interval,
+    _select_native_scan,
+    _transform_dynamic_objects_to_nre,
+)
+
+
+CAMERA_ORDER = (
+    "camera_front_left",
+    "camera_front",
+    "camera_front_right",
+    "camera_back_left",
+    "camera_back",
+    "camera_back_right",
+)
+PREVIEW_CAMERAS = (
+    "camera_front_left",
+    "camera_front",
+    "camera_front_right",
+)
+
+
+@dataclass(frozen=True)
+class ActorState:
+    track_id: str
+    actor_type: str
+    carla_actor_id: int | None
+    x: float
+    y: float
+    z: float
+    yaw: float
+    speed_mps: float
+    length: float
+    width: float
+    height: float
+    controlled: bool
+    trajectory: tuple[tuple[float, float], ...]
+
+
+@dataclass(frozen=True)
+class FramePacket:
+    state_name: str
+    frame_id: int
+    simulation_time_sec: float
+    timestamp_us: int
+    ego: ActorState
+    actors: tuple[ActorState, ...]
+    cameras: Mapping[str, Any]
+    camera_jpegs: Mapping[str, bytes]
+    camera_records: tuple[Mapping[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class RoadGeometry:
+    """A local OpenDRIVE driving-lane centerline plus its display width."""
+
+    road_id: str
+    points: tuple[tuple[float, float], ...]
+    width_m: float
+
+
+def run_visualization(
+    *,
+    config_path: Path,
+    artifact_path: Path,
+    scene_package_path: Path,
+    baseline_path: Path,
+    moved_path: Path,
+    scenario_ir_path: Path,
+    xodr_path: Path,
+    actor_mapping_path: Path,
+    overlap_path: Path,
+    lidar_diagnostic_path: Path,
+    controlled_track_id: str,
+    required_track_ids: list[str],
+    mode: str,
+    output_dir: Path | None,
+    width: int,
+    height: int,
+    display: bool,
+    overlay: bool,
+    preview_camera_count: int,
+    include_dynamic_objects: bool = True,
+) -> dict[str, Any]:
+    if mode not in {"formal_acceptance", "preview_debug"}:
+        raise ValueError(f"unsupported mode: {mode}")
+    if width < 1 or height < 1:
+        raise ValueError("camera dimensions must be positive")
+    if mode == "formal_acceptance" and output_dir is None:
+        raise ValueError("formal_acceptance requires --output-dir")
+    if output_dir is not None and output_dir.exists():
+        raise FileExistsError(f"output directory already exists: {output_dir}")
+
+    cv2, np = _vision_modules()
+    config = _load_object(config_path)
+    baseline = _load_object(baseline_path)
+    moved = _load_object(moved_path)
+    scenario_ir = _load_object(scenario_ir_path)
+    scene_package = _load_object(scene_package_path)
+    actor_mapping = _load_object(actor_mapping_path)
+    overlap = _load_object(overlap_path)
+    lidar_diagnostic = _load_object(lidar_diagnostic_path)
+    validate_nurec_multimodal_frame(baseline)
+    validate_nurec_multimodal_frame(moved)
+    changed_tracks = _changed_tracks(baseline, moved)
+    if changed_tracks != [controlled_track_id]:
+        raise ValueError(
+            "baseline/moved must change exactly the controlled track; "
+            f"observed {changed_tracks}"
+        )
+    _same_frame_gate(baseline, moved)
+
+    runtime = config.get("nurec_runtime")
+    if not isinstance(runtime, Mapping):
+        raise ValueError("config requires nurec_runtime")
+    scene_start_us = int(runtime["scene_start_us"])
+    artifact = _load_artifact_runtime(artifact_path)
+    reference_us = scene_start_us + int(
+        round(float(baseline["simulation_time_sec"]) * 1_000_000)
+    )
+    selected_scan = _select_native_scan(artifact, reference_us)
+    mapping_by_track = _mapping_by_track(actor_mapping)
+    roads = _sample_xodr(xodr_path)
+    map_validation = _validate_map_contract(scene_package, xodr_path)
+    scenario_actors = {
+        str(actor["actor_id"]): actor for actor in scenario_ir.get("actors", [])
+    }
+    if controlled_track_id not in scenario_actors:
+        raise ValueError(f"controlled track absent from Scenario IR: {controlled_track_id}")
+
+    camera_names = (
+        CAMERA_ORDER
+        if mode == "formal_acceptance"
+        else PREVIEW_CAMERAS[: max(1, min(preview_camera_count, 3))]
+    )
+    if output_dir is not None:
+        output_dir.mkdir(parents=True)
+        shutil.copy2(actor_mapping_path, output_dir / "actor_mapping.json")
+        shutil.copy2(overlap_path, output_dir / "overlap.json")
+
+    client = build_nurec_260_client(config)
+    started = time.monotonic()
+    packets: list[FramePacket] = []
+    packet_reports: list[dict[str, Any]] = []
+    try:
+        for state_name, frame in (("baseline", baseline), ("moved", moved)):
+            camera_images, camera_jpegs, camera_records = _capture_cameras(
+                client,
+                frame,
+                camera_names,
+                width=width,
+                height=height,
+                artifact=artifact,
+                selected_scan=selected_scan,
+                include_dynamic_objects=include_dynamic_objects,
+                cv2=cv2,
+                np=np,
+            )
+            packet = _build_packet(
+                state_name=state_name,
+                frame=frame,
+                scene_start_us=scene_start_us,
+                scenario_ir=scenario_ir,
+                scenario_actors=scenario_actors,
+                mapping_by_track=mapping_by_track,
+                controlled_track_id=controlled_track_id,
+                camera_images=camera_images,
+                camera_jpegs=camera_jpegs,
+                camera_records=camera_records,
+                baseline=baseline,
+            )
+            packets.append(packet)
+            carla_canvas = _render_carla_window(
+                packet,
+                roads,
+                cv2=cv2,
+                np=np,
+                map_label=_map_display_label(map_validation),
+            )
+            grid_canvas = _render_camera_window(
+                packet,
+                camera_names,
+                cv2=cv2,
+                np=np,
+                overlay=overlay,
+            )
+            if display:
+                cv2.namedWindow("CARLA state explanation", cv2.WINDOW_NORMAL)
+                cv2.namedWindow("NuRec synchronized cameras", cv2.WINDOW_NORMAL)
+                cv2.imshow("CARLA state explanation", carla_canvas)
+                cv2.imshow("NuRec synchronized cameras", grid_canvas)
+                cv2.waitKey(1)
+
+            report_row = {
+                "state": state_name,
+                "frame_id": packet.frame_id,
+                "simulation_time_sec": packet.simulation_time_sec,
+                "timestamp_us": packet.timestamp_us,
+                "controlled_actor": _actor_report(
+                    next(actor for actor in packet.actors if actor.controlled)
+                ),
+                "camera_records": [dict(row) for row in camera_records],
+                "synchronization_error_us": 0,
+                "dropped_camera_frames": len(camera_names) - len(camera_images),
+            }
+            if output_dir is not None and mode == "formal_acceptance":
+                raw_dir = output_dir / "raw" / state_name
+                raw_dir.mkdir(parents=True)
+                for name in camera_images:
+                    raw_path = raw_dir / f"{name}.{packet.frame_id:05d}.jpg"
+                    raw_path.write_bytes(packet.camera_jpegs[name])
+                carla_path = output_dir / f"frame_{packet.frame_id:05d}.{state_name}.carla.png"
+                grid_path = output_dir / f"frame_{packet.frame_id:05d}.{state_name}.nurec_grid.png"
+                if not cv2.imwrite(str(carla_path), carla_canvas):
+                    raise RuntimeError(f"failed to save CARLA screenshot: {carla_path}")
+                if not cv2.imwrite(str(grid_path), grid_canvas):
+                    raise RuntimeError(f"failed to save NuRec grid screenshot: {grid_path}")
+                report_row["carla_screenshot"] = _file_record(carla_path)
+                report_row["nurec_grid_screenshot"] = _file_record(grid_path)
+                report_row["raw_frame_paths"] = {
+                    name: str((raw_dir / f"{name}.{packet.frame_id:05d}.jpg").resolve())
+                    for name in camera_images
+                }
+                report_row["raw_frame_files"] = {
+                    name: _file_record(
+                        raw_dir / f"{name}.{packet.frame_id:05d}.jpg"
+                    )
+                    for name in camera_images
+                }
+            packet_reports.append(report_row)
+    finally:
+        client.close()
+        if display:
+            cv2.destroyAllWindows()
+
+    elapsed_sec = max(time.monotonic() - started, 1e-9)
+    frame_packet_fps = len(packets) / elapsed_sec
+    mapped_tracks = set(mapping_by_track)
+    missing_required = sorted(set(required_track_ids) - mapped_tracks)
+    camera_gate = (
+        tuple(camera_names) == CAMERA_ORDER
+        and all(len(packet.cameras) == 6 for packet in packets)
+        and all(
+            image.shape[:2] == (height, width)
+            for packet in packets
+            for image in packet.cameras.values()
+        )
+    )
+    overlap_count = int(overlap.get("sample_count", len(overlap.get("samples", []))))
+    gates = {
+        "six_camera_800x450": camera_gate and (width, height) == (800, 450),
+        "live_lidar_diagnostic_passed": lidar_diagnostic.get("status") == "passed",
+        "required_actor_mapping_complete": not missing_required,
+        "overlap_zero": overlap_count == 0,
+        "saveimages": mode == "formal_acceptance" and output_dir is not None,
+        "same_frame_packet_drives_both_windows": all(
+            row["synchronization_error_us"] == 0 for row in packet_reports
+        ),
+        "rgb_color_health": all(
+            float(record["exact_gray_pixel_fraction"]) < 0.98
+            and float(record["mean_channel_spread"]) > 1.0
+            for row in packet_reports
+            for record in row["camera_records"]
+        ),
+    }
+    if mode == "formal_acceptance":
+        status = "passed" if all(gates.values()) else "blocked"
+    else:
+        status = (
+            "passed"
+            if packets
+            and all(row["dropped_camera_frames"] == 0 for row in packet_reports)
+            and all(row["synchronization_error_us"] == 0 for row in packet_reports)
+            else "blocked"
+        )
+    report = {
+        "schema_version": "closed_loopbench.scene0061_dual_window.v1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": mode,
+        "status": status,
+        "window_contract": {
+            "driver": "single FramePacket loop",
+            "carla_window": (
+                "OpenDRIVE top-down state explanation with lane surfaces, actor bbox "
+                "proxies, controlled-actor trajectory, and compact state HUD"
+            ),
+            "carla_display": _carla_display_contract(),
+            "nurec_window": "independent synchronized camera grid",
+            "display_enabled": display,
+            "rgb_bbox_overlay_enabled": overlay,
+        },
+        "inputs": {
+            "config": _input_record(config_path),
+            "artifact": _input_record(artifact_path),
+            "scene_package": _input_record(scene_package_path),
+            "baseline": _input_record(baseline_path),
+            "moved": _input_record(moved_path),
+            "scenario_ir": _input_record(scenario_ir_path),
+            "opendrive": _input_record(xodr_path),
+            "actor_mapping": _input_record(actor_mapping_path),
+            "overlap": _input_record(overlap_path),
+            "lidar_diagnostic": _input_record(lidar_diagnostic_path),
+        },
+        "controlled_track_id": controlled_track_id,
+        "changed_tracks": changed_tracks,
+        "required_track_ids": required_track_ids,
+        "missing_required_actor_mappings": missing_required,
+        "camera_order": list(camera_names),
+        "camera_source_dimensions": {"width": width, "height": height},
+        "render_coordinate_frame": {
+            "sensor_pose": "artifact T_rig_world times T_sensor_rig",
+            "dynamic_objects": "inverse(T_world_base) times nuscenes_global pose",
+            "selected_native_scan": selected_scan["summary"],
+        },
+        "map_validation": map_validation,
+        "packets": packet_reports,
+        "statistics": {
+            "packet_count": len(packets),
+            "elapsed_sec": elapsed_sec,
+            "actual_frame_packet_fps": frame_packet_fps,
+            "dropped_camera_frames": sum(
+                row["dropped_camera_frames"] for row in packet_reports
+            ),
+            "maximum_synchronization_error_us": max(
+                row["synchronization_error_us"] for row in packet_reports
+            ),
+        },
+        "gates": gates,
+        "overlap_classification": (
+            "zero_overlap_samples" if overlap_count == 0 else "overlap_detected"
+        ),
+    }
+    if output_dir is not None:
+        report_path = output_dir / "dual_window_report.json"
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        report["report_path"] = str(report_path.resolve())
+    return report
+
+
+def _capture_cameras(
+    client: Any,
+    frame: Mapping[str, Any],
+    camera_names: tuple[str, ...],
+    *,
+    width: int,
+    height: int,
+    artifact: Mapping[str, Any],
+    selected_scan: Mapping[str, Any],
+    include_dynamic_objects: bool,
+    cv2: Any,
+    np: Any,
+) -> tuple[
+    dict[str, Any],
+    dict[str, bytes],
+    tuple[dict[str, Any], ...],
+]:
+    payloads = {
+        str(payload["sensor"]["sensor_id"]): payload
+        for payload in materialize_nurec_rpc_requests(frame)
+        if payload["modality"] == "rgb"
+    }
+    missing = [name for name in camera_names if name not in payloads]
+    if missing:
+        raise ValueError(f"frame lacks requested cameras: {missing}")
+    images: dict[str, Any] = {}
+    jpeg_payloads: dict[str, bytes] = {}
+    records = []
+    for camera_name in camera_names:
+        payload = deepcopy(payloads[camera_name])
+        parameters = dict(payload["sensor"].get("parameters") or {})
+        parameters.update(width=width, height=height)
+        payload["sensor"]["parameters"] = parameters
+        payload["pose_interval_sec"] = _relative_interval(client, selected_scan)
+        payload["sensor"]["pose_pair"] = _native_sensor_pose_pair(
+            artifact,
+            selected_scan,
+            "camera",
+            camera_name,
+        )
+        payload["dynamic_objects"] = (
+            _transform_dynamic_objects_to_nre(
+                payload["dynamic_objects"], artifact["nre_from_log"]
+            )
+            if include_dynamic_objects
+            else []
+        )
+        started = time.monotonic()
+        encoded = client.encode_rgb(payload)
+        response = client.render_rgb(encoded["wire_request"])
+        body = client.response_bytes(response)
+        metadata = client.inspect_response(payload, response, body)
+        image_bytes = bytes(response.image_bytes)
+        image = cv2.imdecode(np.frombuffer(image_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if image is None or image.shape[:2] != (height, width):
+            raise NuRecMultimodalError(
+                f"decoded {camera_name} dimensions do not match {width}x{height}"
+            )
+        images[camera_name] = image
+        jpeg_payloads[camera_name] = image_bytes
+        sample = image[::8, ::8].reshape(-1, 3)
+        exact_gray_fraction = float(
+            np.mean((sample[:, 0] == sample[:, 1]) & (sample[:, 1] == sample[:, 2]))
+        )
+        mean_channel_spread = float(
+            np.mean(np.max(sample, axis=1) - np.min(sample, axis=1))
+        )
+        records.append(
+            {
+                "camera_name": camera_name,
+                "frame_id": int(frame["frame_id"]),
+                "serialized_response_sha256": hashlib.sha256(body).hexdigest(),
+                "jpeg_sha256": hashlib.sha256(image_bytes).hexdigest(),
+                "jpeg_bytes": len(image_bytes),
+                "width": int(metadata["width"]),
+                "height": int(metadata["height"]),
+                "logical_image_quality": float(parameters.get("image_quality", 0.95)),
+                "wire_image_quality": float(encoded["wire_request"].image_quality),
+                "exact_gray_pixel_fraction": exact_gray_fraction,
+                "mean_channel_spread": mean_channel_spread,
+                "latency_ms": (time.monotonic() - started) * 1000.0,
+            }
+        )
+    return images, jpeg_payloads, tuple(records)
+
+
+def _build_packet(
+    *,
+    state_name: str,
+    frame: Mapping[str, Any],
+    scene_start_us: int,
+    scenario_ir: Mapping[str, Any],
+    scenario_actors: Mapping[str, Mapping[str, Any]],
+    mapping_by_track: Mapping[str, Mapping[str, Any]],
+    controlled_track_id: str,
+    camera_images: Mapping[str, Any],
+    camera_jpegs: Mapping[str, bytes],
+    camera_records: tuple[Mapping[str, Any], ...],
+    baseline: Mapping[str, Any],
+) -> FramePacket:
+    simulation_time_sec = float(frame["simulation_time_sec"])
+    ego_source = scenario_ir.get("ego")
+    if not isinstance(ego_source, Mapping):
+        raise ValueError("Scenario IR lacks ego")
+    ego = _actor_state(
+        ego_source,
+        simulation_time_sec,
+        mapping_by_track,
+        controlled=False,
+        fallback_track_id="ego",
+    )
+    desired_tracks = [controlled_track_id]
+    for track_id in (
+        "c1958768d48640948f6053d04cffd35b",
+        "71603dd1a2ba4e9daf095535e38310ac",
+    ):
+        if track_id not in desired_tracks and track_id in scenario_actors:
+            desired_tracks.append(track_id)
+    actors = []
+    for track_id in desired_tracks:
+        source = scenario_actors.get(track_id)
+        if source is None:
+            continue
+        actor = _actor_state(
+            source,
+            simulation_time_sec,
+            mapping_by_track,
+            controlled=track_id == controlled_track_id,
+        )
+        if state_name == "moved" and actor.controlled:
+            dx, dy, dz = _dynamic_delta(baseline, frame, track_id)
+            actor = ActorState(
+                **{
+                    **actor.__dict__,
+                    "x": actor.x + dx,
+                    "y": actor.y + dy,
+                    "z": actor.z + dz,
+                }
+            )
+        actors.append(actor)
+    return FramePacket(
+        state_name=state_name,
+        frame_id=int(frame["frame_id"]),
+        simulation_time_sec=simulation_time_sec,
+        timestamp_us=scene_start_us + int(round(simulation_time_sec * 1_000_000)),
+        ego=ego,
+        actors=tuple(actors),
+        cameras=camera_images,
+        camera_jpegs=camera_jpegs,
+        camera_records=camera_records,
+    )
+
+
+def _actor_state(
+    source: Mapping[str, Any],
+    simulation_time_sec: float,
+    mapping_by_track: Mapping[str, Mapping[str, Any]],
+    *,
+    controlled: bool,
+    fallback_track_id: str | None = None,
+) -> ActorState:
+    track_id = str(source.get("actor_id") or source.get("source_track_id") or fallback_track_id or "")
+    trajectory = source.get("reference_trajectory") or []
+    if not trajectory:
+        initial = source.get("initial_state")
+        if not isinstance(initial, Mapping):
+            raise ValueError(f"actor {track_id} lacks trajectory/state")
+        trajectory = [initial]
+    point = min(
+        trajectory,
+        key=lambda row: abs(float(row.get("t_sec", 0.0)) - simulation_time_sec),
+    )
+    dimensions = source.get("dimensions") or {}
+    mapping = mapping_by_track.get(track_id) or {}
+    actor_type = str(source.get("type") or "ego")
+    return ActorState(
+        track_id=track_id,
+        actor_type=actor_type,
+        carla_actor_id=(
+            int(mapping["runtime_actor_id"])
+            if isinstance(mapping.get("runtime_actor_id"), int)
+            else None
+        ),
+        x=float(point.get("x", 0.0)),
+        y=float(point.get("y", 0.0)),
+        z=float(point.get("z", 0.0)),
+        yaw=float(point.get("yaw", 0.0)),
+        speed_mps=float(point.get("speed_mps", 0.0)),
+        length=float(dimensions.get("length", 4.5 if actor_type != "pedestrian" else 0.8)),
+        width=float(dimensions.get("width", 1.8 if actor_type != "pedestrian" else 0.8)),
+        height=float(dimensions.get("height", 1.6 if actor_type != "pedestrian" else 1.8)),
+        controlled=controlled,
+        trajectory=tuple(
+            (float(row.get("x", 0.0)), float(row.get("y", 0.0)))
+            for row in trajectory
+            if float(row.get("t_sec", 0.0)) <= simulation_time_sec
+        )[-10:],
+    )
+
+
+def _render_carla_window(
+    packet: FramePacket,
+    roads: list[RoadGeometry],
+    *,
+    cv2: Any,
+    np: Any,
+    map_label: str = "OpenDRIVE road.xodr",
+) -> Any:
+    """Render a compact world-state explainer, not a CARLA camera feed."""
+
+    canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+    canvas[:] = (24, 27, 32)
+    actors = (packet.ego,) + packet.actors
+    min_x, max_x, min_y, max_y = _state_viewport(actors, canvas.shape[1], canvas.shape[0])
+    margin = 26
+    scale = min(
+        (canvas.shape[1] - 2 * margin) / max(max_x - min_x, 1.0),
+        (canvas.shape[0] - 2 * margin) / max(max_y - min_y, 1.0),
+    )
+
+    def screen(point: tuple[float, float]) -> tuple[int, int]:
+        x = int(margin + (point[0] - min_x) * scale)
+        y = int(canvas.shape[0] - margin - (point[1] - min_y) * scale)
+        return x, y
+
+    # The XODR generated for scene-0061 carries one local driving lane per
+    # road. Render width-derived lane surfaces instead of an ambiguous grid of
+    # centerlines, while keeping this view deliberately non-photorealistic.
+    for road in roads:
+        if len(road.points) < 2 or not _road_intersects_view(road, min_x, max_x, min_y, max_y):
+            continue
+        left, right = _offset_polyline(road.points, road.width_m / 2.0)
+        surface = np.asarray(
+            [screen(point) for point in (*left, *reversed(right))], dtype=np.int32
+        )
+        cv2.fillPoly(canvas, [surface], (52, 57, 64), cv2.LINE_AA)
+        for boundary in (left, right):
+            cv2.polylines(
+                canvas,
+                [np.asarray([screen(point) for point in boundary], dtype=np.int32)],
+                False,
+                (110, 116, 124),
+                1,
+                cv2.LINE_AA,
+            )
+        _draw_dashed_polyline(
+            canvas,
+            [screen(point) for point in road.points],
+            color=(76, 82, 90),
+            thickness=1,
+            cv2=cv2,
+            np=np,
+        )
+
+    for actor in actors:
+        if actor.controlled and len(actor.trajectory) > 1:
+            _draw_dashed_polyline(
+                canvas,
+                [screen(point) for point in actor.trajectory],
+                color=_actor_color(actor),
+                thickness=3,
+                cv2=cv2,
+                np=np,
+            )
+
+    for actor in actors:
+        color = _actor_color(actor)
+        corners = _bbox_corners(actor)
+        pixel_corners = np.asarray([screen(point) for point in corners], dtype=np.int32)
+        cv2.fillPoly(canvas, [pixel_corners], tuple(max(0, value // 4) for value in color))
+        cv2.polylines(
+            canvas,
+            [pixel_corners],
+            True,
+            color,
+            4 if actor.controlled else 2,
+            cv2.LINE_AA,
+        )
+        # The view is top-down, so show the cuboid height as a subtle upward
+        # extrusion instead of pretending this is a photorealistic CARLA view.
+        lift = max(5, min(16, int(actor.height * scale * 0.20)))
+        roof_corners = pixel_corners.copy()
+        roof_corners[:, 1] -= lift
+        cv2.polylines(canvas, [roof_corners], True, color, 1, cv2.LINE_AA)
+        for base, roof in zip(pixel_corners, roof_corners):
+            cv2.line(canvas, tuple(base), tuple(roof), color, 1, cv2.LINE_AA)
+        center = screen((actor.x, actor.y))
+        heading_tip = screen(
+            (
+                actor.x
+                + max(actor.length * 0.62, 0.8) * math.cos(_scene_yaw_radians(actor.yaw)),
+                actor.y
+                + max(actor.length * 0.62, 0.8) * math.sin(_scene_yaw_radians(actor.yaw)),
+            )
+        )
+        cv2.arrowedLine(canvas, center, heading_tip, color, 2, cv2.LINE_AA, tipLength=0.28)
+        tag = "CTRL" if actor.controlled else "EGO" if actor.track_id == "ego" else "ACTOR"
+        cv2.putText(
+            canvas,
+            tag,
+            (center[0] + 8, center[1] - 9),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.42,
+            color,
+            1,
+            cv2.LINE_AA,
+        )
+        _draw_actor_bbox_label(
+            canvas,
+            actor,
+            pixel_corners,
+            color=color,
+            cv2=cv2,
+        )
+
+    controlled = next(actor for actor in packet.actors if actor.controlled)
+    _draw_carla_hud(
+        canvas,
+        packet,
+        controlled,
+        map_label=map_label,
+        controlled_color=_actor_color(controlled),
+        cv2=cv2,
+    )
+    return canvas
+
+
+def _state_viewport(
+    actors: tuple[ActorState, ...], canvas_width: int, canvas_height: int
+) -> tuple[float, float, float, float]:
+    points = [(actor.x, actor.y) for actor in actors]
+    points.extend(point for actor in actors if actor.controlled for point in actor.trajectory)
+    center_x = sum(point[0] for point in points) / len(points)
+    center_y = sum(point[1] for point in points) / len(points)
+    span_x = max(max(point[0] for point in points) - min(point[0] for point in points) + 48.0, 64.0)
+    span_y = max(max(point[1] for point in points) - min(point[1] for point in points) + 42.0, 40.0)
+    aspect = canvas_width / canvas_height
+    if span_x / span_y < aspect:
+        span_x = span_y * aspect
+    else:
+        span_y = span_x / aspect
+    return (
+        center_x - span_x / 2.0,
+        center_x + span_x / 2.0,
+        center_y - span_y / 2.0,
+        center_y + span_y / 2.0,
+    )
+
+
+def _road_intersects_view(
+    road: RoadGeometry, min_x: float, max_x: float, min_y: float, max_y: float
+) -> bool:
+    padding = road.width_m
+    return any(
+        min_x - padding <= x <= max_x + padding and min_y - padding <= y <= max_y + padding
+        for x, y in road.points
+    )
+
+
+def _offset_polyline(
+    points: tuple[tuple[float, float], ...], offset_m: float
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    left: list[tuple[float, float]] = []
+    right: list[tuple[float, float]] = []
+    for index, point in enumerate(points):
+        previous = points[max(0, index - 1)]
+        following = points[min(len(points) - 1, index + 1)]
+        dx, dy = following[0] - previous[0], following[1] - previous[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            normal_x, normal_y = 0.0, 1.0
+        else:
+            normal_x, normal_y = -dy / length, dx / length
+        left.append((point[0] + normal_x * offset_m, point[1] + normal_y * offset_m))
+        right.append((point[0] - normal_x * offset_m, point[1] - normal_y * offset_m))
+    return left, right
+
+
+def _draw_dashed_polyline(
+    canvas: Any,
+    points: list[tuple[int, int]],
+    *,
+    color: tuple[int, int, int],
+    thickness: int,
+    cv2: Any,
+    np: Any,
+) -> None:
+    if len(points) < 2:
+        return
+    pattern_px = 14.0
+    for first, second in zip(points, points[1:]):
+        start = np.asarray(first, dtype=float)
+        end = np.asarray(second, dtype=float)
+        vector = end - start
+        length = float(np.linalg.norm(vector))
+        if length < 1e-6:
+            continue
+        direction = vector / length
+        distance = 0.0
+        while distance < length:
+            segment_end = min(distance + pattern_px * 0.55, length)
+            p0 = tuple(np.rint(start + direction * distance).astype(int))
+            p1 = tuple(np.rint(start + direction * segment_end).astype(int))
+            cv2.line(canvas, p0, p1, color, thickness, cv2.LINE_AA)
+            distance += pattern_px
+
+
+def _actor_color(actor: ActorState) -> tuple[int, int, int]:
+    if actor.controlled:
+        return (0, 178, 255)  # orange
+    if actor.track_id == "ego":
+        return (238, 238, 238)
+    if actor.actor_type == "pedestrian":
+        return (255, 190, 72)  # light blue
+    if actor.actor_type == "vehicle":
+        return (105, 210, 120)  # green
+    return (188, 188, 188)
+
+
+def _draw_actor_bbox_label(
+    canvas: Any,
+    actor: ActorState,
+    pixel_corners: Any,
+    *,
+    color: tuple[int, int, int],
+    cv2: Any,
+) -> None:
+    """Draw a compact identity label next to a key actor's projected bbox."""
+
+    carla_id = actor.carla_actor_id if actor.carla_actor_id is not None else "unmapped"
+    lines = (
+        f"CARLA {carla_id} | {actor.actor_type} | {actor.speed_mps:.2f} m/s",
+        f"NuRec {actor.track_id}",
+    )
+    label_width, label_height = 308, 43
+    x = min(int(pixel_corners[:, 0].max()) + 10, canvas.shape[1] - label_width - 8)
+    y = max(int(pixel_corners[:, 1].min()) - label_height - 8, 8)
+    cv2.rectangle(canvas, (x, y), (x + label_width, y + label_height), (9, 11, 15), -1)
+    cv2.rectangle(canvas, (x, y), (x + label_width, y + label_height), color, 1, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        lines[0],
+        (x + 8, y + 17),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.34,
+        color,
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        lines[1],
+        (x + 8, y + 35),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.31,
+        color,
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def _draw_carla_hud(
+    canvas: Any,
+    packet: FramePacket,
+    controlled: ActorState,
+    *,
+    map_label: str,
+    controlled_color: tuple[int, int, int],
+    cv2: Any,
+) -> None:
+    cv2.rectangle(canvas, (16, 16), (496, 174), (9, 11, 15), -1)
+    cv2.rectangle(canvas, (16, 16), (496, 174), (74, 80, 88), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "CARLA STATE / OPENDRIVE", (32, 43), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (246, 246, 246), 2, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        f"frame {packet.frame_id:05d}    t {packet.simulation_time_sec:.6f} s    sync 0 us",
+        (32, 69),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.43,
+        (198, 204, 213),
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(canvas, map_label, (32, 92), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (164, 172, 183), 1, cv2.LINE_AA)
+    cv2.line(canvas, (32, 105), (480, 105), (65, 70, 78), 1, cv2.LINE_AA)
+    carla_id = controlled.carla_actor_id if controlled.carla_actor_id is not None else "unmapped"
+    cv2.rectangle(canvas, (32, 119), (46, 133), controlled_color, -1)
+    cv2.putText(
+        canvas,
+        f"CONTROLLED  CARLA {carla_id}  {controlled.actor_type}  {controlled.speed_mps:.2f} m/s",
+        (57, 132),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.46,
+        controlled_color,
+        1,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"NuRec track {controlled.track_id}    bbox {controlled.length:.1f} x {controlled.width:.1f} x {controlled.height:.1f} m",
+        (32, 157),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.37,
+        controlled_color,
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def _render_camera_window(packet: FramePacket, camera_names: tuple[str, ...], *, cv2: Any, np: Any, overlay: bool) -> Any:
+    columns = 3 if len(camera_names) > 1 else 1
+    rows = math.ceil(len(camera_names) / columns)
+    first = packet.cameras[camera_names[0]]
+    cell_height, cell_width = first.shape[:2]
+    canvas = np.zeros((cell_height * rows, cell_width * columns, 3), dtype=np.uint8)
+    latency_by_name = {str(row["camera_name"]): float(row["latency_ms"]) for row in packet.camera_records}
+    for index, camera_name in enumerate(camera_names):
+        image = packet.cameras[camera_name].copy()
+        fps = 1000.0 / max(latency_by_name[camera_name], 1e-9)
+        lines = [
+            camera_name,
+            f"frame_id={packet.frame_id} timestamp_us={packet.timestamp_us}",
+            f"current_fps={fps:.2f}",
+        ]
+        if overlay:
+            controlled = next(actor for actor in packet.actors if actor.controlled)
+            lines.append(f"DEBUG overlay: {controlled.actor_type} {controlled.track_id}")
+        for line_index, text in enumerate(lines):
+            y = 25 + line_index * 23
+            cv2.putText(image, text, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (0, 0, 0), 3, cv2.LINE_AA)
+            cv2.putText(image, text, (12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 1, cv2.LINE_AA)
+        row, column = divmod(index, columns)
+        y0, x0 = row * cell_height, column * cell_width
+        canvas[y0 : y0 + cell_height, x0 : x0 + cell_width] = image
+    return canvas
+
+
+def _sample_xodr(path: Path) -> list[RoadGeometry]:
+    root = ET.parse(path).getroot()
+    if root.tag != "OpenDRIVE":
+        raise ValueError(f"not an OpenDRIVE document: {path}")
+    roads: list[RoadGeometry] = []
+    for road in root.findall("./road"):
+        width_m = _driving_lane_width(road)
+        for geometry_index, geometry in enumerate(road.findall("./planView/geometry")):
+            x = float(geometry.attrib.get("x", 0.0))
+            y = float(geometry.attrib.get("y", 0.0))
+            heading = float(geometry.attrib.get("hdg", 0.0))
+            length = max(float(geometry.attrib.get("length", 0.0)), 0.0)
+            count = max(2, int(math.ceil(length / 2.0)) + 1)
+            arc = geometry.find("arc")
+            curvature = float(arc.attrib["curvature"]) if arc is not None else 0.0
+            points = []
+            for index in range(count):
+                distance = length * index / (count - 1)
+                if abs(curvature) < 1e-12:
+                    px = x + distance * math.cos(heading)
+                    py = y + distance * math.sin(heading)
+                else:
+                    px = x + (
+                        math.sin(heading + curvature * distance) - math.sin(heading)
+                    ) / curvature
+                    py = y - (
+                        math.cos(heading + curvature * distance) - math.cos(heading)
+                    ) / curvature
+                points.append((px, py))
+            roads.append(
+                RoadGeometry(
+                    road_id=f"{road.attrib.get('id', 'road')}:{geometry_index}",
+                    points=tuple(points),
+                    width_m=width_m,
+                )
+            )
+    return roads
+
+
+def _driving_lane_width(road: ET.Element) -> float:
+    widths = []
+    for lane in road.findall("./lanes/laneSection/*/lane[@type='driving']"):
+        width = lane.find("width")
+        if width is not None and "a" in width.attrib:
+            widths.append(float(width.attrib["a"]))
+    return max(2.0, min(widths[0] if widths else 3.5, 8.0))
+
+
+def _validate_map_contract(
+    scene_package: Mapping[str, Any], xodr_path: Path
+) -> dict[str, Any]:
+    map_info = scene_package.get("map")
+    if not isinstance(map_info, Mapping):
+        raise ValueError("scene package has no map contract")
+    declared = str(map_info.get("opendrive") or "")
+    if declared != "road.xodr":
+        raise ValueError(
+            f"scene package declares {declared!r}, expected road.xodr"
+        )
+    if xodr_path.name != declared:
+        raise ValueError(
+            f"selected OpenDRIVE basename {xodr_path.name!r} != scene package {declared!r}"
+        )
+    return {
+        "status": "matched",
+        "declared_opendrive": declared,
+        "selected_path": str(xodr_path.resolve()),
+        "selected_sha256": _sha256_file(xodr_path),
+        "map_source": str(map_info.get("source") or ""),
+        "location": str(map_info.get("location") or ""),
+    }
+
+
+def _map_display_label(map_validation: Mapping[str, Any]) -> str:
+    location = str(map_validation.get("location") or "OpenDRIVE map")
+    source = str(map_validation.get("map_source") or "scene package")
+    digest = str(map_validation.get("selected_sha256") or "")
+    suffix = digest[:8] if digest else "unhashed"
+    return f"{location} | {source} | road.xodr {suffix}"
+
+
+def _carla_display_contract() -> dict[str, Any]:
+    return {
+        "purpose": "world_state_explanation_not_camera_sensor_output",
+        "map": "width_derived_opendrive_local_driving_lanes",
+        "actors": "3d_bbox_proxy_with_height_projection_and_heading_arrow",
+        "controlled_actor": "orange_bbox_and_recent_dashed_reference_trace",
+        "annotations": {
+            "map": "ego_ctrl_actor_short_tags_only",
+            "bbox_labels": [
+                "carla_actor_id",
+                "nurec_track_id",
+                "actor_type",
+                "speed_mps",
+            ],
+            "hud": [
+                "frame_id",
+                "simulation_timestamp",
+                "shared_frame_sync_error_us",
+                "opendrive_location_source_hash_prefix",
+                "controlled_carla_actor_id",
+                "controlled_nurec_track_id",
+                "controlled_actor_type",
+                "controlled_speed_mps",
+                "controlled_bbox_dimensions_m",
+            ],
+        },
+        "canvas": {"width": 1280, "height": 720},
+    }
+
+
+def _bbox_corners(actor: ActorState) -> list[tuple[float, float]]:
+    half_length = actor.length / 2.0
+    half_width = actor.width / 2.0
+    yaw_radians = _scene_yaw_radians(actor.yaw)
+    cosine = math.cos(yaw_radians)
+    sine = math.sin(yaw_radians)
+    result = []
+    for local_x, local_y in (
+        (-half_length, -half_width),
+        (half_length, -half_width),
+        (half_length, half_width),
+        (-half_length, half_width),
+    ):
+        result.append(
+            (
+                actor.x + local_x * cosine - local_y * sine,
+                actor.y + local_x * sine + local_y * cosine,
+            )
+        )
+    return result
+
+
+def _scene_yaw_radians(yaw: float) -> float:
+    """Convert the Scene IR's declared degree-valued yaw for OpenCV drawing."""
+
+    return math.radians(yaw)
+
+
+def _dynamic_delta(baseline: Mapping[str, Any], moved: Mapping[str, Any], track_id: str) -> tuple[float, float, float]:
+    def position(frame: Mapping[str, Any]) -> Mapping[str, Any]:
+        actor = next(
+            item for item in frame["shared_dynamic_objects"] if str(item["track_id"]) == track_id
+        )
+        return actor["pose_pair"]["start"]["position_m"]
+
+    first = position(baseline)
+    second = position(moved)
+    return tuple(float(second[axis]) - float(first[axis]) for axis in ("x", "y", "z"))
+
+
+def _changed_tracks(baseline: Mapping[str, Any], moved: Mapping[str, Any]) -> list[str]:
+    first = {str(item["track_id"]): item for item in baseline["shared_dynamic_objects"]}
+    second = {str(item["track_id"]): item for item in moved["shared_dynamic_objects"]}
+    return [track_id for track_id in sorted(set(first) | set(second)) if first.get(track_id) != second.get(track_id)]
+
+
+def _same_frame_gate(baseline: Mapping[str, Any], moved: Mapping[str, Any]) -> None:
+    names = ("scene_id", "frame_id", "simulation_time_sec", "pose_interval_sec")
+    mismatches = [name for name in names if baseline.get(name) != moved.get(name)]
+    if mismatches:
+        raise ValueError(f"baseline/moved do not share one clock/frame: {mismatches}")
+
+
+def _mapping_by_track(mapping: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    rows = mapping.get("tracks")
+    if not isinstance(rows, list):
+        raise ValueError("actor mapping requires tracks")
+    return {str(row["track_id"]): row for row in rows}
+
+
+def _actor_report(actor: ActorState) -> dict[str, Any]:
+    return {
+        "track_id": actor.track_id,
+        "carla_actor_id": actor.carla_actor_id,
+        "actor_type": actor.actor_type,
+        "position_m": {"x": actor.x, "y": actor.y, "z": actor.z},
+        "yaw": actor.yaw,
+        "speed_mps": actor.speed_mps,
+        "bbox_m": {"length": actor.length, "width": actor.width, "height": actor.height},
+    }
+
+
+def _load_object(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"expected a JSON object: {path}")
+    return value
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _input_record(path: Path) -> dict[str, Any]:
+    return {"path": str(path.resolve()), "sha256": _sha256_file(path)}
+
+
+def _file_record(path: Path) -> dict[str, Any]:
+    return {"path": str(path.resolve()), "sha256": _sha256_file(path), "bytes": path.stat().st_size}
+
+
+def _vision_modules() -> tuple[Any, Any]:
+    try:
+        import cv2
+        import numpy as np
+    except ImportError as exc:
+        raise RuntimeError("OpenCV and NumPy are required for dual-window rendering") from exc
+    return cv2, np
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Drive independent CARLA-state and NuRec-camera windows from one synchronized FramePacket loop."
+    )
+    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--artifact", required=True, type=Path)
+    parser.add_argument("--scene-package", required=True, type=Path)
+    parser.add_argument("--baseline-frame", required=True, type=Path)
+    parser.add_argument("--moved-frame", required=True, type=Path)
+    parser.add_argument("--scenario-ir", required=True, type=Path)
+    parser.add_argument("--xodr", required=True, type=Path)
+    parser.add_argument("--actor-mapping", required=True, type=Path)
+    parser.add_argument("--overlap", required=True, type=Path)
+    parser.add_argument("--lidar-diagnostic", required=True, type=Path)
+    parser.add_argument("--controlled-track-id", required=True)
+    parser.add_argument("--required-track-id", action="append", default=[])
+    parser.add_argument(
+        "--mode",
+        choices=("formal_acceptance", "preview_debug"),
+        default="preview_debug",
+    )
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--width", type=int, default=800)
+    parser.add_argument("--height", type=int, default=450)
+    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--overlay", action="store_true")
+    parser.add_argument("--preview-camera-count", type=int, choices=(1, 3), default=3)
+    parser.add_argument(
+        "--exclude-dynamic-objects",
+        action="store_true",
+        help="Diagnostic-only A/B probe: render the same native poses without dynamic objects.",
+    )
+    args = parser.parse_args(argv)
+    try:
+        report = run_visualization(
+            config_path=args.config,
+            artifact_path=args.artifact,
+            scene_package_path=args.scene_package,
+            baseline_path=args.baseline_frame,
+            moved_path=args.moved_frame,
+            scenario_ir_path=args.scenario_ir,
+            xodr_path=args.xodr,
+            actor_mapping_path=args.actor_mapping,
+            overlap_path=args.overlap,
+            lidar_diagnostic_path=args.lidar_diagnostic,
+            controlled_track_id=args.controlled_track_id,
+            required_track_ids=args.required_track_id,
+            mode=args.mode,
+            output_dir=args.output_dir,
+            width=args.width,
+            height=args.height,
+            display=not args.headless,
+            overlay=args.overlay,
+            preview_camera_count=args.preview_camera_count,
+            include_dynamic_objects=not args.exclude_dynamic_objects,
+        )
+    except (OSError, ValueError, RuntimeError, NuRecMultimodalError) as exc:
+        print(json.dumps({"status": "failed", "detail": f"{type(exc).__name__}: {exc}"}, ensure_ascii=False))
+        return 2
+    print(
+        json.dumps(
+            {
+                "status": report["status"],
+                "report": report.get("report_path"),
+                "statistics": report["statistics"],
+                "missing_required_actor_mappings": report["missing_required_actor_mappings"],
+            },
+            ensure_ascii=False,
+        )
+    )
+    return 0 if report["status"] == "passed" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
