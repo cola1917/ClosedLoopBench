@@ -1079,11 +1079,10 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
 
         class BboxTransform(FakeTransform):
             def transform(self, offset):
-                return FakeLocation(
-                    self.location.x + offset.x,
-                    self.location.y + offset.y,
-                    self.location.z + offset.z,
-                )
+                offset.x = self.location.x + offset.x
+                offset.y = self.location.y + offset.y
+                offset.z = self.location.z + offset.z
+                return offset
 
         class BboxCarla(FakeCarlaModule):
             def __init__(self, events):
@@ -1109,7 +1108,11 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
                 self.vehicle = AlignedVehicle(events)
 
             def try_spawn_actor(self, _blueprint, transform):
-                self.vehicle.transforms = [transform]
+                # CARLA returns the pre-tick/default actor transform here;
+                # the requested spawn transform is applied on the next tick.
+                self.vehicle.transforms = [
+                    BboxTransform(FakeLocation(), transform.rotation)
+                ]
                 self.vehicle.transform_reads = 0
                 return self.vehicle
 

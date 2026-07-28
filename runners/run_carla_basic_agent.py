@@ -2546,7 +2546,11 @@ def _spawn_actor_vehicle(
 
     transform = _carla_transform(carla_module, actor.get("initial_state") or {})
 
-    def finalize_spawn(vehicle: Any, evidence: Mapping[str, Any]) -> Any:
+    def finalize_spawn(
+        vehicle: Any,
+        evidence: Mapping[str, Any],
+        requested_transform: Any,
+    ) -> Any:
         spawn_evidence = dict(evidence)
         if actor_kind == "vehicle":
             if align_bound_vehicle_bbox_center and isinstance(actor.get("binding"), dict):
@@ -2554,6 +2558,7 @@ def _spawn_actor_vehicle(
                     carla_module,
                     vehicle,
                     spawn_evidence,
+                    requested_transform=requested_transform,
                 )
             else:
                 spawn_evidence = _capture_bound_vehicle_render_pose_offset(
@@ -2576,7 +2581,7 @@ def _spawn_actor_vehicle(
             "source_xy_yaw_preserved": True,
             "vertical_adjustment_m": 0.0,
         }
-        return finalize_spawn(vehicle, spawn_evidence)
+        return finalize_spawn(vehicle, spawn_evidence, transform)
 
     if actor_kind == "pedestrian":
         retry = _sidewalk_walker_retry_transform(carla_module, world, actor)
@@ -2594,7 +2599,7 @@ def _spawn_actor_vehicle(
             vehicle = _try_spawn(world, blueprint, retry_transform)
             if vehicle is None:
                 continue
-            return finalize_spawn(vehicle, spawn_evidence)
+            return finalize_spawn(vehicle, spawn_evidence, retry_transform)
 
     if actor_kind == "vehicle" and isinstance(actor.get("binding"), dict):
         raise RuntimeError(
@@ -2622,6 +2627,8 @@ def _align_bound_vehicle_bbox_center_spawn(
     carla_module: Any,
     vehicle: Any,
     evidence: Mapping[str, Any],
+    *,
+    requested_transform: Any,
 ) -> dict[str, Any]:
     """Place a bound vehicle origin so its CARLA bbox center is source pose.
 
@@ -2638,12 +2645,29 @@ def _align_bound_vehicle_bbox_center_spawn(
     offset = getattr(bounding_box, "location", None)
     if offset is None:
         raise RuntimeError("M8 bbox-center alignment requires a CARLA bounding-box location")
-    transform = vehicle.get_transform()
+    # CARLA acknowledges a spawn/set_transform RPC before the requested pose
+    # is visible through get_transform(); the server applies it on the next
+    # world tick. Use the exact requested spawn transform as the source-frame
+    # reference instead of the transient zero/default actor transform.
+    transform = requested_transform
     location = getattr(transform, "location", None)
     rotation = getattr(transform, "rotation", None)
     if location is None or rotation is None or not hasattr(transform, "transform"):
         raise RuntimeError("M8 bbox-center alignment requires a transform operation")
-    world_center = transform.transform(offset)
+
+    def copy_offset() -> Any:
+        values = {
+            axis: float(getattr(offset, axis, 0.0))
+            for axis in ("x", "y", "z")
+        }
+        try:
+            return type(offset)(**values)
+        except (TypeError, ValueError):
+            return SimpleNamespace(**values)
+
+    # CARLA mutates the vector passed to Transform.transform(). Keep the
+    # source-frame bbox offset immutable across the two transformations.
+    world_center = transform.transform(copy_offset())
     if world_center is None:
         raise RuntimeError("M8 bbox-center alignment could not resolve bbox center")
     correction = {
@@ -2670,10 +2694,14 @@ def _align_bound_vehicle_bbox_center_spawn(
         target_transform = transform_constructor(target_location, rotation)
     vehicle.set_transform(target_transform)
 
+    # CARLA applies set_transform through the server on the next world tick.
+    # Reading vehicle.get_transform() here would still return the pre-alignment
+    # pose and falsely report the unchanged blueprint bbox offset as a failure.
+    # Verify the queued transform mathematically; the runtime frame trace then
+    # validates the applied pose after the matching tick.
     residual_m = None
-    aligned_transform = vehicle.get_transform()
-    if hasattr(aligned_transform, "transform"):
-        aligned_center = aligned_transform.transform(offset)
+    if hasattr(target_transform, "transform"):
+        aligned_center = target_transform.transform(copy_offset())
         if aligned_center is not None:
             residual_m = math.dist(
                 [float(getattr(aligned_center, axis, 0.0)) for axis in ("x", "y", "z")],
@@ -2693,6 +2721,7 @@ def _align_bound_vehicle_bbox_center_spawn(
             axis: correction[axis] for axis in ("x", "y", "z")
         },
         "bbox_center_alignment_residual_m": float(residual_m),
+        "bbox_center_alignment_verification": "queued_transform_math_before_next_carla_tick",
         "vertical_adjustment_m": -correction["z"],
     }
 
