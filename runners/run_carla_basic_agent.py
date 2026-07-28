@@ -4290,10 +4290,20 @@ def _build_sensor_frame_context(
         str(actor.get("actor_id", "actor")): actor
         for actor in plan.get("actors") or []
     }
-    selected = [str(value) for value in (plan.get("actor_binding") or {}).get("selected_actor_ids") or []]
-    if not selected:
+    m8_safety_audit_required = bool(
+        (plan.get("runtime") or {}).get("m8_safety_audit_required", False)
+    )
+    selected = [
+        str(value)
+        for value in (plan.get("actor_binding") or {}).get("selected_actor_ids") or []
+    ]
+    if m8_safety_audit_required:
+        # M8 validates every replay actor with physical presence. The selected
+        # control set remains reserved for later M10 interactive control.
+        selected = sorted(actor_by_id)
+    elif not selected:
         selected = sorted(current_actor_poses)
-    if bool((plan.get("runtime") or {}).get("m8_safety_audit_required", False)):
+    if m8_safety_audit_required:
         active_physical = set(actor_states)
         missing_from_nurec = sorted(active_physical - set(selected))
         if missing_from_nurec:

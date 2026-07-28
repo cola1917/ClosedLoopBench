@@ -122,6 +122,51 @@ class NuRecRunnerIntegrationTests(unittest.TestCase):
                 previous_actor_poses={},
             )
 
+    def test_m8_uses_full_replay_actor_set_not_later_control_selection(self):
+        from runners.run_carla_basic_agent import _build_sensor_frame_context
+
+        plan = _plan()
+        plan["runtime"]["m8_safety_audit_required"] = True
+        replay_actor = {
+            "actor_id": "background",
+            "type": "vehicle",
+            "binding": {
+                "schema_version": "actor_runtime_binding.v1",
+                "nurec_track_id": "track-background",
+                "sensor_pose_source": "carla_runtime_actor_pose",
+                "sensor_pose_reference": "carla_bounding_box_center",
+            },
+        }
+        plan["actors"].append(replay_actor)
+        pose = {"x": 6.0, "y": -2.0, "z": 1.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+        state = {
+            "render_pose": pose,
+            "render_pose_reference": "carla_bounding_box_center",
+            "physical_pose_references": {"carla_bounding_box_center": pose},
+        }
+        context = _build_sensor_frame_context(
+            plan,
+            frame_id=1,
+            tick_index=0,
+            simulation_time_sec=0.05,
+            scenario_time_sec=0.05,
+            interval_start_sec=0.0,
+            ego_pose={"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+            previous_ego_pose={"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+            actor_states={"trigger": state, "background": state},
+            previous_actor_poses={"trigger": pose, "background": pose},
+            previous_actor_physical_poses={
+                "trigger": {"carla_bounding_box_center": pose},
+                "background": {"carla_bounding_box_center": pose},
+            },
+        )
+
+        self.assertEqual(set(context["actor_samples"]), {"trigger", "background"})
+        self.assertEqual(
+            plan["actor_binding"]["selected_actor_ids"],
+            ["trigger"],
+        )
+
     def test_pedestrian_bottom_render_pose_is_forwarded_to_nurec_context(self):
         from runners.run_carla_basic_agent import _build_sensor_frame_context
 
