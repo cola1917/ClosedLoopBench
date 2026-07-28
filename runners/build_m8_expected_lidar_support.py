@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -25,10 +26,26 @@ def build_expected_lidar_support(
     run_config: Mapping[str, Any],
     *,
     max_range_m: float = DEFAULT_MAX_RANGE_M,
+    nurec_rows: list[Mapping[str, Any]] | None = None,
+    source_lidar_support: Mapping[str, Any] | None = None,
+    source_lidar_support_sha256: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Build explicit per-tick CARLA physical LiDAR expectation rows."""
+    """Build explicit same-tick CARLA and source-LiDAR expectations."""
 
     sensor_to_ego = _lidar_sensor_to_ego(run_config)
+    source_mode = nurec_rows is not None or source_lidar_support is not None
+    if source_mode and (nurec_rows is None or source_lidar_support is None):
+        raise LidarWorldSupportError(
+            "source-backed M8 LiDAR expectations require both NuRec and source LiDAR traces"
+        )
+    if source_mode and not _is_sha256(source_lidar_support_sha256):
+        raise LidarWorldSupportError("source-backed M8 LiDAR support requires its SHA-256")
+    alignments = _nurec_alignment_by_frame(nurec_rows or []) if source_mode else {}
+    source_frames = _source_support_by_frame(source_lidar_support) if source_mode else {}
+    actor_sources, static_object_ids = (
+        _registered_object_sources(run_config) if source_mode else ({}, set())
+    )
+    manifest_sha256 = _native_scan_manifest_sha256(run_config) if source_mode else None
     rows = []
     seen = set()
     for runtime in runtime_rows:
@@ -40,23 +57,199 @@ def build_expected_lidar_support(
         states = runtime.get("object_states")
         if not isinstance(ego_state, Mapping) or not isinstance(states, list):
             raise LidarWorldSupportError(f"M8 runtime frame {frame_id} lacks ego_state or object_states")
-        rows.append(
-            {
-                "schema_version": "m8_expected_lidar_support.v1",
-                "frame_id": frame_id,
-                "simulation_time_sec": runtime.get("simulation_time_sec"),
-                "sensor_to_ego": sensor_to_ego,
-                "expected_world_objects": expected_lidar_support_from_physical_boxes(
-                    ego_pose=ego_state.get("pose"),
-                    sensor_to_ego=sensor_to_ego,
-                    object_states=states,
-                    max_range_m=max_range_m,
-                ),
-            }
+        expected_objects = expected_lidar_support_from_physical_boxes(
+            ego_pose=ego_state.get("pose"),
+            sensor_to_ego=sensor_to_ego,
+            object_states=states,
+            max_range_m=max_range_m,
         )
+        row: dict[str, Any] = {
+            "schema_version": "m8_expected_lidar_support.v1",
+            "frame_id": frame_id,
+            "simulation_time_sec": runtime.get("simulation_time_sec"),
+            "sensor_to_ego": sensor_to_ego,
+            "expected_world_objects": expected_objects,
+        }
+        if source_mode:
+            alignment = alignments.get(frame_id)
+            if alignment is None:
+                raise LidarWorldSupportError(f"M8 frame {frame_id} has no passed NuRec temporal alignment")
+            if alignment["manifest_sha256"] != manifest_sha256:
+                raise LidarWorldSupportError(f"M8 frame {frame_id} has a foreign native scan manifest")
+            frame_end_us = alignment["wire_end_us"]
+            source_support = source_frames.get(frame_end_us)
+            if source_support is None:
+                raise LidarWorldSupportError(
+                    f"M8 frame {frame_id} lacks source LiDAR support at {frame_end_us}"
+                )
+            _apply_source_dynamic_support(
+                expected_objects,
+                source_support,
+                actor_sources=actor_sources,
+                static_object_ids=static_object_ids,
+                frame_id=frame_id,
+            )
+            row["schema_version"] = "m8_expected_lidar_support.v2"
+            row["source_lidar_alignment"] = {
+                **alignment,
+                "source_lidar_support_sha256": source_lidar_support_sha256,
+            }
+        rows.append(row)
     if not rows:
         raise LidarWorldSupportError("M8 expected LiDAR support requires at least one runtime frame")
     return rows
+
+
+def _is_sha256(value: str | None) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
+def _registered_object_sources(run_config: Mapping[str, Any]) -> tuple[dict[str, str], set[str]]:
+    actors = run_config.get("actors")
+    if not isinstance(actors, list):
+        raise LidarWorldSupportError("source-backed M8 LiDAR expectations require run_config.actors")
+    result: dict[str, str] = {}
+    for actor in actors:
+        if not isinstance(actor, Mapping):
+            raise LidarWorldSupportError("M8 actor registration must contain objects")
+        actor_id = str(actor.get("actor_id") or "")
+        source_track_id = str(actor.get("source_track_id") or "")
+        if not actor_id or not source_track_id or actor_id in result:
+            raise LidarWorldSupportError("M8 actor registration has invalid or duplicate source track bindings")
+        result[actor_id] = source_track_id
+    static_obstacles = run_config.get("static_obstacles") or []
+    if not isinstance(static_obstacles, list):
+        raise LidarWorldSupportError("M8 static_obstacles must be a list")
+    static_ids = {str(item.get("object_id") or "") for item in static_obstacles if isinstance(item, Mapping)}
+    static_ids.discard("")
+    return result, static_ids
+
+
+def _native_scan_manifest_sha256(run_config: Mapping[str, Any]) -> str:
+    runtime = run_config.get("nurec_runtime")
+    manifest = runtime.get("native_scan_manifest") if isinstance(runtime, Mapping) else None
+    value = manifest.get("sha256") if isinstance(manifest, Mapping) else None
+    if not _is_sha256(value):
+        raise LidarWorldSupportError("M8 run config has no valid native scan manifest SHA-256")
+    return str(value)
+
+
+def _nurec_alignment_by_frame(rows: list[Mapping[str, Any]]) -> dict[int, dict[str, Any]]:
+    result: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        frame_id = row.get("frame_id")
+        if not isinstance(frame_id, int) or isinstance(frame_id, bool):
+            raise LidarWorldSupportError("NuRec trace row has no integer frame_id")
+        if row.get("status") != "passed":
+            raise LidarWorldSupportError(f"M8 frame {frame_id} NuRec trace did not pass")
+        dispatch = row.get("dispatch")
+        alignment = dispatch.get("temporal_alignment") if isinstance(dispatch, Mapping) else None
+        if not isinstance(alignment, Mapping) or alignment.get("status") != "aligned":
+            raise LidarWorldSupportError(f"M8 frame {frame_id} has no aligned native LiDAR scan")
+        manifest_sha256 = alignment.get("manifest_sha256")
+        wire_start_us, wire_end_us = alignment.get("wire_start_us"), alignment.get("wire_end_us")
+        if (
+            not _is_sha256(manifest_sha256)
+            or not isinstance(wire_start_us, int)
+            or isinstance(wire_start_us, bool)
+            or not isinstance(wire_end_us, int)
+            or isinstance(wire_end_us, bool)
+            or wire_start_us >= wire_end_us
+            or frame_id in result
+        ):
+            raise LidarWorldSupportError(f"M8 frame {frame_id} has invalid native LiDAR alignment")
+        result[frame_id] = {
+            "status": "aligned",
+            "native_scan_index": alignment.get("native_scan_index"),
+            "wire_start_us": wire_start_us,
+            "wire_end_us": wire_end_us,
+            "midpoint_error_us": alignment.get("midpoint_error_us"),
+            "max_midpoint_error_us": alignment.get("max_midpoint_error_us"),
+            "manifest_sha256": manifest_sha256,
+        }
+    return result
+
+
+def _source_support_by_frame(source_lidar_support: Mapping[str, Any]) -> dict[int, dict[str, Mapping[str, Any]]]:
+    if source_lidar_support.get("schema_version") != "ncore_dynamic_lidar_support_audit.v2":
+        raise LidarWorldSupportError("M8 source LiDAR support must use ncore_dynamic_lidar_support_audit.v2")
+    raw_frames = source_lidar_support.get("source_lidar_frames")
+    if not isinstance(raw_frames, list) or not raw_frames:
+        raise LidarWorldSupportError("M8 source LiDAR support has no same-tick frame records")
+    result: dict[int, dict[str, Mapping[str, Any]]] = {}
+    for frame in raw_frames:
+        if not isinstance(frame, Mapping):
+            raise LidarWorldSupportError("M8 source LiDAR frame record must be an object")
+        end_us = frame.get("source_lidar_frame_end_us")
+        rows = frame.get("track_support")
+        if not isinstance(end_us, int) or isinstance(end_us, bool) or not isinstance(rows, list) or end_us in result:
+            raise LidarWorldSupportError("M8 source LiDAR frame record is invalid or duplicate")
+        track_rows: dict[str, Mapping[str, Any]] = {}
+        for item in rows:
+            if not isinstance(item, Mapping):
+                raise LidarWorldSupportError("M8 source LiDAR track support must be an object")
+            track_id = str(item.get("track_id") or "")
+            if not track_id or track_id in track_rows:
+                raise LidarWorldSupportError("M8 source LiDAR track support has invalid or duplicate track_id")
+            track_rows[track_id] = item
+        result[end_us] = track_rows
+    return result
+
+
+def _apply_source_dynamic_support(
+    expected_objects: list[dict[str, Any]],
+    source_support: Mapping[str, Mapping[str, Any]],
+    *,
+    actor_sources: Mapping[str, str],
+    static_object_ids: set[str],
+    frame_id: int,
+) -> None:
+    for item in expected_objects:
+        object_id = str(item.get("object_id") or "")
+        source_track_id = actor_sources.get(object_id)
+        if source_track_id is None:
+            if object_id not in static_object_ids:
+                raise LidarWorldSupportError(
+                    f"M8 frame {frame_id} object {object_id} is absent from the full scene registry"
+                )
+            item["source_lidar_observability"] = {"kind": "static_carla_physical_occlusion"}
+            continue
+        source = source_support.get(source_track_id)
+        if source is None or source.get("source_cuboid_available") is not True:
+            raise LidarWorldSupportError(
+                f"M8 frame {frame_id} active dynamic object {object_id} lacks a source cuboid"
+            )
+        exact_hits = source.get("exact_box_hit_points")
+        padded_hits = source.get("padded_box_hit_points")
+        if (
+            not isinstance(exact_hits, int)
+            or isinstance(exact_hits, bool)
+            or exact_hits < 0
+            or not isinstance(padded_hits, int)
+            or isinstance(padded_hits, bool)
+            or padded_hits < exact_hits
+        ):
+            raise LidarWorldSupportError(
+                f"M8 frame {frame_id} dynamic object {object_id} has invalid source LiDAR counts"
+            )
+        source_expected = exact_hits > 0
+        if source_expected and not bool(item.get("expected_lidar_support")):
+            raise LidarWorldSupportError(
+                f"M8 frame {frame_id} dynamic object {object_id} is source-observed but CARLA-occluded"
+            )
+        item["expected_lidar_support"] = bool(item["expected_lidar_support"]) and source_expected
+        item["source"] = "carla_physical_box_occlusion_and_ncore_same_tick_dynamic.v1"
+        item["source_lidar_observability"] = {
+            "kind": "ncore_same_tick_dynamic_cuboid",
+            "source_track_id": source_track_id,
+            "annotation_status": source.get("annotation_status"),
+            "exact_box_hit_points": exact_hits,
+            "padded_box_hit_points": padded_hits,
+        }
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -75,13 +268,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--m8-runtime-trace", required=True, type=Path)
     parser.add_argument("--run-config", required=True, type=Path)
     parser.add_argument("--max-range-m", type=float, default=DEFAULT_MAX_RANGE_M)
+    parser.add_argument("--nurec-multimodal-trace", type=Path)
+    parser.add_argument("--source-lidar-support", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
         if args.output.exists():
             raise ValueError(f"refusing to overwrite M8 expected LiDAR support: {args.output}")
+        if bool(args.nurec_multimodal_trace) != bool(args.source_lidar_support):
+            raise ValueError(
+                "--nurec-multimodal-trace and --source-lidar-support must be supplied together"
+            )
+        source_body = (
+            args.source_lidar_support.read_bytes() if args.source_lidar_support else None
+        )
+        source_support = json.loads(source_body) if source_body is not None else None
+        if source_support is not None and not isinstance(source_support, Mapping):
+            raise ValueError("--source-lidar-support must contain a JSON object")
         rows = build_expected_lidar_support(
-            _read_jsonl(args.m8_runtime_trace), _read_json(args.run_config), max_range_m=args.max_range_m
+            _read_jsonl(args.m8_runtime_trace),
+            _read_json(args.run_config),
+            max_range_m=args.max_range_m,
+            nurec_rows=(
+                _read_jsonl(args.nurec_multimodal_trace)
+                if args.nurec_multimodal_trace
+                else None
+            ),
+            source_lidar_support=source_support,
+            source_lidar_support_sha256=(
+                hashlib.sha256(source_body).hexdigest()
+                if source_body is not None
+                else None
+            ),
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows), encoding="utf-8")

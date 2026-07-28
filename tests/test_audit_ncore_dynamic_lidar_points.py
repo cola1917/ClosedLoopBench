@@ -18,3 +18,21 @@ def test_pose_at_chooses_nearest_timestamp():
     matrices = np.asarray((np.eye(4), np.eye(4) * 2, np.eye(4) * 3))
     result = _pose_at(matrices, np.asarray((100, 200, 300), dtype=np.uint64), 249)
     assert np.array_equal(result, matrices[1])
+
+
+def test_interpolate_box_uses_shortest_yaw_arc_without_extrapolation():
+    from runners.audit_ncore_dynamic_lidar_points import _interpolate_box_at
+
+    samples = [
+        (100, {"centroid": (0.0, 0.0, 0.0), "size": (2.0, 2.0, 2.0), "yaw": np.deg2rad(350.0)}),
+        (200, {"centroid": (10.0, 2.0, 4.0), "size": (4.0, 6.0, 8.0), "yaw": np.deg2rad(10.0)}),
+    ]
+    box, status = _interpolate_box_at(samples, 150)
+    assert status == "linearly_interpolated_source_cuboid"
+    assert box is not None
+    assert np.allclose(box["centroid"], (5.0, 1.0, 2.0))
+    assert np.allclose(box["size"], (3.0, 4.0, 5.0))
+    assert abs(float(box["yaw"])) < 1e-6
+    absent, absent_status = _interpolate_box_at(samples, 99)
+    assert absent is None
+    assert absent_status == "outside_source_annotation_window"
