@@ -634,6 +634,9 @@ def _run_basic_agent_loop(
                 actor_vehicles,
                 actor_temporal_lifecycle_evidence,
                 scenario_time_sec=0.0,
+                align_bound_vehicle_bbox_center=bool(
+                    runtime_options.get("m8_safety_audit_required", False)
+                ),
             )
             lifecycle_issues = _actor_temporal_lifecycle_issues(
                 actor_temporal_lifecycle_evidence
@@ -649,6 +652,9 @@ def _run_basic_agent_loop(
                 world,
                 plan.get("actors") or [],
                 actor_vehicles,
+                align_bound_vehicle_bbox_center=bool(
+                    runtime_options.get("m8_safety_audit_required", False)
+                ),
             )
         if static_obstacle_lifecycle == "source_annotation_window":
             static_obstacle_temporal_lifecycle_evidence = (
@@ -789,6 +795,9 @@ def _run_basic_agent_loop(
                     actor_vehicles,
                     actor_temporal_lifecycle_evidence,
                     scenario_time_sec=run_time_sec,
+                    align_bound_vehicle_bbox_center=bool(
+                        runtime_options.get("m8_safety_audit_required", False)
+                    ),
                 )
                 for actor_id in lifecycle_events["spawned_actor_ids"]:
                     actor = next(
@@ -2027,12 +2036,20 @@ def _spawn_interactive_actor_vehicles(
     world: Any,
     actors: list[dict[str, Any]],
     actor_vehicles: dict[str, Any],
+    *,
+    align_bound_vehicle_bbox_center: bool = False,
 ) -> None:
     for actor in actors:
         if not _should_spawn_actor(actor):
             continue
         actor_id = str(actor.get("actor_id", "actor"))
-        actor_vehicles[actor_id] = _spawn_actor_vehicle(carla_module, world, actor, actor_id)
+        actor_vehicles[actor_id] = _spawn_actor_vehicle(
+            carla_module,
+            world,
+            actor,
+            actor_id,
+            align_bound_vehicle_bbox_center=align_bound_vehicle_bbox_center,
+        )
 
 
 def _initialize_actor_temporal_lifecycle(
@@ -2083,6 +2100,8 @@ def _spawn_actor_at_annotation_start(
     actor: dict[str, Any],
     actor_id: str,
     window: tuple[float, float],
+    *,
+    align_bound_vehicle_bbox_center: bool = False,
 ) -> Any:
     """Spawn from the first source pose rather than an out-of-window initial pose."""
 
@@ -2093,7 +2112,13 @@ def _spawn_actor_at_annotation_start(
     initial_state = dict(actor.get("initial_state") or {})
     initial_state.update(start_pose)
     spawn_actor["initial_state"] = initial_state
-    entity = _spawn_actor_vehicle(carla_module, world, spawn_actor, actor_id)
+    entity = _spawn_actor_vehicle(
+        carla_module,
+        world,
+        spawn_actor,
+        actor_id,
+        align_bound_vehicle_bbox_center=align_bound_vehicle_bbox_center,
+    )
     if "_runtime_spawn_evidence" in spawn_actor:
         actor["_runtime_spawn_evidence"] = dict(spawn_actor["_runtime_spawn_evidence"])
     return entity
@@ -2107,6 +2132,7 @@ def _advance_actor_temporal_lifecycle(
     evidence: dict[str, dict[str, Any]],
     *,
     scenario_time_sec: float,
+    align_bound_vehicle_bbox_center: bool = False,
 ) -> dict[str, list[str]]:
     """Apply source annotation windows before the CARLA frame being observed.
 
@@ -2132,7 +2158,12 @@ def _advance_actor_temporal_lifecycle(
         entity = actor_vehicles.get(actor_id)
         if desired_state == "active" and entity is None:
             entity = _spawn_actor_at_annotation_start(
-                carla_module, world, actor, actor_id, window
+                carla_module,
+                world,
+                actor,
+                actor_id,
+                window,
+                align_bound_vehicle_bbox_center=align_bound_vehicle_bbox_center,
             )
             actor_vehicles[actor_id] = entity
             spawned_actor_ids.append(actor_id)
@@ -2480,7 +2511,14 @@ def _static_obstacle_runtime_evidence(
     }
 
 
-def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], actor_id: str) -> Any:
+def _spawn_actor_vehicle(
+    carla_module: Any,
+    world: Any,
+    actor: dict[str, Any],
+    actor_id: str,
+    *,
+    align_bound_vehicle_bbox_center: bool = False,
+) -> Any:
     blueprint_library = world.get_blueprint_library()
     actor_kind = _actor_kind(actor)
     if (
@@ -2507,19 +2545,20 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
         _set_blueprint_attribute(blueprint, "is_invincible", "false")
 
     transform = _carla_transform(carla_module, actor.get("initial_state") or {})
-    vehicle = _try_spawn(world, blueprint, transform)
-    if vehicle is not None:
-        spawn_evidence = {
-            "strategy": "source_transform",
-            "source_xy_yaw_preserved": True,
-            "vertical_adjustment_m": 0.0,
-        }
+
+    def finalize_spawn(vehicle: Any, evidence: Mapping[str, Any]) -> Any:
+        spawn_evidence = dict(evidence)
         if actor_kind == "vehicle":
-            spawn_evidence = _capture_bound_vehicle_render_pose_offset(
-                actor, vehicle, spawn_evidence
-            )
-        actor["_runtime_spawn_evidence"] = spawn_evidence
-        if actor_kind == "vehicle":
+            if align_bound_vehicle_bbox_center and isinstance(actor.get("binding"), dict):
+                spawn_evidence = _align_bound_vehicle_bbox_center_spawn(
+                    carla_module,
+                    vehicle,
+                    spawn_evidence,
+                )
+            else:
+                spawn_evidence = _capture_bound_vehicle_render_pose_offset(
+                    actor, vehicle, spawn_evidence
+                )
             initial_state = actor.get("initial_state") or {}
             _set_initial_vehicle_velocity(
                 carla_module,
@@ -2527,7 +2566,17 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
                 initial_state,
                 speed_mps=float(initial_state.get("speed_mps", 0.0)),
             )
+        actor["_runtime_spawn_evidence"] = spawn_evidence
         return vehicle
+
+    vehicle = _try_spawn(world, blueprint, transform)
+    if vehicle is not None:
+        spawn_evidence = {
+            "strategy": "source_transform",
+            "source_xy_yaw_preserved": True,
+            "vertical_adjustment_m": 0.0,
+        }
+        return finalize_spawn(vehicle, spawn_evidence)
 
     if actor_kind == "pedestrian":
         retry = _sidewalk_walker_retry_transform(carla_module, world, actor)
@@ -2545,20 +2594,7 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
             vehicle = _try_spawn(world, blueprint, retry_transform)
             if vehicle is None:
                 continue
-            actor["_runtime_spawn_evidence"] = (
-                _capture_bound_vehicle_render_pose_offset(actor, vehicle, spawn_evidence)
-                if actor_kind == "vehicle"
-                else spawn_evidence
-            )
-            if actor_kind == "vehicle":
-                initial_state = actor.get("initial_state") or {}
-                _set_initial_vehicle_velocity(
-                    carla_module,
-                    vehicle,
-                    initial_state,
-                    speed_mps=float(initial_state.get("speed_mps", 0.0)),
-                )
-            return vehicle
+            return finalize_spawn(vehicle, spawn_evidence)
 
     if actor_kind == "vehicle" and isinstance(actor.get("binding"), dict):
         raise RuntimeError(
@@ -2580,6 +2616,85 @@ def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], a
                 return vehicle
 
     raise RuntimeError(f"failed to spawn interactive {actor_kind} actor {actor_id}")
+
+
+def _align_bound_vehicle_bbox_center_spawn(
+    carla_module: Any,
+    vehicle: Any,
+    evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Place a bound vehicle origin so its CARLA bbox center is source pose.
+
+    M8 actor initial states are NuScenes cuboid centres.  CARLA vehicle
+    transforms are actor origins, so spawning directly at that state applies
+    the blueprint bbox offset a second time.  Move only the origin after the
+    successful exact spawn; the resulting physical collision box remains the
+    real CARLA box while its centre is the declared source reference.
+    """
+
+    if not hasattr(vehicle, "get_transform") or not hasattr(vehicle, "set_transform"):
+        raise RuntimeError("M8 bbox-center alignment requires CARLA get/set_transform")
+    bounding_box = getattr(vehicle, "bounding_box", None)
+    offset = getattr(bounding_box, "location", None)
+    if offset is None:
+        raise RuntimeError("M8 bbox-center alignment requires a CARLA bounding-box location")
+    transform = vehicle.get_transform()
+    location = getattr(transform, "location", None)
+    rotation = getattr(transform, "rotation", None)
+    if location is None or rotation is None or not hasattr(transform, "transform"):
+        raise RuntimeError("M8 bbox-center alignment requires a transform operation")
+    world_center = transform.transform(offset)
+    if world_center is None:
+        raise RuntimeError("M8 bbox-center alignment could not resolve bbox center")
+    correction = {
+        axis: float(getattr(world_center, axis, 0.0))
+        - float(getattr(location, axis, 0.0))
+        for axis in ("x", "y", "z")
+    }
+    target_location_values = {
+        axis: float(getattr(location, axis, 0.0)) - correction[axis]
+        for axis in ("x", "y", "z")
+    }
+    location_type = type(location)
+    try:
+        target_location = location_type(**target_location_values)
+    except (TypeError, ValueError):
+        target_location = SimpleNamespace(**target_location_values)
+    transform_type = type(transform)
+    try:
+        target_transform = transform_type(target_location, rotation)
+    except (TypeError, ValueError):
+        transform_constructor = getattr(carla_module, "Transform", None)
+        if transform_constructor is None:
+            raise RuntimeError("M8 bbox-center alignment cannot construct a CARLA transform")
+        target_transform = transform_constructor(target_location, rotation)
+    vehicle.set_transform(target_transform)
+
+    residual_m = None
+    aligned_transform = vehicle.get_transform()
+    if hasattr(aligned_transform, "transform"):
+        aligned_center = aligned_transform.transform(offset)
+        if aligned_center is not None:
+            residual_m = math.dist(
+                [float(getattr(aligned_center, axis, 0.0)) for axis in ("x", "y", "z")],
+                [float(getattr(location, axis, 0.0)) for axis in ("x", "y", "z")],
+            )
+    if residual_m is None or residual_m > 1e-3:
+        raise RuntimeError(
+            "M8 bbox-center alignment residual exceeds tolerance: "
+            f"{residual_m!r}"
+        )
+    return {
+        **dict(evidence),
+        "strategy": "source_bbox_center_runtime_spawn_aligned",
+        "render_reference_source_frame_mapped": "carla_bounding_box_center",
+        "source_xy_yaw_preserved": True,
+        "bbox_center_origin_adjustment_m": {
+            axis: correction[axis] for axis in ("x", "y", "z")
+        },
+        "bbox_center_alignment_residual_m": float(residual_m),
+        "vertical_adjustment_m": -correction["z"],
+    }
 
 
 def _capture_bound_vehicle_render_pose_offset(

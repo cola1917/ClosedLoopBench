@@ -1074,6 +1074,69 @@ class BasicAgentRuntimeLoopTests(unittest.TestCase):
         )
         self.assertNotIn("_runtime_render_pose_offset", actor)
 
+    def test_m8_bound_vehicle_spawn_aligns_bbox_center_without_changing_source_pose(self):
+        from runners.run_carla_basic_agent import _spawn_actor_vehicle
+
+        class BboxTransform(FakeTransform):
+            def transform(self, offset):
+                return FakeLocation(
+                    self.location.x + offset.x,
+                    self.location.y + offset.y,
+                    self.location.z + offset.z,
+                )
+
+        class BboxCarla(FakeCarlaModule):
+            def __init__(self, events):
+                super().__init__(events)
+                self.Transform = BboxTransform
+
+        class AlignedVehicle(FakeVehicle):
+            def __init__(self, events):
+                super().__init__(events, label="actor.m8-aligned")
+                self.set_transforms = []
+
+            def set_transform(self, transform):
+                self.set_transforms.append(transform)
+                self.transforms = [transform]
+                self.transform_reads = 0
+
+            def get_transform(self):
+                return super().get_transform()
+
+        class AlignedWorld(FakeWorld):
+            def __init__(self, events):
+                super().__init__(events)
+                self.vehicle = AlignedVehicle(events)
+
+            def try_spawn_actor(self, _blueprint, transform):
+                self.vehicle.transforms = [transform]
+                self.vehicle.transform_reads = 0
+                return self.vehicle
+
+        events = []
+        actor = {
+            "actor_id": "m8-aligned",
+            "type": "vehicle",
+            "initial_state": {"x": 3.0, "y": 4.0, "z": 1.0, "yaw": 0.0, "speed_mps": 0.0},
+            "binding": {"sensor_pose_reference": "carla_bounding_box_center"},
+        }
+        world = AlignedWorld(events)
+        vehicle = _spawn_actor_vehicle(
+            BboxCarla(events),
+            world,
+            actor,
+            "m8-aligned",
+            align_bound_vehicle_bbox_center=True,
+        )
+
+        self.assertIs(vehicle, world.vehicle)
+        self.assertEqual(len(vehicle.set_transforms), 1)
+        self.assertAlmostEqual(vehicle.set_transforms[0].location.z, 0.25)
+        evidence = actor["_runtime_spawn_evidence"]
+        self.assertEqual(evidence["strategy"], "source_bbox_center_runtime_spawn_aligned")
+        self.assertAlmostEqual(evidence["vertical_adjustment_m"], -0.75)
+        self.assertAlmostEqual(evidence["bbox_center_alignment_residual_m"], 0.0)
+
     def test_runtime_frame_offset_never_changes_bbox_bottom_pedestrian_pose(self):
         from runners.run_carla_basic_agent import _apply_runtime_reference_frame_offset
 
