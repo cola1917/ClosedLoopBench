@@ -23,7 +23,7 @@ class DeriveM7PhysicalPoseBindingsTests(unittest.TestCase):
         self.assertTrue(derived["runtime"]["m7_actor_pose_audit_required"])
         self.assertEqual(derived["actors"][0]["closed_loop_level"], "replay")
         self.assertEqual(derived["actors"][0]["binding"]["sensor_pose_source"], "carla_runtime_actor_pose")
-        self.assertEqual(derived["actors"][1]["binding"]["sensor_pose_reference"], "carla_bounding_box_bottom")
+        self.assertEqual(derived["actors"][1]["binding"]["sensor_pose_reference"], "carla_bounding_box_center")
         self.assertEqual(sidecar["bindings"][0]["sensor_sync"]["pose_reference"], "carla_bounding_box_center")
         self.assertEqual(sidecar["bindings"][0]["sensor_sync"]["replay_render_pose_mode"], "carla_runtime_physical")
 

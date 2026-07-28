@@ -159,6 +159,31 @@ class PedestrianActorRuntimeTests(unittest.TestCase):
         self.assertAlmostEqual(direct["z"], 1.02)
         self.assertEqual(direct, fallback)
 
+    def test_bound_pedestrian_render_pose_uses_declared_box_center(self):
+        from runners.run_carla_basic_agent import _bound_actor_render_pose
+
+        actor = {
+            "actor_id": "walker",
+            "binding": {"sensor_pose_reference": "carla_bounding_box_center"},
+        }
+        entity = SimpleNamespace(
+            bounding_box=SimpleNamespace(
+                location=Vector(0.0, 0.0, 0.0),
+                extent=Vector(0.40, 0.35, 0.93),
+            )
+        )
+        actor_pose = {"x": 10.0, "y": 20.0, "z": 1.95, "roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+
+        pose, reference = _bound_actor_render_pose(
+            actor,
+            entity,
+            transform=Transform(Vector(10.0, -20.0, 1.95), Rotation()),
+            actor_pose=actor_pose,
+        )
+
+        self.assertEqual(reference, "carla_bounding_box_center")
+        self.assertEqual(pose, actor_pose)
+
     def test_actor_control_contract_preflight_and_execution_are_fail_closed(self):
         from runners.run_carla_basic_agent import (
             _actor_control_execution_evidence,

@@ -46,12 +46,9 @@ def derive_m7_physical_pose_bindings(
         actor = actors.get(actor_id)
         if sidecar is None or actor is None or not isinstance(actor.get("binding"), dict):
             raise ValueError(f"selected actor has no matching binding: {actor_id}")
-        actor_type = str(sidecar.get("actor_type") or actor.get("type") or "")
-        reference = (
-            "carla_bounding_box_bottom"
-            if actor_type == "pedestrian"
-            else "carla_bounding_box_center"
-        )
+        # nuScenes track translations are cuboid centres for vehicles and
+        # pedestrians. NuRec's DynamicObject API consumes that same reference.
+        reference = "carla_bounding_box_center"
         sync = dict(sidecar.get("sensor_sync") or {})
         sync["pose_source"] = "carla_runtime_actor_pose"
         sync["pose_reference"] = reference

@@ -3141,11 +3141,9 @@ def _bound_actor_render_pose(
 ) -> tuple[dict[str, float], str]:
     """Return the NuRec track reference pose used by NVIDIA's CARLA adapter.
 
-    NuRec vehicle/two-wheeler tracks are cuboid-centred. CARLA vehicle transforms
-    use the blueprint actor origin, so NVIDIA composes ``bounding_box.location``
-    before sending a controllable dynamic object to gRPC. Pedestrian source poses
-    refer to the ground-contact point, while CARLA walker origins are capsule
-    centres; pedestrian tracks therefore use the bottom of the CARLA bounding box.
+    NuRec source tracks are cuboid-centred for vehicles, two-wheelers, and
+    pedestrians. CARLA transforms use blueprint actor origins, so the runtime
+    composes ``bounding_box.location`` before sending a dynamic object to gRPC.
 
     Replay-frozen actors (``sensor_pose_reference == "source_track_frame"``, as
     stamped by the counterfactual actor-control contract) render at the source
@@ -4197,11 +4195,7 @@ def _actor_runtime_binding_evidence(
         expected_pose_reference = (
             "source_track_frame"
             if binding.get("sensor_pose_source") == "scenario_ir_reference_trajectory"
-            else (
-                "carla_bounding_box_bottom"
-                if _actor_kind(actor or {}) == "pedestrian"
-                else "carla_bounding_box_center"
-            )
+            else "carla_bounding_box_center"
         )
         if binding.get("sensor_pose_reference") != expected_pose_reference:
             record_issues.append("sensor_pose_reference_invalid")

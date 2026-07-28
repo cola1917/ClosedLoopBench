@@ -463,11 +463,7 @@ def _freeze_actor_control_modes(
         pose_reference = (
             "source_track_frame"
             if effective_mode == "replay"
-            else (
-                "carla_bounding_box_bottom"
-                if actor_type == "pedestrian"
-                else "carla_bounding_box_center"
-            )
+            else "carla_bounding_box_center"
         )
         actor["closed_loop_level"] = effective_mode
         closed_loop = dict(actor.get("closed_loop") or {})

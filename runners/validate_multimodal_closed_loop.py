@@ -52,11 +52,7 @@ def validate_multimodal_closed_loop_result(result: Mapping[str, Any]) -> dict[st
             raise MultimodalClosedLoopError(
                 f"actor {record.get('actor_id')} source/NuRec identity changed"
             )
-        expected_reference = (
-            "carla_bounding_box_bottom"
-            if record.get("actor_type") == "pedestrian"
-            else "carla_bounding_box_center"
-        )
+        expected_reference = "carla_bounding_box_center"
         if record.get("sensor_pose_reference") != expected_reference:
             raise MultimodalClosedLoopError(
                 f"actor {record.get('actor_id')} has an invalid NuRec pose reference"

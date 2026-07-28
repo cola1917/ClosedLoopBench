@@ -279,11 +279,7 @@ def _build_binding(
             "pose_reference": (
                 "source_track_frame"
                 if not interactive
-                else (
-                    "carla_bounding_box_bottom"
-                    if actor_type == "pedestrian"
-                    else "carla_bounding_box_center"
-                )
+                else "carla_bounding_box_center"
             ),
             "same_dynamic_object_for_all_modalities": True,
         },

@@ -73,11 +73,7 @@ def freeze_actor_binding_set_for_case(
         if mode == "scripted":
             interactive_count += 1
             sync["pose_source"] = "carla_runtime_actor_pose"
-            sync["pose_reference"] = (
-                "carla_bounding_box_bottom"
-                if str(item.get("actor_type")) == "pedestrian"
-                else "carla_bounding_box_center"
-            )
+            sync["pose_reference"] = "carla_bounding_box_center"
         else:
             sync["pose_source"] = "scenario_ir_reference_trajectory"
             sync["pose_reference"] = "source_track_frame"

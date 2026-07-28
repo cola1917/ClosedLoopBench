@@ -11,7 +11,7 @@
 |---|---|---|---|
 | M1-M5 | operational vertical slice: CARLA, NuRec, ROS2/TF++ and portable evidence | retained as Phase 1 record | none; not a physics/safety pass |
 | M6 | full scene-object registry and physical CARLA representation | passed | M7 |
-| M7 | same-tick CARLA physical pose to NuRec render-pose binding | passed | M8 |
+| M7 | same-tick CARLA physical pose to NuRec render-pose binding | rerun required after pedestrian centre-reference correction | M8 |
 | M8.1 | CARLA collision, lane and physical-box runtime truth on every tick | implemented; three-tick probe valid | M8.2 |
 | M8.2 | occlusion-aware expected LiDAR support and LiDAR-to-world audit | failed on the three-tick probe; NuRec LiDAR investigation required | M8.3 |
 | M8.3 | calibrated six-camera geometric visibility records | required as geometry evidence; no detector dependency | M9 |
@@ -205,12 +205,15 @@ M7 derives a new replay-preserving binding set whose NuRec request poses come
 from the CARLA runtime rather than the source trajectory. The explicit
 `replay_render_pose_mode=carla_runtime_physical` contract keeps replay as the
 actor behaviour policy while making CARLA/NuRec pose disagreement measurable.
-The 22-tick run has 22 successful RGB/LiDAR transactions and a 44-row pose
-audit: 23 active actor/tick rows pass, 21 pedestrian rows before its source
-annotation window are `not_applicable`, and no row fails. At the first common
-window both the lead vehicle and pedestrian pass their respective
-`0.50 m`/`0.30 m` and `5 deg` gates. Both actors also pass RGB and LiDAR A/A/B
-pose probes (stable A/A, changed B after a 1 m target shift).
+The former 22-tick run remains retained evidence, but it is superseded for
+promotion. It encoded pedestrian dynamic poses at the CARLA box bottom, while
+the source nuScenes track and NuRec dynamic-object API use the cuboid centre.
+The mismatch is directly visible for track `00cfe5312e5e469bb97d7b64245a98e3`:
+the source pose is `z=0.862 m` while the old runtime request sent `z=-0.080 m`
+(one CARLA pedestrian half-height lower). M7 must be rerun with the corrected
+`carla_bounding_box_center` reference before it is marked passed again. The
+existing A/A/B records remain useful renderer capability evidence, but do not
+prove the corrected runtime binding.
 
 The static placement audit joins the immutable registry to CARLA static runtime
 identity and calibrated 3D-box projections into the same NuRec six-camera
@@ -261,6 +264,14 @@ raw inputs in the same world frame before a remote M8 run is valid:
   assurance, not an M8 gate;
 - LiDAR point/occupancy support for every object declared observable in the
   scan, including the road-boundary representation.
+
+The retained artifact021 three-tick preflight has collision, lane, and
+calibrated visibility streams passing, but all three LiDAR-world rows fail.
+This is a measured geometry failure, not a missing metric: the normalized NRE
+payloads contain approximately 20k-28k points, while the old pedestrian
+bottom-reference contract displaced dynamic geometry from the CARLA boxes.
+The centre-reference correction must be applied, then M7 and all M8 streams
+must be regenerated without relaxing the LiDAR occupancy gate.
 
 ### Scene-0061 M8 Runtime Probe
 

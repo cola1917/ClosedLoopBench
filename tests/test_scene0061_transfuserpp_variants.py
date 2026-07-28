@@ -92,11 +92,7 @@ class Scene0061TransFuserPPVariantTests(unittest.TestCase):
                     expected_reference = (
                         "source_track_frame"
                         if actor["effective_control_mode"] == "replay"
-                        else (
-                            "carla_bounding_box_bottom"
-                            if row["actor_type"] == "pedestrian"
-                            else "carla_bounding_box_center"
-                        )
+                        else "carla_bounding_box_center"
                     )
                     self.assertEqual(
                         actor["control_mode_contract"]["sensor_pose_reference"],

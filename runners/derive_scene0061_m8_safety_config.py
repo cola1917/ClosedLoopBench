@@ -44,11 +44,7 @@ def _bind_all_m8_dynamic_replay_actors(config: dict[str, Any]) -> None:
                 "schema_version": "actor_runtime_binding.v1",
                 "nurec_track_id": source_track_id,
                 "sensor_pose_source": "carla_runtime_actor_pose",
-                "sensor_pose_reference": (
-                    "carla_bounding_box_bottom"
-                    if actor_type == "pedestrian"
-                    else "carla_bounding_box_center"
-                ),
+                "sensor_pose_reference": "carla_bounding_box_center",
                 "required_modalities": ["rgb", "lidar"],
                 "same_dynamic_object_for_all_modalities": True,
                 "declared_status": "ready",
@@ -110,11 +106,7 @@ def build_m8_actor_binding_manifest(config: Mapping[str, Any]) -> dict[str, Any]
         binding["sensor_sync"] = {
             "required_modalities": ["rgb", "lidar"],
             "pose_source": "carla_runtime_actor_pose",
-            "pose_reference": (
-                "carla_bounding_box_bottom"
-                if actor_type == "pedestrian"
-                else "carla_bounding_box_center"
-            ),
+            "pose_reference": "carla_bounding_box_center",
             "same_dynamic_object_for_all_modalities": True,
             "replay_render_pose_mode": "carla_runtime_physical",
         }

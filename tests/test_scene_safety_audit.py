@@ -192,7 +192,7 @@ class SceneSafetyAuditTests(unittest.TestCase):
         )
         self.assertEqual(
             bindings["walker"]["sensor_sync"]["pose_reference"],
-            "carla_bounding_box_bottom",
+            "carla_bounding_box_center",
         )
 
     def test_m8_runtime_adapter_retains_physical_box_state(self):
