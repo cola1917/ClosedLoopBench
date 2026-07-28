@@ -32,6 +32,7 @@ def build_scene_object_registry(
     *,
     static_objects: Iterable[Mapping[str, Any]] = (),
     role_overrides: Mapping[str, str] | None = None,
+    nonreplay_static_actor_ids: Iterable[str] = (),
     include_road_boundary: bool = True,
     road_boundary_source: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -45,6 +46,7 @@ def build_scene_object_registry(
 
     scene_id = _scene_id(scenario_ir)
     roles = {str(key): str(value) for key, value in (role_overrides or {}).items()}
+    nonreplay_static_ids = {str(actor_id) for actor_id in nonreplay_static_actor_ids}
     actors = scenario_ir.get("actors")
     if not isinstance(actors, list):
         raise SceneObjectRegistryError("scenario_ir.actors must be a list")
@@ -54,7 +56,12 @@ def build_scene_object_registry(
     for actor in actors:
         if not isinstance(actor, Mapping):
             raise SceneObjectRegistryError("every Scenario IR actor must be an object")
-        record = _scenario_actor_record(actor, roles.get(str(actor.get("actor_id") or "")))
+        actor_id = str(actor.get("actor_id") or "")
+        record = _scenario_actor_record(
+            actor,
+            roles.get(actor_id),
+            force_static=actor_id in nonreplay_static_ids,
+        )
         if record["object_id"] in actor_ids:
             raise SceneObjectRegistryError(f"duplicate Scenario IR actor_id: {record['object_id']}")
         actor_ids.add(record["object_id"])
@@ -63,6 +70,12 @@ def build_scene_object_registry(
     if unknown_roles:
         raise SceneObjectRegistryError(
             "role_overrides contains unknown Scenario IR actor IDs: " + ", ".join(unknown_roles)
+        )
+    unknown_nonreplay_static_ids = sorted(nonreplay_static_ids - actor_ids)
+    if unknown_nonreplay_static_ids:
+        raise SceneObjectRegistryError(
+            "nonreplay_static_actor_ids contains unknown Scenario IR actor IDs: "
+            + ", ".join(unknown_nonreplay_static_ids)
         )
 
     for raw in static_objects:
@@ -201,6 +214,7 @@ def attach_static_obstacles_to_carla_run(
                 "object_id": record["object_id"],
                 "semantic_class": record["semantic_class"],
                 "source": deepcopy(dict(record["source"])),
+                "time_interval": deepcopy(dict(record["time_interval"])),
                 "placement": deepcopy(dict(placement)),
                 "blueprint": carla.get("blueprint_class"),
                 "collision_policy": carla.get("collision_policy"),
@@ -339,17 +353,23 @@ def _scene_id(scenario_ir: Mapping[str, Any]) -> str:
     return scene_id
 
 
-def _scenario_actor_record(actor: Mapping[str, Any], role_override: str | None) -> dict[str, Any]:
+def _scenario_actor_record(
+    actor: Mapping[str, Any], role_override: str | None, *, force_static: bool = False
+) -> dict[str, Any]:
     actor_id = str(actor.get("actor_id") or "")
     if not actor_id:
         raise SceneObjectRegistryError("every Scenario IR actor requires actor_id")
     actor_type = str(actor.get("type") or actor.get("actor_type") or "object").lower()
     actor_type = {"walker": "pedestrian", "person": "pedestrian", "motorcycle": "two_wheeler"}.get(actor_type, actor_type)
-    is_dynamic = actor_type in _DYNAMIC_TYPES
+    is_dynamic = actor_type in _DYNAMIC_TYPES and not force_static
+    points = actor.get("reference_trajectory")
+    if not isinstance(points, list) or not points:
+        raise SceneObjectRegistryError(f"dynamic actor {actor_id} requires reference_trajectory")
+    interval = _interval(points, actor_id)
     role = role_override or ("background_replay" if is_dynamic else "static_obstacle")
     if not is_dynamic and role_override is not None:
         raise SceneObjectRegistryError(
-            f"static source object {actor_id} cannot be assigned a dynamic control role"
+            f"single-observation/static source object {actor_id} cannot be assigned a dynamic control role"
         )
     if is_dynamic and role not in _ROLES - {"static_obstacle", "road_boundary"}:
         raise SceneObjectRegistryError(f"dynamic actor {actor_id} has invalid role {role}")
@@ -357,10 +377,6 @@ def _scenario_actor_record(actor: Mapping[str, Any], role_override: str | None) 
         raise SceneObjectRegistryError("controlled_lead_vehicle must reference a vehicle")
     if role == "controlled_pedestrian" and actor_type != "pedestrian":
         raise SceneObjectRegistryError("controlled_pedestrian must reference a pedestrian")
-    points = actor.get("reference_trajectory")
-    if not isinstance(points, list) or not points:
-        raise SceneObjectRegistryError(f"dynamic actor {actor_id} requires reference_trajectory")
-    interval = _interval(points, actor_id)
     source_track = str(actor.get("source_track_id") or actor_id)
     relevant = True
     return {
@@ -370,7 +386,7 @@ def _scenario_actor_record(actor: Mapping[str, Any], role_override: str | None) 
         "role": role,
         "safety_relevant": relevant,
         "source": {
-            "kind": "nuscenes_instance_track",
+            "kind": "nuscenes_instance_track" if is_dynamic else "nuscenes_single_observation_track",
             "source_track_id": source_track,
             "annotation_tokens": list(actor.get("source_annotation_tokens") or []),
         },
@@ -385,7 +401,13 @@ def _scenario_actor_record(actor: Mapping[str, Any], role_override: str | None) 
             else {
                 "representation": "static_collision_proxy",
                 "collision_policy": "required",
-                "blueprint_class": _static_blueprint(actor_type, str(actor.get("category") or "")),
+                "blueprint_class": (
+                    "walker.pedestrian.*"
+                    if actor_type == "pedestrian"
+                    else "vehicle.*"
+                    if actor_type in {"vehicle", "two_wheeler"}
+                    else _static_blueprint(actor_type, str(actor.get("category") or ""))
+                ),
                 "placement": _placement(actor.get("initial_state") or {}, actor_id),
             }
         ),
@@ -395,7 +417,7 @@ def _scenario_actor_record(actor: Mapping[str, Any], role_override: str | None) 
         },
         "control": {
             "mode": "replay" if is_dynamic else "none",
-            "controllable": role.startswith("controlled_"),
+            "controllable": is_dynamic and role.startswith("controlled_"),
         },
     }
 

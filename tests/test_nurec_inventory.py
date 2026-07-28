@@ -36,6 +36,145 @@ def _probe(digest="a" * 64):
 
 
 class NuRecInventoryTests(unittest.TestCase):
+    def test_ncore_dynamic_closure_requires_exact_track_and_class_match(self):
+        from adapters.nurec_inventory import audit_registry_ncore_dynamic_closure
+
+        vehicle = "a" * 32
+        pedestrian = "b" * 32
+        unexpected = "c" * 32
+        registry = {
+            "schema_version": "scene_object_registry.v1",
+            "scene_id": "scene",
+            "records": [
+                {
+                    "object_id": vehicle,
+                    "semantic_class": "vehicle",
+                    "role": "background_replay",
+                    "carla": {"representation": "physical_actor", "collision_policy": "required"},
+                    "nurec": {"representation": "dynamic_track", "track_id": vehicle},
+                },
+                {
+                    "object_id": pedestrian,
+                    "semantic_class": "pedestrian",
+                    "role": "controlled_pedestrian",
+                    "carla": {"representation": "physical_actor", "collision_policy": "required"},
+                    "nurec": {"representation": "dynamic_track", "track_id": pedestrian},
+                },
+                {
+                    "object_id": "road_boundary:carla_map",
+                    "semantic_class": "road_boundary",
+                    "role": "road_boundary",
+                    "carla": {"representation": "road_topology", "collision_policy": "not_applicable"},
+                    "nurec": {"representation": "projection_target", "track_id": None},
+                },
+            ],
+        }
+        ncore = {
+            "schema_version": 1,
+            "pass": True,
+            "contract": {"accepted_sources": ["EXTERNAL"]},
+            "eligible_tracks": [
+                {"track_id": vehicle, "class_id": "automobile", "source": "EXTERNAL"},
+                {"track_id": unexpected, "class_id": "pedestrian", "source": "EXTERNAL"},
+            ],
+        }
+
+        audit = audit_registry_ncore_dynamic_closure(registry, ncore)
+
+        self.assertEqual(audit["status"], "failed")
+        self.assertEqual(audit["missing_from_ncore"], [pedestrian])
+        self.assertEqual(audit["unexpected_from_ncore"], [unexpected])
+        self.assertEqual(audit["summary"]["matched_track_count"], 1)
+
+    def test_ncore_dynamic_closure_accepts_full_vehicle_pedestrian_and_two_wheeler_match(self):
+        from adapters.nurec_inventory import audit_registry_ncore_dynamic_closure
+
+        vehicle, pedestrian, motorcycle = "a" * 32, "b" * 32, "c" * 32
+        def record(track_id, semantic_class):
+            return {
+                "object_id": track_id,
+                "semantic_class": semantic_class,
+                "role": "background_replay",
+                "carla": {"representation": "physical_actor", "collision_policy": "required"},
+                "nurec": {"representation": "dynamic_track", "track_id": track_id},
+            }
+        registry = {
+            "schema_version": "scene_object_registry.v1",
+            "scene_id": "scene",
+            "records": [record(vehicle, "vehicle"), record(pedestrian, "pedestrian"), record(motorcycle, "two_wheeler")],
+        }
+        ncore = {
+            "schema_version": 1,
+            "pass": True,
+            "contract": {"accepted_sources": ["EXTERNAL"]},
+            "eligible_tracks": [
+                {"track_id": vehicle, "class_id": "heavy_truck", "source": "EXTERNAL"},
+                {"track_id": pedestrian, "class_id": "pedestrian", "source": "EXTERNAL"},
+                {"track_id": motorcycle, "class_id": "motorcycle", "source": "EXTERNAL"},
+            ],
+        }
+
+        audit = audit_registry_ncore_dynamic_closure(registry, ncore)
+
+        self.assertEqual(audit["status"], "passed")
+        self.assertEqual(audit["summary"]["matched_track_count"], 3)
+
+    def test_ncore_dynamic_closure_uses_explicit_selected_tracks_when_present(self):
+        from adapters.nurec_inventory import audit_registry_ncore_dynamic_closure
+
+        required, ignored = "a" * 32, "b" * 32
+        registry = {
+            "schema_version": "scene_object_registry.v1",
+            "scene_id": "scene",
+            "records": [{
+                "object_id": required,
+                "semantic_class": "vehicle",
+                "role": "background_replay",
+                "carla": {"representation": "physical_actor", "collision_policy": "required"},
+                "nurec": {"representation": "dynamic_track", "track_id": required},
+            }],
+        }
+        ncore = {
+            "schema_version": 1,
+            "pass": True,
+            "eligible_tracks": [
+                {"track_id": required, "class_id": "automobile", "source": "EXTERNAL"},
+                {"track_id": ignored, "class_id": "automobile", "source": "EXTERNAL"},
+            ],
+            "selected_tracks": [{"track_id": required, "class_id": "automobile", "source": "EXTERNAL"}],
+        }
+
+        audit = audit_registry_ncore_dynamic_closure(registry, ncore)
+
+        self.assertEqual(audit["status"], "passed")
+        self.assertEqual(audit["ncore_track_collection"], "selected_tracks")
+
+    def test_ncore_dynamic_closure_rejects_unresolved_explicit_selection(self):
+        from adapters.nurec_inventory import audit_registry_ncore_dynamic_closure
+
+        track_id = "a" * 32
+        registry = {
+            "schema_version": "scene_object_registry.v1",
+            "scene_id": "scene",
+            "records": [{
+                "object_id": track_id,
+                "semantic_class": "vehicle",
+                "role": "background_replay",
+                "carla": {"representation": "physical_actor", "collision_policy": "required"},
+                "nurec": {"representation": "dynamic_track", "track_id": track_id},
+            }],
+        }
+        ncore = {
+            "schema_version": 1,
+            "pass": False,
+            "selected_tracks": [{"track_id": track_id, "class_id": "automobile", "source": "EXTERNAL"}],
+            "selected_track_ids_missing_from_eligible": ["b" * 32],
+        }
+
+        audit = audit_registry_ncore_dynamic_closure(registry, ncore)
+
+        self.assertEqual(audit["status"], "failed")
+        self.assertIn("ncore_selected_track_ids_missing_from_eligible", audit["issues"])
     def test_registry_source_content_audit_is_fail_closed_for_missing_and_static_objects(self):
         from adapters.nurec_inventory import audit_registry_source_content
 

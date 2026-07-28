@@ -151,6 +151,10 @@ class SceneSafetyAuditTests(unittest.TestCase):
             derived["runtime"]["dynamic_actor_lifecycle"],
             "source_annotation_window",
         )
+        self.assertEqual(
+            derived["runtime"]["static_obstacle_lifecycle"],
+            "source_annotation_window",
+        )
         self.assertEqual(derived["actors"][0]["closed_loop_level"], "replay")
         self.assertFalse(derived["nurec_runtime"]["lidar_instant_sampling"])
 
@@ -168,6 +172,50 @@ class SceneSafetyAuditTests(unittest.TestCase):
         self.assertEqual(_actor_temporal_lifecycle_state(window, 1.0), "active")
         self.assertEqual(_actor_temporal_lifecycle_state(window, 2.0), "active")
         self.assertEqual(_actor_temporal_lifecycle_state(window, 2.0001), "despawned")
+
+    def test_static_obstacle_lifecycle_uses_its_declared_source_window(self):
+        from runners.run_carla_basic_agent import (
+            _advance_static_obstacle_temporal_lifecycle,
+            _initialize_static_obstacle_temporal_lifecycle,
+            _static_obstacle_runtime_evidence,
+        )
+        from tests.test_basic_agent_runtime_loop import FakeCarlaModule, FakeWorld
+
+        events = []
+        obstacle = {
+            "object_id": "source-singleton",
+            "placement": {"x": 2.0, "y": 1.0, "z": 0.0, "yaw": 0.0},
+            "blueprint": "static.prop.*",
+            "collision_policy": "required",
+            "time_interval": {"start_sec": 1.0, "end_sec": 2.0},
+        }
+        spawned = {}
+        lifecycle = _initialize_static_obstacle_temporal_lifecycle([obstacle])
+        _advance_static_obstacle_temporal_lifecycle(
+            FakeCarlaModule(events), FakeWorld(events), [obstacle], spawned, lifecycle,
+            scenario_time_sec=0.5,
+        )
+        self.assertEqual(lifecycle["source-singleton"]["state"], "deferred")
+        self.assertFalse(spawned)
+
+        _advance_static_obstacle_temporal_lifecycle(
+            FakeCarlaModule(events), FakeWorld(events), [obstacle], spawned, lifecycle,
+            scenario_time_sec=1.0,
+        )
+        self.assertEqual(lifecycle["source-singleton"]["state"], "active")
+        self.assertIn("source-singleton", spawned)
+
+        _advance_static_obstacle_temporal_lifecycle(
+            FakeCarlaModule(events), FakeWorld(events), [obstacle], spawned, lifecycle,
+            scenario_time_sec=2.01,
+        )
+        self.assertEqual(lifecycle["source-singleton"]["state"], "despawned")
+        self.assertFalse(spawned)
+        audit = _static_obstacle_runtime_evidence(
+            {"static_obstacles": [obstacle]}, spawned,
+            temporal_lifecycle=lifecycle, require_window_entered=True,
+        )
+        self.assertEqual(audit["status"], "passed")
 
     def test_replay_executor_is_explicitly_not_required_before_source_window(self):
         from runners.run_carla_basic_agent import _actor_control_execution_evidence

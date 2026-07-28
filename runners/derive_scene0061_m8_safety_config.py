@@ -32,6 +32,7 @@ def derive_m8_safety_config(
     # M8 compares CARLA physical boxes with NuRec observations. A dynamic
     # actor outside its source annotation window must therefore exist in neither.
     runtime["dynamic_actor_lifecycle"] = "source_annotation_window"
+    runtime["static_obstacle_lifecycle"] = "source_annotation_window"
     config["nurec_runtime"] = dict(config.get("nurec_runtime") or {})
     config["nurec_runtime"]["lidar_instant_sampling"] = bool(lidar_instant_sampling)
     config["runtime"] = runtime

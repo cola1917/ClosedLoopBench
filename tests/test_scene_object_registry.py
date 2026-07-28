@@ -74,6 +74,63 @@ class SceneObjectRegistryTests(unittest.TestCase):
         self.assertEqual(cone["carla"]["blueprint_class"], "static.prop.trafficcone01")
         self.assertEqual(cone["nurec"]["representation"], "source_scene_appearance")
 
+    def test_registers_single_observation_pedestrian_as_static_visible_collision_proxy(self):
+        from adapters.scene_object_registry import build_scene_object_registry
+
+        singleton = "5" * 32
+        scenario = _scenario()
+        scenario["actors"].append(
+            {
+                "actor_id": singleton,
+                "source_track_id": singleton,
+                "type": "pedestrian",
+                "category": "human.pedestrian.adult",
+                "initial_state": _state(0, 4, -2),
+                "reference_trajectory": [_state(0, 4, -2)],
+            }
+        )
+
+        registry = build_scene_object_registry(
+            scenario, static_objects=[], nonreplay_static_actor_ids={singleton}
+        )
+        record = next(item for item in registry["records"] if item["object_id"] == singleton)
+
+        self.assertEqual(record["role"], "static_obstacle")
+        self.assertEqual(record["source"]["kind"], "nuscenes_single_observation_track")
+        self.assertEqual(record["nurec"]["representation"], "source_scene_appearance")
+        self.assertEqual(record["carla"]["blueprint_class"], "walker.pedestrian.*")
+        self.assertEqual(record["carla"]["placement"]["x"], 4.0)
+        self.assertFalse(record["control"]["controllable"])
+
+    def test_derives_new_m8_registry_without_mutating_prior_actor_identity_set(self):
+        from runners.derive_m8_registry_from_m6_plan import derive_registry
+        from adapters.scene_object_registry import build_scene_object_registry
+
+        singleton = "6" * 32
+        scenario = _scenario()
+        scenario["actors"].append(
+            {
+                "actor_id": singleton,
+                "source_track_id": singleton,
+                "type": "pedestrian",
+                "category": "human.pedestrian.adult",
+                "initial_state": _state(0, 4, -2),
+                "reference_trajectory": [_state(0, 4, -2), _state(1, 4, -2)],
+            }
+        )
+        prior = build_scene_object_registry(scenario, static_objects=[])
+        plan = {"schema_version": "basic_agent_plan.v1", "scenario_id": SCENE, "actors": scenario["actors"]}
+        plan["actors"][-1]["reference_trajectory"] = [_state(0, 4, -2)]
+
+        derived, manifest = derive_registry(
+            prior, plan, nonreplay_static_actor_ids={singleton}
+        )
+        record = next(item for item in derived["records"] if item["object_id"] == singleton)
+
+        self.assertEqual(record["role"], "static_obstacle")
+        self.assertTrue(manifest["object_id_match"])
+        self.assertEqual(manifest["reclassified_records"][0]["object_id"], singleton)
+
     def test_visible_unknown_or_noncollidable_object_blocks_promotion(self):
         from adapters.scene_object_registry import (
             SceneObjectRegistryError,
@@ -220,7 +277,7 @@ class SceneObjectRegistryTests(unittest.TestCase):
                 "type": "two_wheeler",
                 "category": "vehicle.bicycle",
                 "initial_state": _state(0, 4, -2),
-                "reference_trajectory": [_state(0, 4, -2)],
+                "reference_trajectory": [_state(0, 4, -2), _state(1, 4.5, -2)],
             }
         )
         bicycle_registry = build_scene_object_registry(bicycle, static_objects=[])

@@ -5,11 +5,166 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from adapters.scene_object_registry import validate_scene_object_registry
 from adapters.shared_protocol_validation import validate_document
 
 
 class NuRecInventoryError(ValueError):
     """Raised when runtime track discovery/probe evidence is malformed."""
+
+
+_DYNAMIC_ROLES = {
+    "background_replay",
+    "controlled_lead_vehicle",
+    "controlled_pedestrian",
+}
+
+_NCORE_CLASS_TO_REGISTRY_CLASS = {
+    "automobile": "vehicle",
+    "bus": "vehicle",
+    "heavy_truck": "vehicle",
+    "Other Vehicle - Construction Vehicle": "vehicle",
+    "bicycle": "two_wheeler",
+    "motorcycle": "two_wheeler",
+    "pedestrian": "pedestrian",
+}
+
+
+def audit_registry_ncore_dynamic_closure(
+    registry: Mapping[str, Any],
+    ncore_track_audit: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Fail closed unless CARLA and NCore name the identical dynamic tracks.
+
+    The NCore sidecar is produced from the same cuboid-track selectors passed to
+    NuRec.  A count-only comparison is insufficient: an unregistered NuRec
+    track has no CARLA collision proxy, while a missing registered track makes
+    a CARLA actor visually unverifiable.  This audit therefore requires a
+    bidirectional track-ID match and compatible semantic classes.
+    """
+
+    try:
+        validate_scene_object_registry(registry)
+    except ValueError as exc:
+        raise NuRecInventoryError(str(exc)) from exc
+    if ncore_track_audit.get("schema_version") != 1:
+        raise NuRecInventoryError("NCore track audit must use schema_version 1")
+    selected_tracks = ncore_track_audit.get("selected_tracks")
+    tracks = selected_tracks if isinstance(selected_tracks, list) else ncore_track_audit.get("eligible_tracks")
+    if not isinstance(tracks, list):
+        raise NuRecInventoryError("NCore track audit requires eligible_tracks list")
+    selected_track_collection = "selected_tracks" if isinstance(selected_tracks, list) else "eligible_tracks"
+    selection_missing = ncore_track_audit.get("selected_track_ids_missing_from_eligible") or []
+    if not isinstance(selection_missing, list) or any(not str(track_id) for track_id in selection_missing):
+        raise NuRecInventoryError("NCore selected_track_ids_missing_from_eligible must be a list of IDs")
+
+    ncore_by_id: dict[str, Mapping[str, Any]] = {}
+    malformed_tracks: list[str] = []
+    for raw_track in tracks:
+        if not isinstance(raw_track, Mapping):
+            raise NuRecInventoryError("NCore eligible tracks must be objects")
+        track_id = str(raw_track.get("track_id") or "")
+        if not track_id or track_id in ncore_by_id:
+            raise NuRecInventoryError("NCore eligible track IDs must be unique and non-empty")
+        ncore_by_id[track_id] = raw_track
+        if not str(raw_track.get("class_id") or "") or not str(raw_track.get("source") or ""):
+            malformed_tracks.append(track_id)
+
+    required_by_id: dict[str, Mapping[str, Any]] = {}
+    malformed_records: list[str] = []
+    for raw_record in registry["records"]:
+        if raw_record.get("role") not in _DYNAMIC_ROLES:
+            continue
+        nurec = raw_record.get("nurec")
+        track_id = str(nurec.get("track_id") or "") if isinstance(nurec, Mapping) else ""
+        object_id = str(raw_record.get("object_id") or "")
+        if not track_id or track_id in required_by_id:
+            malformed_records.append(object_id or track_id or "<missing>")
+            continue
+        if nurec.get("representation") != "dynamic_track":
+            malformed_records.append(object_id)
+            continue
+        required_by_id[track_id] = raw_record
+
+    required_ids = set(required_by_id)
+    ncore_ids = set(ncore_by_id)
+    missing_ids = sorted(required_ids - ncore_ids)
+    unexpected_ids = sorted(ncore_ids - required_ids)
+    rows: list[dict[str, Any]] = []
+    class_mismatch_ids: list[str] = []
+    source_mismatch_ids: list[str] = []
+    for track_id in sorted(required_ids):
+        record = required_by_id[track_id]
+        ncore_track = ncore_by_id.get(track_id)
+        row = {
+            "object_id": str(record["object_id"]),
+            "track_id": track_id,
+            "registry_semantic_class": str(record.get("semantic_class") or ""),
+            "ncore_class_id": ncore_track.get("class_id") if ncore_track else None,
+            "ncore_source": ncore_track.get("source") if ncore_track else None,
+            "status": "passed",
+            "issues": [],
+        }
+        if ncore_track is None:
+            row["status"] = "missing_from_ncore"
+            row["issues"].append("registered_dynamic_track_missing_from_ncore")
+        else:
+            mapped_class = _NCORE_CLASS_TO_REGISTRY_CLASS.get(str(ncore_track.get("class_id") or ""))
+            if mapped_class != row["registry_semantic_class"]:
+                class_mismatch_ids.append(track_id)
+                row["issues"].append("ncore_registry_semantic_class_mismatch")
+            if str(ncore_track.get("source") or "") != "EXTERNAL":
+                source_mismatch_ids.append(track_id)
+                row["issues"].append("ncore_track_source_is_not_external")
+            if row["issues"]:
+                row["status"] = "failed"
+        rows.append(row)
+
+    issues: list[str] = []
+    if malformed_tracks:
+        issues.append("ncore_track_metadata_malformed")
+    if malformed_records:
+        issues.append("registry_dynamic_track_metadata_malformed")
+    if missing_ids:
+        issues.append("registered_dynamic_tracks_missing_from_ncore")
+    if unexpected_ids:
+        issues.append("ncore_dynamic_tracks_missing_from_carla_registry")
+    if class_mismatch_ids:
+        issues.append("ncore_registry_semantic_class_mismatch")
+    if source_mismatch_ids:
+        issues.append("ncore_track_source_is_not_external")
+    if selection_missing:
+        issues.append("ncore_selected_track_ids_missing_from_eligible")
+    if ncore_track_audit.get("pass") is not True:
+        issues.append("ncore_dynamic_track_gate_not_passed")
+    return {
+        "schema_version": "scene_object_ncore_dynamic_closure_audit.v1",
+        "scene_id": registry["scene_id"],
+        "registry_schema_version": registry["schema_version"],
+        "ncore_track_audit_schema_version": ncore_track_audit["schema_version"],
+        "ncore_track_collection": selected_track_collection,
+        "ncore_contract": dict(ncore_track_audit.get("contract") or {}),
+        "records": rows,
+        "missing_from_ncore": missing_ids,
+        "unexpected_from_ncore": unexpected_ids,
+        "class_mismatch_track_ids": class_mismatch_ids,
+        "source_mismatch_track_ids": source_mismatch_ids,
+        "selected_track_ids_missing_from_eligible": sorted(str(track_id) for track_id in selection_missing),
+        "malformed_ncore_track_ids": sorted(malformed_tracks),
+        "malformed_registry_object_ids": sorted(malformed_records),
+        "summary": {
+            "registry_dynamic_track_count": len(required_ids),
+            "ncore_eligible_dynamic_track_count": len(ncore_ids),
+            "matched_track_count": len(required_ids & ncore_ids),
+            "missing_from_ncore_count": len(missing_ids),
+            "unexpected_from_ncore_count": len(unexpected_ids),
+            "class_mismatch_count": len(class_mismatch_ids),
+            "source_mismatch_count": len(source_mismatch_ids),
+            "selected_track_ids_missing_from_eligible_count": len(selection_missing),
+        },
+        "issues": issues,
+        "status": "passed" if not issues else "failed",
+    }
 
 
 def audit_registry_source_content(

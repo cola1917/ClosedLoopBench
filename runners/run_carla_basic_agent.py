@@ -440,6 +440,7 @@ def _run_basic_agent_loop(
     actor_execution_evidence: dict[str, str] = {}
     actor_despawn_evidence: dict[str, dict[str, Any]] = {}
     actor_temporal_lifecycle_evidence: dict[str, dict[str, Any]] = {}
+    static_obstacle_temporal_lifecycle_evidence: dict[str, dict[str, Any]] = {}
     actor_physical_response: dict[str, dict[str, float]] = {}
     actor_initial_poses: dict[str, dict[str, Any]] = {}
     frame_trace: list[dict[str, Any]] = []
@@ -496,6 +497,19 @@ def _run_basic_agent_loop(
         ):
             raise RuntimeError(
                 "M8 requires dynamic_actor_lifecycle=source_annotation_window"
+            )
+        static_obstacle_lifecycle = runtime_options.get("static_obstacle_lifecycle")
+        if static_obstacle_lifecycle not in {None, "source_annotation_window"}:
+            raise RuntimeError(
+                "unsupported static obstacle lifecycle: "
+                f"{static_obstacle_lifecycle!r}"
+            )
+        if (
+            bool(runtime_options.get("m8_safety_audit_required", False))
+            and static_obstacle_lifecycle != "source_annotation_window"
+        ):
+            raise RuntimeError(
+                "M8 requires static_obstacle_lifecycle=source_annotation_window"
             )
         if multimodal_sensor_required and sensor_frame_handler is None:
             raise RuntimeError(
@@ -627,15 +641,39 @@ def _run_basic_agent_loop(
                 plan.get("actors") or [],
                 actor_vehicles,
             )
-        _spawn_static_obstacles(
-            carla_module,
-            world,
-            plan.get("static_obstacles") or [],
-            static_obstacle_actors,
-        )
+        if static_obstacle_lifecycle == "source_annotation_window":
+            static_obstacle_temporal_lifecycle_evidence = (
+                _initialize_static_obstacle_temporal_lifecycle(
+                    plan.get("static_obstacles") or []
+                )
+            )
+            _advance_static_obstacle_temporal_lifecycle(
+                carla_module,
+                world,
+                plan.get("static_obstacles") or [],
+                static_obstacle_actors,
+                static_obstacle_temporal_lifecycle_evidence,
+                scenario_time_sec=0.0,
+            )
+            lifecycle_issues = _static_obstacle_temporal_lifecycle_issues(
+                static_obstacle_temporal_lifecycle_evidence
+            )
+            if lifecycle_issues:
+                raise RuntimeError(
+                    "static obstacle lifecycle initialization failed: "
+                    + ", ".join(lifecycle_issues)
+                )
+        else:
+            _spawn_static_obstacles(
+                carla_module,
+                world,
+                plan.get("static_obstacles") or [],
+                static_obstacle_actors,
+            )
         static_obstacle_runtime_evidence = _static_obstacle_runtime_evidence(
             plan,
             static_obstacle_actors,
+            temporal_lifecycle=static_obstacle_temporal_lifecycle_evidence,
         )
         if (
             bool(runtime_options.get("m6_static_obstacle_required", False))
@@ -763,6 +801,22 @@ def _run_basic_agent_loop(
                 if lifecycle_issues:
                     raise RuntimeError(
                         "dynamic actor lifecycle failed: " + ", ".join(lifecycle_issues)
+                    )
+            if static_obstacle_lifecycle == "source_annotation_window":
+                _advance_static_obstacle_temporal_lifecycle(
+                    carla_module,
+                    world,
+                    plan.get("static_obstacles") or [],
+                    static_obstacle_actors,
+                    static_obstacle_temporal_lifecycle_evidence,
+                    scenario_time_sec=run_time_sec,
+                )
+                lifecycle_issues = _static_obstacle_temporal_lifecycle_issues(
+                    static_obstacle_temporal_lifecycle_evidence
+                )
+                if lifecycle_issues:
+                    raise RuntimeError(
+                        "static obstacle lifecycle failed: " + ", ".join(lifecycle_issues)
                     )
             control = ego_driver.run_step()
             ego_vehicle.apply_control(control)
@@ -1225,6 +1279,12 @@ def _run_basic_agent_loop(
             if actor_id in interactive_actor_ids
         }
         status = "interactive_closed_loop" if physical_actor_evidence else "ego_closed_loop"
+        static_obstacle_runtime_evidence = _static_obstacle_runtime_evidence(
+            plan,
+            static_obstacle_actors,
+            temporal_lifecycle=static_obstacle_temporal_lifecycle_evidence,
+            require_window_entered=static_obstacle_lifecycle == "source_annotation_window",
+        )
         report = build_closed_loop_report(runtime_config, tick_metrics=rows, status=status)
         report["summary"]["control_timeout_count"] = int(
             driver_diagnostics.get("fallback_count", 0)
@@ -1238,6 +1298,9 @@ def _run_basic_agent_loop(
             "actor_despawn_evidence": dict(actor_despawn_evidence),
             "actor_temporal_lifecycle": _actor_temporal_lifecycle_snapshot(
                 actor_temporal_lifecycle_evidence
+            ),
+            "static_obstacle_temporal_lifecycle": _static_obstacle_temporal_lifecycle_snapshot(
+                static_obstacle_temporal_lifecycle_evidence
             ),
             "actor_physical_response": dict(actor_physical_response),
             "actor_runtime_binding": actor_runtime_binding_evidence,
@@ -2068,6 +2131,126 @@ def _actor_temporal_lifecycle_snapshot(
     }
 
 
+def _static_obstacle_annotation_window(
+    obstacle: Mapping[str, Any],
+) -> tuple[float, float] | None:
+    interval = obstacle.get("time_interval")
+    if interval is None:
+        return 0.0, math.inf
+    if not isinstance(interval, Mapping) or interval.get("start_sec") is None:
+        return None
+    try:
+        start_sec = float(interval["start_sec"])
+        end_value = interval.get("end_sec")
+        end_sec = math.inf if end_value is None else float(end_value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(start_sec) or end_sec < start_sec:
+        return None
+    return start_sec, end_sec
+
+
+def _initialize_static_obstacle_temporal_lifecycle(
+    obstacles: list[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    evidence: dict[str, dict[str, Any]] = {}
+    for obstacle in obstacles:
+        object_id = str(obstacle.get("object_id") or "")
+        if not object_id or object_id in evidence:
+            raise RuntimeError("static obstacles require unique non-empty object_id values")
+        window = _static_obstacle_annotation_window(obstacle)
+        record: dict[str, Any] = {
+            "object_id": object_id,
+            "schema_version": "static_obstacle_temporal_lifecycle_evidence.v1",
+            "state": "deferred",
+            "events": [],
+            "issues": [],
+        }
+        if window is None:
+            record["state"] = "failed"
+            record["issues"] = ["source_annotation_window_invalid"]
+        else:
+            record["source_annotation_window"] = {
+                "start_sec": window[0],
+                "end_sec": None if math.isinf(window[1]) else window[1],
+            }
+        evidence[object_id] = record
+    return evidence
+
+
+def _advance_static_obstacle_temporal_lifecycle(
+    carla_module: Any,
+    world: Any,
+    obstacles: list[Mapping[str, Any]],
+    spawned: dict[str, Any],
+    evidence: dict[str, dict[str, Any]],
+    *,
+    scenario_time_sec: float,
+) -> dict[str, list[str]]:
+    obstacle_by_id = {str(item.get("object_id") or ""): item for item in obstacles}
+    spawned_ids: list[str] = []
+    despawned_ids: list[str] = []
+    for object_id, record in evidence.items():
+        obstacle = obstacle_by_id.get(object_id)
+        if obstacle is None or record.get("state") == "failed":
+            continue
+        window = _static_obstacle_annotation_window(obstacle)
+        if window is None:
+            record.setdefault("issues", []).append("source_annotation_window_invalid")
+            record["state"] = "failed"
+            continue
+        desired_state = _actor_temporal_lifecycle_state(window, scenario_time_sec)
+        entity = spawned.get(object_id)
+        if desired_state == "active" and entity is None:
+            _spawn_static_obstacles(carla_module, world, [obstacle], spawned)
+            entity = spawned.get(object_id)
+            spawned_ids.append(object_id)
+            event = "spawned"
+        elif desired_state != "active" and entity is not None:
+            destroyed = False
+            try:
+                if hasattr(entity, "destroy"):
+                    entity.destroy()
+                    destroyed = True
+            except RuntimeError:
+                destroyed = False
+            spawned.pop(object_id, None)
+            despawned_ids.append(object_id)
+            event = "despawned"
+            if not destroyed:
+                record.setdefault("issues", []).append("carla_destroy_failed")
+        else:
+            event = None
+        record["state"] = desired_state
+        record["last_scenario_time_sec"] = float(scenario_time_sec)
+        if event is not None:
+            event_record = {"event": event, "scenario_time_sec": float(scenario_time_sec)}
+            if event == "spawned":
+                event_record["carla_runtime_actor_id"] = getattr(entity, "id", None)
+            record.setdefault("events", []).append(event_record)
+    return {"spawned_object_ids": spawned_ids, "despawned_object_ids": despawned_ids}
+
+
+def _static_obstacle_temporal_lifecycle_issues(
+    evidence: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    return sorted(
+        f"{object_id}:{issue}"
+        for object_id, record in evidence.items()
+        for issue in record.get("issues") or []
+    )
+
+
+def _static_obstacle_temporal_lifecycle_snapshot(
+    evidence: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "static_obstacle_temporal_lifecycle_evidence.v1",
+        "records": [dict(record) for _, record in sorted(evidence.items())],
+        "issues": _static_obstacle_temporal_lifecycle_issues(evidence),
+    }
+
+
 def _spawn_static_obstacles(
     carla_module: Any,
     world: Any,
@@ -2116,7 +2299,11 @@ def _spawn_static_obstacles(
 
 
 def _static_obstacle_runtime_evidence(
-    plan: Mapping[str, Any], spawned: Mapping[str, Any]
+    plan: Mapping[str, Any],
+    spawned: Mapping[str, Any],
+    *,
+    temporal_lifecycle: Mapping[str, Mapping[str, Any]] | None = None,
+    require_window_entered: bool = False,
 ) -> dict[str, Any]:
     declared = plan.get("static_obstacles") or []
     if not declared:
@@ -2131,9 +2318,19 @@ def _static_obstacle_runtime_evidence(
     for obstacle in declared:
         object_id = str(obstacle.get("object_id") or "")
         entity = spawned.get(object_id)
+        lifecycle = (temporal_lifecycle or {}).get(object_id) or {}
+        lifecycle_state = lifecycle.get("state")
+        events = lifecycle.get("events") or []
+        spawn_events = [event for event in events if event.get("event") == "spawned"]
+        runtime_actor_id = getattr(entity, "id", None) if entity is not None else (
+            spawn_events[-1].get("carla_runtime_actor_id") if spawn_events else None
+        )
         record_issues = []
-        if entity is None:
+        lifecycle_active = temporal_lifecycle is None or lifecycle_state == "active"
+        if lifecycle_active and entity is None:
             record_issues.append("runtime_actor_missing")
+        if require_window_entered and temporal_lifecycle is not None and not spawn_events:
+            record_issues.append("source_annotation_window_never_entered")
         if str(obstacle.get("collision_policy") or "") != "required":
             record_issues.append("collision_policy_not_required")
         record = {
@@ -2144,7 +2341,9 @@ def _static_obstacle_runtime_evidence(
             "requested_blueprint": obstacle.get("blueprint"),
             "effective_blueprint_filter": obstacle.get("_runtime_blueprint_filter"),
             "collision_policy": obstacle.get("collision_policy"),
-            "carla_runtime_actor_id": getattr(entity, "id", None) if entity is not None else None,
+            "carla_runtime_actor_id": runtime_actor_id,
+            "temporal_lifecycle_state": lifecycle_state,
+            "temporal_lifecycle_events": [dict(event) for event in events],
             "status": "passed" if not record_issues else "failed",
             "issues": record_issues,
         }
