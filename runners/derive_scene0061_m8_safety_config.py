@@ -3,9 +3,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from adapters.actor_binding import build_actor_binding_set, validate_actor_binding_set
 
 
 def _m8_actor_type(actor: Mapping[str, Any]) -> str:
@@ -56,43 +63,63 @@ def _bind_all_m8_dynamic_replay_actors(config: dict[str, Any]) -> None:
 
 
 def build_m8_actor_binding_manifest(config: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a hashable closure manifest for every M8 dynamic replay binding."""
+    """Build the standard NuRec Actor Binding Set for all M8 replay tracks."""
 
-    bindings = []
-    for actor in config.get("actors") or []:
-        if not isinstance(actor, Mapping):
+    actors = config.get("actors") or []
+    if not isinstance(actors, list) or not actors:
+        raise ValueError("M8 binding manifest requires replay actors")
+    scene_id = str(config.get("scenario_id") or "")
+    if not scene_id:
+        raise ValueError("M8 binding manifest requires scenario_id")
+    source_actors = []
+    track_ids = []
+    role_names: dict[str, str] = {}
+    blueprints: dict[str, str] = {}
+    control_modes: dict[str, str] = {}
+    for raw in actors:
+        if not isinstance(raw, Mapping):
             raise ValueError("M8 actor configuration must contain objects")
-        binding = actor.get("binding")
-        if not isinstance(binding, Mapping):
-            raise ValueError(f"M8 actor {actor.get('actor_id')} lacks runtime binding")
-        bindings.append(
-            {
-                "actor_id": str(actor.get("actor_id") or ""),
-                "source_track_id": str(actor.get("source_track_id") or ""),
-                "actor_type": _m8_actor_type(actor),
-                "nurec_track_id": str(binding.get("nurec_track_id") or ""),
-                "sensor_pose_source": str(binding.get("sensor_pose_source") or ""),
-                "sensor_pose_reference": str(binding.get("sensor_pose_reference") or ""),
-                "required_modalities": list(binding.get("required_modalities") or []),
-                "same_dynamic_object_for_all_modalities": binding.get(
-                    "same_dynamic_object_for_all_modalities"
-                ),
-                "effective_control_mode": str(binding.get("effective_control_mode") or ""),
-                "declared_status": str(binding.get("declared_status") or ""),
-            }
-        )
-    if not bindings or any(not row["actor_id"] or not row["source_track_id"] for row in bindings):
-        raise ValueError("M8 binding manifest requires non-empty actor and source-track IDs")
-    return {
-        "schema_version": "m8_full_dynamic_actor_binding_set.v1",
-        "scene_id": str(config.get("scenario_id") or ""),
-        "run_id": str(config.get("run_id") or ""),
-        "dynamic_actor_count": len(bindings),
-        "control_selection_actor_ids": list(
-            (config.get("actor_binding") or {}).get("selected_actor_ids") or []
-        ),
-        "bindings": sorted(bindings, key=lambda row: row["actor_id"]),
-    }
+        actor = deepcopy(dict(raw))
+        actor_id = str(actor.get("actor_id") or "")
+        source_track_id = str(actor.get("source_track_id") or actor_id)
+        if not actor_id or not source_track_id:
+            raise ValueError("M8 binding manifest requires actor/source-track IDs")
+        actor["source_track_id"] = source_track_id
+        source_actors.append(actor)
+        track_ids.append(source_track_id)
+        control_modes[actor_id] = "replay"
+        if actor.get("role_name"):
+            role_names[actor_id] = str(actor["role_name"])
+        if actor.get("blueprint"):
+            blueprints[actor_id] = str(actor["blueprint"])
+    binding_set = build_actor_binding_set(
+        {
+            "schema_version": "scenario_ir.v1",
+            "scenario_id": scene_id,
+            "source": {"dataset": "nuscenes", "scene_token": scene_id},
+            "actors": source_actors,
+        },
+        selected_actor_ids=[str(actor["actor_id"]) for actor in source_actors],
+        nurec_track_ids=track_ids,
+        control_modes=control_modes,
+        role_names=role_names,
+        blueprints=blueprints,
+    )
+    for binding in binding_set["bindings"]:
+        actor_type = str(binding["actor_type"])
+        binding["sensor_sync"] = {
+            "required_modalities": ["rgb", "lidar"],
+            "pose_source": "carla_runtime_actor_pose",
+            "pose_reference": (
+                "carla_bounding_box_bottom"
+                if actor_type == "pedestrian"
+                else "carla_bounding_box_center"
+            ),
+            "same_dynamic_object_for_all_modalities": True,
+            "replay_render_pose_mode": "carla_runtime_physical",
+        }
+    validate_actor_binding_set(binding_set)
+    return binding_set
 
 
 def derive_m8_safety_config(

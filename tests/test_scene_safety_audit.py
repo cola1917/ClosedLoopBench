@@ -150,7 +150,7 @@ class SceneSafetyAuditTests(unittest.TestCase):
         source = {
             "schema_version": "carla_run_config.mvp.v0",
             "run_id": "base",
-            "scenario_id": "scene-m8",
+            "scenario_id": "a" * 32,
             "runtime": {"m7_actor_pose_audit_required": True},
             "actor_binding": {"selected_actor_ids": ["car"]},
             "actors": [
@@ -185,13 +185,13 @@ class SceneSafetyAuditTests(unittest.TestCase):
             for row in build_m8_actor_binding_manifest(derived)["bindings"]
         }
         self.assertEqual(set(bindings), {"car", "walker"})
-        self.assertEqual(bindings["car"]["nurec_track_id"], "car")
+        self.assertEqual(bindings["car"]["nurec"]["track_id"], "car")
         self.assertEqual(
-            bindings["car"]["sensor_pose_reference"],
+            bindings["car"]["sensor_sync"]["pose_reference"],
             "carla_bounding_box_center",
         )
         self.assertEqual(
-            bindings["walker"]["sensor_pose_reference"],
+            bindings["walker"]["sensor_sync"]["pose_reference"],
             "carla_bounding_box_bottom",
         )
 

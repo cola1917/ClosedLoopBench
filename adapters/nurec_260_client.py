@@ -783,7 +783,14 @@ def _validate_runtime_actor_binding_contract(
         if isinstance(actor, Mapping) and isinstance(actor.get("binding"), Mapping)
     }
     declared = (run_config.get("actor_binding") or {}).get("selected_actor_ids")
-    actor_ids = [str(value) for value in declared] if isinstance(declared, list) else list(embedded_by_id)
+    if bool((run_config.get("runtime") or {}).get("m8_safety_audit_required", False)):
+        actor_ids = sorted(embedded_by_id)
+    else:
+        actor_ids = (
+            [str(value) for value in declared]
+            if isinstance(declared, list)
+            else list(embedded_by_id)
+        )
     for actor_id in actor_ids:
         actor = embedded_by_id.get(actor_id)
         sidecar = sidecar_by_id.get(actor_id)
