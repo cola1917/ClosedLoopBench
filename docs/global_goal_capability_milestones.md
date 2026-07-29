@@ -25,6 +25,26 @@ The first five capabilities are useful and reportable on their own. The final
 integration stage is the only place where all required capabilities become a
 single promotion gate.
 
+## Cross-cutting observability: O1
+
+The BEV/CARLA state view plus the six-camera Pygame grid is a cross-cutting
+observability product, not a separate algorithm or sensor-closure Goal. It is
+fed by one synchronized `FramePacket` and must preserve the same frame ID,
+timestamp, ego pose, actor identity, and CARLA/NuRec mapping in both views.
+
+| Use | Supports | Does not prove |
+|---|---|---|
+| CARLA BEV/state view | S1 replay, S2 metric debugging, S5 actor behavior | semantic perception or NuRec geometry |
+| six-camera NuRec grid | S4 RGB transport/geometry debugging | LiDAR-world consistency or detector success |
+| combined BEV + six-camera window | S6 qualitative evidence and incident diagnosis | collision absence, TF++ inference, or M8 promotion by itself |
+
+The viewer's exit condition is only display integrity: common frame/timestamp,
+non-overlapping camera layout, correct labels, and rehashable screenshots. A
+synthetic or local screenshot remains visualization evidence, not live closed-loop
+acceptance. The existing implementation is `runners/run_scene0061_dual_window.py`
+and the six-camera grid patch is
+`tools/patch_carla_nurec_six_camera_grid.py`.
+
 ## Anti-coupling rules
 
 - A milestone owns one contract and one primary deliverable. “Implemented” is

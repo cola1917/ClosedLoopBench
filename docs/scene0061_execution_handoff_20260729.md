@@ -53,6 +53,21 @@ and report. Stages exchange artifacts through contracts, not internal state.
 The important independence rule is: S4 failure does not fail S1, S2, or S3.
 S6 integration is the only stage allowed to require multiple stage gates.
 
+## BEV + six-camera Pygame window
+
+The combined BEV/CARLA-state plus six-camera Pygame window is a cross-cutting
+observability tool (`O1`), not an M8, TF++, or NuRec promotion gate. The BEV
+side explains CARLA lanes, ego pose, actor boxes, and physical state; the six
+camera side displays NuRec RGB payloads. Both must come from one synchronized
+`FramePacket` with the same frame ID and timestamp.
+
+Use it for S1/S2/S5 debugging and S6 qualitative evidence. It can help diagnose
+S4 RGB alignment, but it cannot prove LiDAR-world consistency, real TF++
+inference, collision absence, or formal M8 promotion. Existing code is
+`runners/run_scene0061_dual_window.py`; the six-camera grid patch is
+`tools/patch_carla_nurec_six_camera_grid.py`. Preserve screenshots and their
+frame/timestamp/hash metadata as supporting evidence only.
+
 ## TF++ clarification
 
 TF++ has a separate status from NuRec/M8. The adapter and ROS2/container
