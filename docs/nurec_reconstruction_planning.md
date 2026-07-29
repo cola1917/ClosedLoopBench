@@ -22,6 +22,32 @@ result must explicitly pass all six `--expected-camera-id` arguments together
 with `--expected-global-step 40000 --expected-samples-per-epoch 40000`; this
 prevents a smoke artifact from being promoted as the formal reconstruction.
 
+Before starting any formal training, run the source/config smoke gate against
+the intended NuRec config, the M6 scene-object registry, and the source track
+manifest:
+
+```bash
+python runners/audit_nurec_reconstruction_smoke.py \
+  --config /path/to/parsed_config.yaml \
+  --scene-object-registry /path/to/scene_object_registry.v1.json \
+  --source-track-manifest /path/to/sequence_tracks.json \
+  --expected-camera-id camera_front \
+  --expected-camera-id camera_front_left \
+  --expected-camera-id camera_front_right \
+  --expected-camera-id camera_back \
+  --expected-camera-id camera_back_left \
+  --expected-camera-id camera_back_right \
+  --output outputs/scene-0061/nurec_reconstruction_smoke.v1.json
+```
+
+The gate is intentionally cheap and fail-closed. It rejects a formal training
+budget, missing registered dynamic tracks, disabled sequence-track export, and
+a safety-relevant static registry when neither
+`dataset.generate_static_rigid_cuboid_tracks.enabled` is true nor every static
+object has an explicitly configured NuRec track-layer representation. Passing
+this gate proves only that the planned source/config boundary is eligible for
+a formal run; the four-stream M8 audit remains mandatory after rendering.
+
 Then build the portable motion/map/scenario bundle with the same package:
 
 ```bash
