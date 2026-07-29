@@ -9,6 +9,9 @@ Core CARLA/ROS2 environment handoff: [`docs/core_closed_loop_integration.md`](do
 Implementation order and independent promotion gates:
 [`docs/closed_loop_execution_ladder.md`](docs/closed_loop_execution_ladder.md).
 
+Current Goal decomposition and capability-level milestone status:
+[`docs/global_goal_capability_milestones.md`](docs/global_goal_capability_milestones.md).
+
 Existing NuRec artifact planning and strict 1000-step validation:
 [`docs/nurec_reconstruction_planning.md`](docs/nurec_reconstruction_planning.md).
 

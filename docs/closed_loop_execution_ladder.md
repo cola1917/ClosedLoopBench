@@ -1,4 +1,10 @@
-# ClosedLoopBench Execution Ladder
+# ClosedLoopBench Execution Ladder (Legacy Ordering)
+
+> **Planning note:** The capability-independent plan in
+> [`global_goal_capability_milestones.md`](global_goal_capability_milestones.md)
+> is now authoritative. This file is retained as a dependency view for the
+> final integrated path; it must not be used to block G1/G2/G3 work on the
+> current G4 LiDAR evidence failure.
 
 This document defines the implementation order for the Global Goal. It is an
 execution track, not a renumbering of the historical M-series. The M-series
@@ -155,4 +161,3 @@ the following traceability aliases:
 The current Scene-0061 state is L0-L3 offline-ready, L4-L6 blocked on the
 remote NuRec/source-content artifact, and L7-L9 not started. Remote host
 availability is required for claims about real CARLA or NuRec execution.
-
