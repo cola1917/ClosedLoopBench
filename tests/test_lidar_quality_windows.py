@@ -73,6 +73,8 @@ class LidarQualityWindowTests(unittest.TestCase):
         self.assertEqual(pedestrian["frames"][1]["editable_quality_window"], True)
         self.assertEqual(pedestrian["frames"][1]["lidar_world_closed_loop_eligible"], True)
         self.assertEqual(report["window_semantics"]["name"], "editable_quality_window")
+        self.assertEqual(report["window_semantics"]["display_name"], "local_lidar_editable_window")
+        self.assertEqual(report["window_semantics"]["scope"], "ego_corridor_actor_interaction")
         self.assertTrue(report["window_semantics"]["lidar_world_closed_loop_claim_allowed_only_inside_window"])
         self.assertEqual(
             sorted(report["frames"][0]["track_support"]),
@@ -118,6 +120,8 @@ class LidarQualityWindowTests(unittest.TestCase):
         )
         self.assertTrue(report["policy"]["quality_is_not_a_carla_physics_filter"])
         self.assertTrue(report["policy"]["registry_objects_preserved"])
+        self.assertTrue(report["policy"]["local_window_is_not_complete_scene_scope"])
+        self.assertTrue(report["policy"]["ego_corridor_selection_is_not_object_deletion"])
         self.assertEqual(report["editable_quality_windows"], report["editable_windows"])
 
 

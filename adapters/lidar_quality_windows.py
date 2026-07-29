@@ -178,6 +178,12 @@ def build_lidar_quality_window_manifest(
         "purpose": "candidate_smoke_editable_quality_window_selection_only",
         "window_semantics": {
             "name": "editable_quality_window",
+            "display_name": "local_lidar_editable_window",
+            "scope": "ego_corridor_actor_interaction",
+            "scope_definition": (
+                "local same-tick actor interaction scope selected from the ego corridor; "
+                "it is not a complete-scene or CARLA-physics filter"
+            ),
             "definition": (
                 "consecutive same-tick frames inside source lifetime with a source cuboid "
                 "and exact/padded LiDAR support above threshold"
@@ -195,6 +201,8 @@ def build_lidar_quality_window_manifest(
             "max_frame_gap_us": max_frame_gap_us,
             "quality_is_not_a_carla_physics_filter": True,
             "registry_objects_preserved": True,
+            "local_window_is_not_complete_scene_scope": True,
+            "ego_corridor_selection_is_not_object_deletion": True,
         },
         "candidate_object_ids": sorted(candidate_ids),
         "required_object_ids": sorted(required_ids),

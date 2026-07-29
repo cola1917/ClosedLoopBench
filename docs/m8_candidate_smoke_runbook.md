@@ -5,7 +5,8 @@ The M8 order is deliberately two-stage:
 1. Build a low-budget candidate from a complete CARLA registry. The NuRec
    render selection may contain only objects with an auditable ego-corridor
    and LiDAR-quality basis, but it never removes a CARLA actor or collision
-   proxy.
+   proxy. The resulting `editable_quality_window` is a **local LiDAR editable
+   window** for actor interaction, not a reduced physical-scene definition.
 2. Run the candidate artifact at the same CARLA ticks and regenerate the four
    immutable streams: collision, lane, calibrated visibility, and LiDAR-world.
 3. Run `runners/audit_m8_formal_promotion.py`. A formal reconstruction is
@@ -38,6 +39,13 @@ After the remote VM is reachable:
 7. Run the promotion gate. Only a `passed` report with
    `formal_reconstruction_allowed=true` authorizes deriving a formal 40k
    config.
+
+The local window is intentionally narrow: an actor may be edited only on
+same-tick frames with source cuboid support and sufficient LiDAR returns. This
+does not waive the M8 requirement to audit all expected observable objects in
+the complete CARLA registry. Missing LiDAR occupancy outside the controlled
+actor's window is still a world-closure failure when that object is expected
+to be observable.
 
 The current local evidence is not promotable: candidate quality window v4 is
 failed because the pedestrian is outside the three collected frames, and the

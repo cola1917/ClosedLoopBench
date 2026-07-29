@@ -243,22 +243,31 @@ geometry independently inspectable at every tick.
 visibility contradiction, unmodelled obstacle contact, lane departure, or
 missing LiDAR support is a failed safety result, not an unavailable metric.
 
-### Editable quality windows
+### Local LiDAR editable windows
 
 For candidate NuRec smoke and actor interaction, the precise term is
-**editable quality window**, not a generic lifecycle or replay window. It is a
-consecutive run of same-tick frames where the actor is inside its source
-lifecycle, has a source cuboid, and has exact and padded LiDAR returns above
-the declared thresholds. Only those ticks are eligible for an RGB/LiDAR/world/
-collision closed-loop claim. Outside the window, the actor remains in the
-complete CARLA registry and retains its physical collision state, but the run
-must record that LiDAR-world closure is not claimed. Sparse returns must never
-silently turn an actor into background.
+**local LiDAR editable window** (the machine-readable name remains
+`editable_quality_window`), not a generic lifecycle or replay window. It is a
+small, ego-corridor-scoped run of same-tick frames where the actor is inside
+its source lifecycle, has a source cuboid, and has exact and padded LiDAR
+returns above the declared thresholds. Those conditions are what make an
+actor eligible for an RGB/LiDAR/world/collision closed-loop claim; seeing a
+camera projection alone is insufficient.
+
+"Local" describes the interaction scope, not a reduced physical world. The
+complete CARLA registry, collision proxies, lane state, and road boundary
+remain authoritative on every tick. Outside the window, an actor remains a
+physical/replay object and sparse returns are recorded as evidence; it is not
+silently converted into background. A window can therefore authorize editing
+the controlled lead vehicle or pedestrian only during LiDAR-supported ticks,
+while M8 still fails if another expected observable physical object lacks
+same-tick NuRec LiDAR occupancy.
 
 The canonical evidence is
 `lidar_quality_window_manifest.v1.json`, produced by
 `runners/build_lidar_quality_window_manifest.py`. Its
 `window_semantics.name` is `editable_quality_window` and its
+`window_semantics.display_name` is `local_lidar_editable_window`; the
 `lidar_world_closed_loop_claim_allowed_only_inside_window` flag is mandatory.
 The older `nurec_lifecycle_quality_manifest.v1` builder is retained only for
 compatibility with historical evidence.
