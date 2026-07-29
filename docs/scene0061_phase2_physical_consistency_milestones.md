@@ -243,6 +243,26 @@ geometry independently inspectable at every tick.
 visibility contradiction, unmodelled obstacle contact, lane departure, or
 missing LiDAR support is a failed safety result, not an unavailable metric.
 
+### Editable quality windows
+
+For candidate NuRec smoke and actor interaction, the precise term is
+**editable quality window**, not a generic lifecycle or replay window. It is a
+consecutive run of same-tick frames where the actor is inside its source
+lifecycle, has a source cuboid, and has exact and padded LiDAR returns above
+the declared thresholds. Only those ticks are eligible for an RGB/LiDAR/world/
+collision closed-loop claim. Outside the window, the actor remains in the
+complete CARLA registry and retains its physical collision state, but the run
+must record that LiDAR-world closure is not claimed. Sparse returns must never
+silently turn an actor into background.
+
+The canonical evidence is
+`lidar_quality_window_manifest.v1.json`, produced by
+`runners/build_lidar_quality_window_manifest.py`. Its
+`window_semantics.name` is `editable_quality_window` and its
+`lidar_world_closed_loop_claim_allowed_only_inside_window` flag is mandatory.
+The older `nurec_lifecycle_quality_manifest.v1` builder is retained only for
+compatibility with historical evidence.
+
 ### M8 Implementation Status
 
 The fail-closed audit contract and immutable four-stream writer are implemented

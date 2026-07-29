@@ -17,6 +17,77 @@ class NuRecReconstructionSmokeError(ValueError):
     """Raised when smoke-gate inputs are malformed."""
 
 
+def _validate_lidar_quality_windows(
+    manifest: Mapping[str, Any],
+    *,
+    scene_id: str,
+    registry_ids: set[str],
+    selected_object_ids: set[str] | None,
+) -> dict[str, Any]:
+    """Validate editable-quality-window source evidence.
+
+    This only validates candidate-input provenance.  It never removes a
+    registry object or changes the CARLA collision/lane requirements.
+    """
+
+    if manifest.get("schema_version") != "lidar_quality_window_manifest.v1":
+        raise NuRecReconstructionSmokeError(
+            "LiDAR quality window manifest must use lidar_quality_window_manifest.v1"
+        )
+    if str(manifest.get("scene_id") or "") != str(scene_id):
+        raise NuRecReconstructionSmokeError("LiDAR quality window manifest scene_id does not match registry")
+    if manifest.get("status") != "passed":
+        raise NuRecReconstructionSmokeError("LiDAR quality window manifest is not passed")
+    semantics = manifest.get("window_semantics")
+    if not isinstance(semantics, Mapping) or semantics.get("name") != "editable_quality_window":
+        raise NuRecReconstructionSmokeError(
+            "LiDAR quality window manifest must declare editable_quality_window semantics"
+        )
+    if semantics.get("lidar_world_closed_loop_claim_allowed_only_inside_window") is not True:
+        raise NuRecReconstructionSmokeError(
+            "LiDAR quality window manifest must scope closure claims to editable windows"
+        )
+    policy = manifest.get("policy")
+    if not isinstance(policy, Mapping) or policy.get("quality_is_not_a_carla_physics_filter") is not True:
+        raise NuRecReconstructionSmokeError(
+            "LiDAR quality window manifest must declare quality_is_not_a_carla_physics_filter"
+        )
+    candidate = {str(value) for value in manifest.get("candidate_object_ids") or [] if str(value)}
+    required = {str(value) for value in manifest.get("required_object_ids") or [] if str(value)}
+    if not candidate or not required.issubset(candidate):
+        raise NuRecReconstructionSmokeError(
+            "LiDAR quality window manifest requires non-empty candidate IDs and subset required IDs"
+        )
+    if not candidate.issubset(registry_ids):
+        raise NuRecReconstructionSmokeError("LiDAR quality window manifest contains unknown registry objects")
+    if selected_object_ids is not None and not candidate.issubset(selected_object_ids):
+        raise NuRecReconstructionSmokeError(
+            "LiDAR quality window candidates must be included in render selection"
+        )
+    tracks = manifest.get("tracks")
+    if not isinstance(tracks, list):
+        raise NuRecReconstructionSmokeError("LiDAR quality window manifest tracks are required")
+    by_object = {str(row.get("object_id")): row for row in tracks if isinstance(row, Mapping)}
+    missing = sorted(
+        object_id
+        for object_id in required
+        if not (by_object.get(object_id) or {}).get("editable_windows")
+    )
+    if missing:
+        raise NuRecReconstructionSmokeError(
+            "LiDAR quality window required objects have no editable window: " + ", ".join(missing)
+        )
+    return {
+        "status": "passed",
+        "candidate_object_count": len(candidate),
+        "required_object_count": len(required),
+        "editable_window_count": sum(
+            len((by_object.get(object_id) or {}).get("editable_windows") or [])
+            for object_id in candidate
+        ),
+    }
+
+
 def load_config(path: str | Path) -> dict[str, Any]:
     """Load JSON or YAML without accepting a non-object document."""
 
@@ -67,6 +138,8 @@ def audit_reconstruction_smoke(
     registry: Mapping[str, Any],
     *,
     source_track_ids: Iterable[str],
+    render_selection: Mapping[str, Any] | None = None,
+    lidar_quality_windows: Mapping[str, Any] | None = None,
     expected_camera_ids: Sequence[str] | None = None,
     max_samples_per_epoch: int = 1000,
     max_epochs: int = 1,
@@ -105,11 +178,42 @@ def audit_reconstruction_smoke(
         None,
     )
 
+    selected_object_ids: set[str] | None = None
+    selection_status = "not_provided"
+    if render_selection is not None:
+        if render_selection.get("schema_version") != "nurec_render_selection.v1":
+            raise NuRecReconstructionSmokeError("render selection must use nurec_render_selection.v1")
+        if str(render_selection.get("scene_id") or "") != str(registry["scene_id"]):
+            raise NuRecReconstructionSmokeError("render selection scene_id does not match registry")
+        if render_selection.get("status") != "passed":
+            raise NuRecReconstructionSmokeError("render selection is not passed")
+        raw_selected = render_selection.get("selected_object_ids")
+        if not isinstance(raw_selected, list) or not raw_selected:
+            raise NuRecReconstructionSmokeError("render selection requires selected_object_ids")
+        selected_object_ids = {str(value) for value in raw_selected if str(value)}
+        registry_ids = {str(record["object_id"]) for record in registry["records"]}
+        if not selected_object_ids.issubset(registry_ids):
+            raise NuRecReconstructionSmokeError("render selection contains an unknown registry object")
+        selection_status = "passed"
+
+    lidar_quality_status: dict[str, Any] = {"status": "not_provided"}
+    if lidar_quality_windows is not None:
+        lidar_quality_status = _validate_lidar_quality_windows(
+            lidar_quality_windows,
+            scene_id=str(registry["scene_id"]),
+            registry_ids={str(record["object_id"]) for record in registry["records"]},
+            selected_object_ids=selected_object_ids,
+        )
+
+    def selected(record: Mapping[str, Any]) -> bool:
+        return selected_object_ids is None or str(record["object_id"]) in selected_object_ids
+
     dynamic_records = [
         record
         for record in registry["records"]
         if record.get("role")
         in {"background_replay", "controlled_lead_vehicle", "controlled_pedestrian"}
+        and selected(record)
     ]
     required_dynamic_ids = {
         str((record.get("nurec") or {}).get("track_id"))
@@ -120,6 +224,7 @@ def audit_reconstruction_smoke(
         record
         for record in registry["records"]
         if record.get("role") == "static_obstacle" and record.get("safety_relevant") is True
+        and selected(record)
     ]
     static_track_ids = {
         str((record.get("nurec") or {}).get("track_id"))
@@ -131,6 +236,16 @@ def audit_reconstruction_smoke(
     missing_dynamic = sorted(required_dynamic_ids - source_ids)
     issues: list[str] = []
     checks: dict[str, Any] = {}
+
+    checks["editable_quality_windows"] = {
+        "status": lidar_quality_status["status"],
+        "required": lidar_quality_windows is not None,
+        "candidate_object_count": lidar_quality_status.get("candidate_object_count"),
+        "required_object_count": lidar_quality_status.get("required_object_count"),
+        "editable_window_count": lidar_quality_status.get("editable_window_count"),
+    }
+    if lidar_quality_windows is not None and lidar_quality_status["status"] != "passed":
+        issues.append("editable_quality_window_manifest_failed")
 
     checks["camera_set"] = {
         "expected": expected,
@@ -197,6 +312,11 @@ def audit_reconstruction_smoke(
         "status": "passed" if not issues else "failed",
         "scene_id": str(registry["scene_id"]),
         "checks": checks,
+        "editable_quality_windows": lidar_quality_status,
+        "render_selection": {
+            "status": selection_status,
+            "selected_object_count": len(selected_object_ids) if selected_object_ids is not None else None,
+        },
         "summary": {
             "required_dynamic_track_count": len(required_dynamic_ids),
             "source_track_count": len(source_ids),

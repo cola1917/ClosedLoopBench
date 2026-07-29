@@ -171,14 +171,17 @@ def build_lifecycle_quality_manifest(
     min_padded_points: int = 1,
     min_supported_ticks: int = 1,
 ) -> dict[str, Any]:
-    """Summarize per-tick source LiDAR quality inside each track's lifetime.
+    """Build the legacy lifecycle report used by older evidence.
 
     NCore's aggregate counters cannot distinguish a sparse track from a track
     that is well observed during the small interval used by a probe.  This
     manifest consumes the optional ``source_lidar_frames`` evidence emitted by
     ``audit_ncore_dynamic_lidar_points`` and makes that distinction explicit.
     It is an evidence/selection aid only: the complete CARLA object registry
-    and its physical actors remain unchanged.
+    and its physical actors remain unchanged. New M8 smoke runs should use
+    ``adapters.lidar_quality_windows.build_lidar_quality_window_manifest``;
+    its canonical terminology is ``editable_quality_window`` and only that
+    window is eligible for a LiDAR-world closure claim.
 
     A supported window is made from consecutive native frame indices whose
     track has at least ``min_exact_points`` exact and ``min_padded_points``

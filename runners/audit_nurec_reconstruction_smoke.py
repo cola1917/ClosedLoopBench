@@ -24,6 +24,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--scene-object-registry", required=True, type=Path)
     parser.add_argument("--source-track-manifest", required=True, type=Path)
+    parser.add_argument("--render-selection", type=Path)
+    parser.add_argument(
+        "--editable-quality-window-manifest",
+        "--lidar-quality-windows",
+        dest="editable_quality_window_manifest",
+        type=Path,
+        help="lifecycle-aware editable quality-window manifest",
+    )
     parser.add_argument("--expected-camera-id", action="append", dest="expected_camera_ids")
     parser.add_argument("--max-samples-per-epoch", type=int, default=1000)
     parser.add_argument("--max-epochs", type=int, default=1)
@@ -40,6 +48,16 @@ def main(argv: list[str] | None = None) -> int:
             config,
             registry,
             source_track_ids=load_track_ids(args.source_track_manifest),
+            render_selection=(
+                json.loads(args.render_selection.read_text(encoding="utf-8-sig"))
+                if args.render_selection is not None
+                else None
+            ),
+            lidar_quality_windows=(
+                json.loads(args.editable_quality_window_manifest.read_text(encoding="utf-8-sig"))
+                if args.editable_quality_window_manifest is not None
+                else None
+            ),
             expected_camera_ids=args.expected_camera_ids,
             max_samples_per_epoch=args.max_samples_per_epoch,
             max_epochs=args.max_epochs,

@@ -134,6 +134,97 @@ class NuRecReconstructionSmokeTests(unittest.TestCase):
 
         self.assertEqual(report["status"], "passed")
 
+    def test_selection_limits_required_objects_without_dropping_registry(self):
+        from adapters.nurec_reconstruction_smoke import audit_reconstruction_smoke
+
+        registry = _registry(static=True)
+        selection = {
+            "schema_version": "nurec_render_selection.v1",
+            "scene_id": "scene-0061",
+            "status": "passed",
+            "selected_object_ids": ["dynamic-a"],
+        }
+        report = audit_reconstruction_smoke(
+            _config(),
+            registry,
+            source_track_ids={"track-a"},
+            render_selection=selection,
+            expected_camera_ids=("camera_front", "camera_back"),
+        )
+
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["render_selection"]["selected_object_count"], 1)
+        self.assertEqual(len(registry["records"]), 2)
+
+    def test_quality_windows_are_candidate_evidence_and_must_cover_selection(self):
+        from adapters.nurec_reconstruction_smoke import audit_reconstruction_smoke
+
+        registry = _registry()
+        selection = {
+            "schema_version": "nurec_render_selection.v1",
+            "scene_id": "scene-0061",
+            "status": "passed",
+            "selected_object_ids": ["dynamic-a"],
+        }
+        windows = {
+            "schema_version": "lidar_quality_window_manifest.v1",
+            "scene_id": "scene-0061",
+            "status": "passed",
+            "policy": {
+                "quality_is_not_a_carla_physics_filter": True,
+                "registry_objects_preserved": True,
+            },
+            "window_semantics": {
+                "name": "editable_quality_window",
+                "lidar_world_closed_loop_claim_allowed_only_inside_window": True,
+            },
+            "candidate_object_ids": ["dynamic-a"],
+            "required_object_ids": ["dynamic-a"],
+            "tracks": [{"object_id": "dynamic-a", "editable_windows": [{"frame_count": 3}]}],
+        }
+        report = audit_reconstruction_smoke(
+            _config(),
+            registry,
+            source_track_ids={"track-a"},
+            render_selection=selection,
+            lidar_quality_windows=windows,
+            expected_camera_ids=("camera_front", "camera_back"),
+        )
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["editable_quality_windows"]["status"], "passed")
+
+    def test_quality_window_candidate_outside_selection_fails_closed(self):
+        from adapters.nurec_reconstruction_smoke import audit_reconstruction_smoke, NuRecReconstructionSmokeError
+
+        selection = {
+            "schema_version": "nurec_render_selection.v1",
+            "scene_id": "scene-0061",
+            "status": "passed",
+            "selected_object_ids": ["dynamic-a"],
+        }
+        windows = {
+            "schema_version": "lidar_quality_window_manifest.v1",
+            "scene_id": "scene-0061",
+            "status": "passed",
+            "policy": {"quality_is_not_a_carla_physics_filter": True},
+            "window_semantics": {
+                "name": "editable_quality_window",
+                "lidar_world_closed_loop_claim_allowed_only_inside_window": True,
+            },
+            "candidate_object_ids": ["missing-selection"],
+            "required_object_ids": [],
+            "tracks": [],
+        }
+        with self.assertRaises(NuRecReconstructionSmokeError):
+            audit_reconstruction_smoke(
+                _config(),
+                _registry(),
+                source_track_ids={"track-a"},
+                render_selection=selection,
+                lidar_quality_windows=windows,
+                expected_camera_ids=("camera_front", "camera_back"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
