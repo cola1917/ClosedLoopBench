@@ -21,9 +21,9 @@ Current source baseline:
 
 - Local checkout: `E:\code\ClosedLoopBench`
 - Current branch: `master`
-- Pre-handoff verified commit: `215979ebadbf5d2551091aacc6a2cc743af6e839`.
-  This handoff document adds a new documentation commit; always run
-  `git rev-parse HEAD` and compare all three `master` SHAs before testing.
+- Current verified commit after endpoint-history redaction:
+  `8b592bb67d61d3c1e7fe831833e4a06d59f4b9fc`. Always run `git rev-parse HEAD`
+  and compare all three `master` SHAs before testing.
 - GitHub remote: `origin` (`git@github.com:cola1917/ClosedLoopBench.git`)
 - Local `master`, GitHub `origin/master`, and remote `master` were verified
   equal at commit `215979e` on 2026-07-29.
