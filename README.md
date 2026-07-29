@@ -6,6 +6,9 @@ Architecture and contract boundary: [`docs/architecture.md`](docs/architecture.m
 
 Core CARLA/ROS2 environment handoff: [`docs/core_closed_loop_integration.md`](docs/core_closed_loop_integration.md).
 
+Implementation order and independent promotion gates:
+[`docs/closed_loop_execution_ladder.md`](docs/closed_loop_execution_ladder.md).
+
 Existing NuRec artifact planning and strict 1000-step validation:
 [`docs/nurec_reconstruction_planning.md`](docs/nurec_reconstruction_planning.md).
 
