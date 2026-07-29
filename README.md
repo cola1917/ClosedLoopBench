@@ -41,6 +41,9 @@ Step-by-step environment coding and acceptance plan:
 Development and remote test synchronization policy:
 [`docs/development_sync_policy.md`](docs/development_sync_policy.md).
 
+Next-agent handoff prompt (2026-07-29):
+[`docs/agent_handoff_prompt_20260729.md`](docs/agent_handoff_prompt_20260729.md).
+
 Algorithm/ODD/seed matrix planning:
 [`docs/offline_experiment_planning.md`](docs/offline_experiment_planning.md).
 
