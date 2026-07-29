@@ -22,7 +22,7 @@ Current source baseline:
 - Local checkout: `E:\code\ClosedLoopBench`
 - Current branch: `master`
 - Current verified commit after endpoint-history redaction:
-  `8b592bb67d61d3c1e7fe831833e4a06d59f4b9fc`. Always run `git rev-parse HEAD`
+  `92df4df040790daca4d38ef00baed4f4b5a2f79a`. Always run `git rev-parse HEAD`
   and compare all three `master` SHAs before testing.
 - GitHub remote: `origin` (`git@github.com:cola1917/ClosedLoopBench.git`)
 - Local `master`, GitHub `origin/master`, and remote `master` were verified
