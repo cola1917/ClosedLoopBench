@@ -12,6 +12,9 @@ Implementation order and independent promotion gates:
 Current Goal decomposition and capability-level milestone status:
 [`docs/global_goal_capability_milestones.md`](docs/global_goal_capability_milestones.md).
 
+Current agent handoff and execution status:
+[`docs/scene0061_execution_handoff_20260729.md`](docs/scene0061_execution_handoff_20260729.md).
+
 Existing NuRec artifact planning and strict 1000-step validation:
 [`docs/nurec_reconstruction_planning.md`](docs/nurec_reconstruction_planning.md).
 
