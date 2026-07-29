@@ -62,7 +62,12 @@ def build_visibility_manifest(
     frame_rows = []
     for frame_id in common_ids:
         frame = frames_by_id[frame_id]
-        ego = _scene_to_carla_pose(frame.get("ego_pose"), "frame ego_pose")
+        # The runtime trace is serialized back from CARLA into the canonical
+        # Scene Package frame (x-forward, y-left).  NuRec's source-bound
+        # sensor_to_ego matrices use that same frame, so the projection must
+        # remain there.  Reflecting only the poses into CARLA would mirror the
+        # image-plane x coordinate.
+        ego = _canonical_scene_pose(frame.get("ego_pose"), "frame ego_pose")
         frame_payloads = payloads[frame_id]
         frame_rows.append(
             {
@@ -260,20 +265,20 @@ def _record_pose_and_extent(
             return None
         if not isinstance(pose, Mapping) or not isinstance(extent, Mapping):
             raise SceneObjectVisibilityError(f"dynamic record {object_id} has incomplete frame actor state")
-        return _scene_to_carla_pose(pose, f"actor {object_id} render_pose"), _extent(extent, object_id)
+        return _canonical_scene_pose(pose, f"actor {object_id} render_pose"), _extent(extent, object_id)
     state = actor_states.get(object_id) if isinstance(actor_states, Mapping) else None
     if isinstance(state, Mapping) and state.get("pose") is not None and state.get("extent_m") is not None:
         return (
-            _scene_to_carla_pose(state["pose"], f"static {object_id} physical pose"),
+            _canonical_scene_pose(state["pose"], f"static {object_id} physical pose"),
             _extent(state["extent_m"], object_id),
         )
     placement = (record.get("carla") or {}).get("placement")
     if not isinstance(placement, Mapping):
         raise SceneObjectVisibilityError(f"static record {object_id} has no CARLA placement")
-    return _scene_to_carla_pose(placement, f"static {object_id} placement"), _default_static_extent(record)
+    return _canonical_scene_pose(placement, f"static {object_id} placement"), _default_static_extent(record)
 
 
-def _scene_to_carla_pose(pose: Any, label: str) -> list[float]:
+def _canonical_scene_pose(pose: Any, label: str) -> list[float]:
     if not isinstance(pose, Mapping):
         raise SceneObjectVisibilityError(f"{label} must be an object")
     try:
@@ -283,7 +288,7 @@ def _scene_to_carla_pose(pose: Any, label: str) -> list[float]:
         raise SceneObjectVisibilityError(f"{label} requires finite x/y/z/yaw") from exc
     if not all(math.isfinite(value) for value in values + [yaw]):
         raise SceneObjectVisibilityError(f"{label} must be finite")
-    return [values[0], -values[1], values[2], -math.radians(yaw)]
+    return [values[0], values[1], values[2], math.radians(yaw)]
 
 
 def _extent(value: Mapping[str, Any], label: str) -> list[float]:

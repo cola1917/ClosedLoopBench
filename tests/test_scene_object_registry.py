@@ -395,6 +395,81 @@ class SceneObjectRegistryTests(unittest.TestCase):
             )
         )
 
+    def test_visibility_projection_keeps_canonical_left_right_axis(self):
+        from adapters.scene_object_visibility import (
+            _canonical_scene_pose,
+            _project_box,
+            _record_pose_and_extent,
+        )
+
+        camera = {
+            "camera_front": {
+                "matrix": [[100.0, 0.0, 50.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]],
+                # nuScenes camera optical -> canonical scene (x-forward, y-left, z-up).
+                "sensor_to_ego": [
+                    0.0, 0.0, 1.0, 0.0,
+                    -1.0, 0.0, 0.0, 0.0,
+                    0.0, -1.0, 0.0, 1.5,
+                    0.0, 0.0, 0.0, 1.0,
+                ],
+                "width": 100,
+                "height": 100,
+            }
+        }
+        ego = _canonical_scene_pose({"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0}, "ego")
+        left_pose, extent = _record_pose_and_extent(
+            {"object_id": VEHICLE, "role": "background_replay"},
+            {
+                VEHICLE: {
+                    "render_pose": {"x": 10.0, "y": 2.0, "z": 1.0, "yaw": 0.0},
+                    "extent_m": {"x": 0.2, "y": 0.2, "z": 0.8},
+                }
+            },
+        )
+        right_pose = _canonical_scene_pose(
+            {"x": 10.0, "y": -2.0, "z": 1.0, "yaw": 0.0}, "right actor"
+        )
+
+        left_box = _project_box(left_pose, extent, ego, camera, 30.0)["camera_front"]["bbox_xyxy_px"]
+        right_box = _project_box(right_pose, extent, ego, camera, 30.0)["camera_front"]["bbox_xyxy_px"]
+
+        self.assertEqual(left_pose[1], 2.0)
+        self.assertLess((left_box[0] + left_box[2]) / 2.0, 50.0)
+        self.assertGreater((right_box[0] + right_box[2]) / 2.0, 50.0)
+
+    def test_visibility_projection_preserves_left_and_right_camera_assignments(self):
+        from math import cos, radians, sin
+
+        from adapters.scene_object_visibility import _project_box
+
+        # Camera optical axes are z-forward/x-right.  Build the pair in the
+        # canonical x-forward/y-left frame so a left target cannot leak into
+        # the right camera merely because a CARLA-axis reflection was applied.
+        def side_camera(yaw_deg: float) -> dict[str, object]:
+            yaw = radians(yaw_deg)
+            return {
+                "matrix": [[100.0, 0.0, 50.0], [0.0, 100.0, 50.0], [0.0, 0.0, 1.0]],
+                "sensor_to_ego": [
+                    sin(yaw), 0.0, cos(yaw), 1.5,
+                    -cos(yaw), 0.0, sin(yaw), 0.5 if yaw_deg > 0.0 else -0.5,
+                    0.0, -1.0, 0.0, 1.5,
+                    0.0, 0.0, 0.0, 1.0,
+                ],
+                "width": 100,
+                "height": 100,
+            }
+
+        cameras = {
+            "camera_front_left": side_camera(55.0),
+            "camera_front_right": side_camera(-55.0),
+        }
+        ego = [0.0, 0.0, 0.0, 0.0]
+        left_target = _project_box([10.0, 10.0, 1.0, 0.0], [0.5, 0.5, 1.0], ego, cameras, 30.0)
+        right_target = _project_box([10.0, -10.0, 1.0, 0.0], [0.5, 0.5, 1.0], ego, cameras, 30.0)
+
+        self.assertEqual(set(left_target), {"camera_front_left"})
+        self.assertEqual(set(right_target), {"camera_front_right"})
+
     def test_m6_replay_binding_freeze_reconciles_embedded_and_sidecar_contracts(self):
         from runners.freeze_scene0061_replay_actor_bindings import freeze_replay_actor_bindings
 
