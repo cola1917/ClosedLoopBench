@@ -38,6 +38,9 @@ Offline render-quality gate and final video shot manifest:
 Step-by-step environment coding and acceptance plan:
 [`docs/environment_integration_verification_plan.md`](docs/environment_integration_verification_plan.md).
 
+Development and remote test synchronization policy:
+[`docs/development_sync_policy.md`](docs/development_sync_policy.md).
+
 Algorithm/ODD/seed matrix planning:
 [`docs/offline_experiment_planning.md`](docs/offline_experiment_planning.md).
 
