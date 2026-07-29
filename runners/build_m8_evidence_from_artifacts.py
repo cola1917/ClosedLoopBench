@@ -42,6 +42,10 @@ def build_m8_evidence_from_artifacts(
         occupancy = occupancy_by_frame.get(frame_id)
         if expected is None or occupancy is None:
             raise SceneSafetyAuditError(f"M8 frame {frame_id} lacks expected LiDAR or occupancy artifact")
+        if frame_id not in visibility_by_frame:
+            raise SceneSafetyAuditError(f"M8 frame {frame_id} lacks calibrated visibility artifact")
+        _check_same_tick_time(runtime, expected, "expected LiDAR support")
+        _check_same_tick_time(runtime, occupancy, "LiDAR occupancy")
         objects = expected.get("expected_world_objects")
         supported = occupancy.get("occupancy")
         if not isinstance(objects, list) or not isinstance(supported, list):
@@ -61,7 +65,25 @@ def build_m8_evidence_from_artifacts(
         )
     if not result:
         raise SceneSafetyAuditError("M8 evidence requires at least one runtime frame")
+    runtime_ids = set(seen)
+    for label, rows in (("visibility", visibility_by_frame), ("expected LiDAR support", expected_by_frame), ("LiDAR occupancy", occupancy_by_frame)):
+        extra = sorted(set(rows) - runtime_ids)
+        if extra:
+            raise SceneSafetyAuditError(f"M8 {label} contains frames absent from runtime: {extra}")
     return result
+
+
+def _check_same_tick_time(runtime: Mapping[str, Any], evidence: Mapping[str, Any], label: str) -> None:
+    runtime_time = runtime.get("simulation_time_sec")
+    evidence_time = evidence.get("simulation_time_sec")
+    if evidence_time is None or runtime_time is None:
+        return
+    try:
+        delta = abs(float(runtime_time) - float(evidence_time))
+    except (TypeError, ValueError):
+        raise SceneSafetyAuditError(f"M8 {label} has invalid simulation time")
+    if delta > 1e-6:
+        raise SceneSafetyAuditError(f"M8 {label} is not same-tick with runtime frame {runtime.get('frame_id')}")
 
 
 def _unique_by_frame(rows: list[Mapping[str, Any]], label: str) -> dict[int, Mapping[str, Any]]:

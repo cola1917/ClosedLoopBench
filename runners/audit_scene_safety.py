@@ -58,8 +58,15 @@ def write_m8_evidence(
     output_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {}
     failures = 0
+    stream_frame_ids: dict[str, list[int]] = {}
     for name, filename, _ in AUDITS:
         records = list(rows.get(name) or [])
+        frame_ids = [record.get("frame_id") for record in records]
+        if any(not isinstance(frame_id, int) or isinstance(frame_id, bool) for frame_id in frame_ids):
+            raise SceneSafetyAuditError(f"{name} stream contains an invalid frame_id")
+        if len(frame_ids) != len(set(frame_ids)):
+            raise SceneSafetyAuditError(f"{name} stream contains duplicate frame_id")
+        stream_frame_ids[name] = frame_ids
         path = output_dir / filename
         if path.exists():
             raise FileExistsError(f"refusing to overwrite immutable M8 audit: {path}")
@@ -69,10 +76,18 @@ def write_m8_evidence(
         )
         failed = sum(row.get("status") != "passed" for row in records)
         failures += failed
-        artifacts[name] = {"path": str(path), "tick_count": len(records), "failed_tick_count": failed}
+        artifacts[name] = {"path": str(path), "tick_count": len(records), "failed_tick_count": failed, "frame_ids": frame_ids}
+    nonempty = [set(value) for value in stream_frame_ids.values() if value]
+    frame_set_mismatch = bool(nonempty and any(value != nonempty[0] for value in nonempty[1:]))
+    if frame_set_mismatch:
+        failures += 1
     summary = {
         "schema_version": "scene_safety_audit_summary.v1",
         "status": "passed" if failures == 0 and all(item["tick_count"] > 0 for item in artifacts.values()) else "failed",
+        "required_streams": [name for name, _, _ in AUDITS],
+        "stream_frame_ids": stream_frame_ids,
+        "common_frame_count": len(nonempty[0]) if nonempty and not frame_set_mismatch else 0,
+        "frame_set_mismatch": frame_set_mismatch,
         "artifacts": artifacts,
     }
     summary_path = output_dir / "scene_safety_audit_summary.v1.json"

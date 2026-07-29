@@ -59,6 +59,12 @@ class SceneSafetyAuditTests(unittest.TestCase):
         })
         self.assertEqual(audit_visibility_tick(base)["status"], "passed")
 
+    def test_visibility_empty_frame_fails_closed(self):
+        from adapters.scene_safety_audit import audit_visibility_tick
+
+        result = audit_visibility_tick({"frame_id": 10, "simulation_time_sec": 0.5, "projections": []})
+        self.assertEqual(result["status"], "failed")
+
     def test_lidar_world_requires_declared_occupancy(self):
         from adapters.scene_safety_audit import audit_lidar_world_tick
 
@@ -86,6 +92,16 @@ class SceneSafetyAuditTests(unittest.TestCase):
         self.assertEqual(result["status"], "failed")
         self.assertIn("source_observed_carla_occluded:truck", result["issues"])
 
+    def test_lidar_world_rejects_unknown_or_duplicate_occupancy(self):
+        from adapters.scene_safety_audit import audit_lidar_world_tick, SceneSafetyAuditError
+
+        base = {"frame_id": 10, "simulation_time_sec": 0.5, "expected_world_objects": [{"object_id": "truck", "expected_lidar_support": False}]}
+        with self.assertRaises(SceneSafetyAuditError):
+            audit_lidar_world_tick({**base, "lidar_occupancy": [{"object_id": "truck", "point_count": 0}, {"object_id": "truck", "point_count": 0}]})
+        result = audit_lidar_world_tick({**base, "lidar_occupancy": [{"object_id": "unknown", "point_count": 1}]})
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("unexpected_lidar_occupancy:unknown", result["issues"])
+
     def test_runner_writes_four_immutable_tick_streams(self):
         from runners.audit_scene_safety import audit_m8_evidence, write_m8_evidence
 
@@ -102,6 +118,16 @@ class SceneSafetyAuditTests(unittest.TestCase):
             self.assertEqual(summary["status"], "passed")
             for filename in ("collision_audit.v1.jsonl", "lane_audit.v1.jsonl", "visibility_audit.v1.jsonl", "lidar_world_audit.v1.jsonl"):
                 self.assertEqual(len((Path(directory) / filename).read_text(encoding="utf-8").splitlines()), 1)
+
+    def test_runner_rejects_mismatched_stream_frames(self):
+        from runners.audit_scene_safety import write_m8_evidence
+
+        rows = {name: [{"frame_id": 10, "status": "passed"}] for name, _, _ in __import__("runners.audit_scene_safety", fromlist=["AUDITS"]).AUDITS}
+        rows["lidar_world"] = [{"frame_id": 11, "status": "passed"}]
+        with tempfile.TemporaryDirectory() as directory:
+            summary = write_m8_evidence(rows, Path(directory))
+            self.assertEqual(summary["status"], "failed")
+            self.assertTrue(summary["frame_set_mismatch"])
 
     def test_normalized_lidar_is_counted_in_scene_world_boxes(self):
         from adapters.lidar_world_support import lidar_occupancy_from_xyzi, summarize_xyzi_payload
@@ -358,6 +384,18 @@ class SceneSafetyAuditTests(unittest.TestCase):
 
         self.assertEqual(rows[0]["visibility"]["projections"][0]["frame_id"], 10)
         self.assertEqual(rows[0]["lidar_world"]["lidar_occupancy"][0]["point_count"], 2)
+
+    def test_m8_artifact_join_rejects_empty_visibility_and_extra_frames(self):
+        from runners.build_m8_evidence_from_artifacts import build_m8_evidence_from_artifacts
+
+        runtime = [_tick()]
+        expected = [{"frame_id": 10, "expected_world_objects": [{"object_id": "truck", "expected_lidar_support": True}]}]
+        occupancy = [{"frame_id": 10, "occupancy": [{"object_id": "truck", "point_count": 2}]}]
+        with self.assertRaisesRegex(Exception, "calibrated visibility"):
+            build_m8_evidence_from_artifacts(runtime, {"observations": []}, expected, occupancy)
+        visibility = {"observations": [{"frame_id": 10, "object_id": "truck", "camera": "camera_front", "observation_kind": "calibrated_3d_box_projection", "projection": {}, "evidence": {"nre_payload_sha256": "a" * 64, "calibrated_sensor_token": "front", "intrinsics_table_sha256": "b" * 64}}]}
+        with self.assertRaisesRegex(Exception, "absent from runtime"):
+            build_m8_evidence_from_artifacts(runtime, {"observations": visibility["observations"] + [{**visibility["observations"][0], "frame_id": 11}]}, expected, occupancy)
 
     def test_detector_evidence_requires_pinned_model_and_iou_match(self):
         from adapters.rgb_detector_evidence import match_detector_evidence

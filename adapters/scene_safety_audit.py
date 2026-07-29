@@ -109,6 +109,14 @@ def audit_visibility_tick(tick: Mapping[str, Any]) -> dict[str, Any]:
         raise SceneSafetyAuditError("visibility audit requires a projections list")
     rows = []
     issues = []
+    if not projections:
+        return _result(
+            "visibility_audit.v1",
+            frame_id,
+            t_sec,
+            [],
+            ["missing_calibrated_same_frame_projection"],
+        )
     for projection in projections:
         if not isinstance(projection, Mapping):
             raise SceneSafetyAuditError("visibility projection must be an object")
@@ -140,16 +148,29 @@ def audit_lidar_world_tick(tick: Mapping[str, Any]) -> dict[str, Any]:
     support = tick.get("lidar_occupancy")
     if not isinstance(expected, list) or not isinstance(support, list):
         raise SceneSafetyAuditError("LiDAR world audit requires expected_world_objects and lidar_occupancy lists")
-    support_by_object = {
-        _nonempty(item.get("object_id"), "lidar_occupancy.object_id"): item
-        for item in support
-        if isinstance(item, Mapping)
-    }
-    rows = []
     issues = []
+    if not expected:
+        issues.append("missing_expected_world_objects")
+    expected_ids: list[str] = []
     for item in expected:
         if not isinstance(item, Mapping):
             raise SceneSafetyAuditError("expected world object must be an object")
+        expected_ids.append(_nonempty(item.get("object_id"), "expected_world_objects.object_id"))
+    if len(expected_ids) != len(set(expected_ids)):
+        raise SceneSafetyAuditError("duplicate expected world object IDs")
+    support_by_object: dict[str, Mapping[str, Any]] = {}
+    for item in support:
+        if not isinstance(item, Mapping):
+            raise SceneSafetyAuditError("lidar occupancy must be an object")
+        object_id = _nonempty(item.get("object_id"), "lidar_occupancy.object_id")
+        if object_id in support_by_object:
+            raise SceneSafetyAuditError(f"duplicate lidar occupancy object ID: {object_id}")
+        support_by_object[object_id] = item
+    unknown_support = sorted(set(support_by_object) - set(expected_ids))
+    if unknown_support:
+        issues.extend(f"unexpected_lidar_occupancy:{object_id}" for object_id in unknown_support)
+    rows = []
+    for item in expected:
         object_id = _nonempty(item.get("object_id"), "expected_world_objects.object_id")
         declared = item.get("expected_lidar_support")
         if not isinstance(declared, bool):
