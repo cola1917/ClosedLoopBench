@@ -53,6 +53,29 @@ and report. Stages exchange artifacts through contracts, not internal state.
 The important independence rule is: S4 failure does not fail S1, S2, or S3.
 S6 integration is the only stage allowed to require multiple stage gates.
 
+## TF++ clarification
+
+TF++ has a separate status from NuRec/M8. The adapter and ROS2/container
+boundary can be complete even when the real checkpoint has not run. Classify
+the evidence as follows:
+
+| Evidence observed | Classification |
+|---|---|
+| adapter, module, lifecycle, and ROS2 contract tests | S3 implementation |
+| real repository/checkpoint/config/image hashes bound | S3 runtime-ready |
+| real checkpoint produces frame-matched controls in CARLA with native sensors | S3.M5 passed / S6.M1 candidate |
+| same controls use paired NuRec RGB/LiDAR transactions | S4.M5 + S6.M2 |
+| three repeated TF++ replay runs share the evaluator and have no unclassified fallback | S6.M3 / historical M9 |
+
+Do not infer TF++ execution from `algorithm_id=transfuserpp_v5` alone. The
+runtime report must identify the actual ego driver/backend, checkpoint hash,
+accepted controls, frame identity, and fallback count. Existing local closeout
+evidence explicitly remains `real_checkpoint_loaded=false`; existing remote
+M8 reports also contain `basic_agent` or `topology_follower` driver records.
+Those are not proof of a TF++ inference run. This means the current defensible
+state is: **TF++ integration boundary prepared, real TF++ replay baseline not
+yet evidenced**.
+
 ## M-series mapping and status
 
 Historical M numbers remain stable and must not be retroactively relabelled:
@@ -65,7 +88,7 @@ Historical M numbers remain stable and must not be retroactively relabelled:
 | M8.1 | S1/S2 collision and lane truth | probe valid; independent repeat gate pending |
 | M8.2 | S4 LiDAR-world consistency | failed; formally deferred |
 | M8.3 | S4 RGB geometry | geometry evidence exists; no detector claim |
-| M9 | S6 TF++ replay baseline | not started for formal acceptance |
+| M9 | S6 TF++ replay baseline | integration boundary prepared; real three-run TF++ evidence not yet established |
 | M10 | S5 interactive lead/pedestrian | not started for live acceptance |
 | M11 | S6 Goal experiment matrix | not started |
 
@@ -143,4 +166,3 @@ dependency and is not evidence of live CARLA/NuRec acceptance.
   occupancy.
 - If a stage fails, fix that stage's contract or evidence producer; do not
   rewrite unrelated stage statuses.
-

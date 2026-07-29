@@ -98,11 +98,30 @@ control, with safe-stop on failure, while producing a Stage 2-compatible trace.
 | S3.M2 | Control validation/safe-stop | stale, mismatched, timeout, exception, NaN/Inf, and range errors produce full brake | `offline_ready` |
 | S3.M3 | Native CARLA control | BasicAgent/Pure Pursuit controls synchronous CARLA and writes a Stage 2 trace | `not_evidenced` |
 | S3.M4 | ROS2 external ego | passive bridge observation/control topics and accepted/safe-stop evidence pass | `not_evidenced` |
-| S3.M5 | Real algorithm binding | pinned checkpoint/container identity and controls are reproducible | `not_started` |
+| S3.M5 | Real algorithm binding | pinned checkpoint/container identity and controls are reproducible | `evidence-dependent` |
 
 S3 can use CARLA-native sensors. It must not wait for NuRec reconstruction.
 Offline plugin replay is `offline_conformance`, never a real ego closed-loop
 claim.
+
+### TF++ status interpretation
+
+"TF++ connected" is not one acceptance state. Use these separate labels:
+
+| TF++ evidence | Stage classification | Claim allowed |
+|---|---|---|
+| adapter/module, ROS2 topics, container and lifecycle tests | S3.M1-S3.M2 implementation | TF++ integration boundary implemented |
+| real checkpoint/config/repository/image hashes bound, but no live control trace | S3.M5 `runtime_ready` | prepared for remote validation |
+| real checkpoint loaded and frame-matched controls reach CARLA using native sensors | S3.M5 `runtime_passed`; eligible for S6.M1 | native-sensor control-only run |
+| same run uses NuRec RGB/LiDAR with valid paired transaction | S4.M5 + S6.M2 | multimodal control-only run |
+| three repeated TF++ replay runs with common evaluator and no unclassified fallback | S6.M3 / historical M9 | TF++ replay baseline |
+| sensor/world and perception gates also pass | S6.M2 plus perception evidence | perception-eligible multimodal experiment |
+
+An `algorithm_id` in a run config is identity metadata only. It does not prove
+that the TF++ backend was selected, that a checkpoint loaded, or that TF++
+produced the control. The runtime report must show the actual ego driver,
+backend identity, checkpoint hash, accepted frame-matched controls, and
+fallback counts.
 
 ## Stage 4: Sensor bridge and world consistency
 
@@ -148,9 +167,9 @@ It creates release-level results from already-passed products:
 
 | Milestone | Product | Required inputs | Current status |
 |---|---|---|---|
-| S6.M1 | Native-sensor control baseline | S1 + S2 + S3 | `not_started` |
+| S6.M1 | Native-sensor control baseline | S1 + S2 + S3 | `evidence-dependent` |
 | S6.M2 | NuRec multimodal baseline | S1 + S2 + S3 + S4.M5 | `blocked_by_S4` |
-| S6.M3 | TF++ replay baseline | passed S6.M2, pinned checkpoint, three repeat runs | `not_started` |
+| S6.M3 | TF++ replay baseline | S1 + S2 + S3, pinned checkpoint, three repeat runs; S4 is required only for the multimodal variant | `evidence-dependent` |
 | S6.M4 | Lead/pedestrian counterfactual matrix | S5 + selected S6 baseline | `not_started` |
 | S6.M5 | Global Goal report | complete bounded evidence for selected cases | `not_started` |
 
@@ -170,7 +189,7 @@ passed:
 | M8.1 | S1.M3/S2.M2 | collision/lane probe valid, repetition gate pending |
 | M8.2 | S4.M4 | failed LiDAR-world consistency |
 | M8.3 | S4.M1/S4.M2 | RGB geometry evidence, no detector claim |
-| M9 | S6.M3 | not started for formal acceptance |
+| M9 | S6.M3 | integration boundary prepared; real three-run TF++ evidence not yet established |
 | M10 | S5.M2/S5.M3 | not started for acceptance |
 | M11 | S6.M4/S6.M5 | not started |
 
@@ -190,4 +209,3 @@ The next local work should improve S1-S3 independently with native or
 synthetic fixtures. When the remote host returns, run S1 replay and S3 native
 control before attempting S4 reconstruction. Formal 40k reconstruction is
 allowed only after S4.M4/S4.M5 pass on a common non-empty frame set.
-
