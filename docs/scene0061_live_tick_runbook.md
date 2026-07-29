@@ -23,9 +23,9 @@ git status --short
 git rev-parse HEAD
 python tools/scene0061_sync.py status `
   --repo . `
-  --remote-host ${CLB_REMOTE_SSH_USER}@${CLB_REMOTE_SSH_HOST} `
+  --remote-host cwadmin@113.108.63.33 `
   --remote-repo /home/cwadmin/workspace/ClosedLoopBench `
-  --ssh-port ${CLB_REMOTE_SSH_PORT} `
+  --ssh-port 16722 `
   --require-equal
 ```
 
