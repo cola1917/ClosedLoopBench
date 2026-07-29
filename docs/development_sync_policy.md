@@ -1,9 +1,9 @@
 # Development and Remote Sync Policy
 
 This repository uses GitHub as the source of truth for tracked source code.
-The local checkout is the only development checkout. The remote host at
-`${CLB_REMOTE_SSH_HOST}:${CLB_REMOTE_SSH_PORT}` is a test checkout and must not be used for ad-hoc code
-edits or bundle-based source transfer.
+The local checkout is the only development checkout. The remote test checkout
+is configured out of band and must not be used for ad-hoc code edits or
+bundle-based source transfer.
 
 ## Normal flow
 

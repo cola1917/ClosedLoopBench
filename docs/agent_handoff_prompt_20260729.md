@@ -29,9 +29,10 @@ Current source baseline:
   equal at commit `215979e` on 2026-07-29.
 - M8 experiment branches are deliberately not merged into `master`.
 
-Remote test host:
+Remote test host (configured out of band; values must not be committed):
 
-- SSH endpoint: `${CLB_REMOTE_SSH_USER}@${CLB_REMOTE_SSH_HOST}`, port `${CLB_REMOTE_SSH_PORT}`
+- SSH endpoint: `${CLB_REMOTE_SSH_USER}@${CLB_REMOTE_SSH_HOST}`, port
+  `${CLB_REMOTE_SSH_PORT}`
 - ClosedLoopBench checkout: `/home/cwadmin/workspace/ClosedLoopBench`
 - NeuralSceneBridge checkout: `/home/cwadmin/workspace/NeuralSceneBridge`
 - Use the existing SSH authentication on the machine. Never request,
@@ -47,7 +48,7 @@ The only normal source flow is:
 1. Develop and run focused tests locally.
 2. Commit on local `master` or a short-lived feature branch merged locally.
 3. Push normally to GitHub: `git push origin master`.
-4. On port ${CLB_REMOTE_SSH_PORT}, run `git pull --ff-only origin master`.
+4. On the configured remote checkout, run `git pull --ff-only origin master`.
 5. Run remote validation from that exact commit and keep evidence outside the
    tracked source tree.
 
@@ -64,8 +65,9 @@ Rules:
   material and must not be deleted during Git governance.
 - Before attributing a remote result to code, require exact SHA equality. Use:
   `python tools/scene0061_sync.py status --repo E:/code/ClosedLoopBench
-   --remote-host ${CLB_REMOTE_SSH_USER}@${CLB_REMOTE_SSH_HOST} --remote-repo
-   /home/cwadmin/workspace/ClosedLoopBench --ssh-port ${CLB_REMOTE_SSH_PORT} --require-equal`
+   --remote-host "${CLB_REMOTE_SSH_USER}@${CLB_REMOTE_SSH_HOST}"
+   --remote-repo /home/cwadmin/workspace/ClosedLoopBench
+   --ssh-port "${CLB_REMOTE_SSH_PORT}" --require-equal`
 - Do not claim a milestone passed from an RPC success, a video, or
   `collision_count == 0` alone.
 
