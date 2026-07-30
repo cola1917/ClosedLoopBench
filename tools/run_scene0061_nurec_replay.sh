@@ -12,7 +12,15 @@ NUREC_IMAGE="${NUREC_IMAGE:-nvcr.io/nvidia/nre/nre-ga:26.04}"
 NUREC_IMAGE_COMMAND="${NUREC_IMAGE_COMMAND:-serve-grpc}"
 NUREC_SERVER_ARGS="${NUREC_SERVER_ARGS:---enable-editing-actors}"
 NUREC_USDZ="${NUREC_USDZ:-/home/cwadmin/workspace/NeuralSceneBridge/outputs/nurec_formal_scene0061_6cam_40k/nB3fGDTuUz5ptMbZzCXnjS/artifacts/last.usdz}"
-NUREC_XODR_PATH="${NUREC_XODR_PATH:-/home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-1000step/road.xodr}"
+# The canonical exchange map retains all selected nuScenes lanes, inferred
+# connector roads, and the six-road Ego route chain. The separate corridor is
+# diagnostic-only; the historical scene-0061-1000step file is not a safe
+# default for replay.
+NUREC_XODR_PATH="${NUREC_XODR_PATH:-/home/cwadmin/workspace/ClosedLoopBench/outputs/scene0061_exchange_v2/road.xodr}"
+NUREC_SCENARIO_IR="${NUREC_SCENARIO_IR:-/home/cwadmin/workspace/ClosedLoopBench/outputs/scene0061_exchange_v2/scene_ir.json}"
+# Formal replay is bound to the canonical topology exchange bytes.  A path
+# override is allowed only when it points to an identical artifact.
+EXPECTED_CANONICAL_XODR_SHA256="eb117dd99f84cdd8072e13aaacc502702dd815658ed4b53e81a00ace931b109e"
 OUTPUT_DIR="${OUTPUT_DIR:-/home/cwadmin/workspace/ClosedLoopBench/outputs/scene-0061-40k-nurec-replay/images}"
 CARLA_HOST="${CARLA_HOST:-127.0.0.1}"
 CARLA_PORT="${CARLA_PORT:-2000}"
@@ -24,12 +32,29 @@ LOG_FILE="${LOG_FILE:-}"
 OVERLAP_LOG="${OVERLAP_LOG:-}"
 ACTOR_MAPPING_LOG="${ACTOR_MAPPING_LOG:-}"
 
-for path in "${PYTHON_BIN}" "${NUREC_USDZ}" "${NUREC_XODR_PATH}" "${NUREC_CAMERA_CONFIG}"; do
+for path in "${PYTHON_BIN}" "${NUREC_USDZ}" "${NUREC_XODR_PATH}" "${NUREC_SCENARIO_IR}" "${NUREC_CAMERA_CONFIG}"; do
   if [[ ! -e "${path}" ]]; then
     echo "Required path does not exist: ${path}" >&2
     exit 1
   fi
 done
+
+# Refuse a route-only or structurally invalid map before starting CARLA/NuRec.
+# The contract reports partial connectivity separately; this gate prevents the
+# one-road corridor fallback from being consumed as the scene map.
+PYTHONPATH="/home/cwadmin/workspace/ClosedLoopBench${PYTHONPATH:+:${PYTHONPATH}}" \
+  "${PYTHON_BIN}" -m adapters.opendrive_contract \
+  --xodr "${NUREC_XODR_PATH}" \
+  --expected-sha256 "${EXPECTED_CANONICAL_XODR_SHA256}" \
+  --require-junction-topology \
+  --require-boundary-audit \
+  --require-connector-evidence \
+  --require-route-chain \
+  --require-route-map-integration \
+  --require-route-source-audit \
+  --scenario-ir "${NUREC_SCENARIO_IR}" \
+  --require-ego-route-coverage \
+  --expected-ego-corridor-count 0
 if ! docker image inspect "${NUREC_IMAGE}" >/dev/null 2>&1; then
   echo "NuRec gRPC image is not installed: ${NUREC_IMAGE}" >&2
   exit 1

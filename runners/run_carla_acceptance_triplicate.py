@@ -113,6 +113,7 @@ def run_acceptance_triplicate(
             acceptance_evidence=True,
             multimodal_sensor_required=require_multimodal,
             opendrive_path=opendrive_path,
+            require_topology_map=bool(opendrive_path),
             ego_driver=ego_driver,
             snap_to_map=bool(opendrive_path),
             run_config_provenance=(

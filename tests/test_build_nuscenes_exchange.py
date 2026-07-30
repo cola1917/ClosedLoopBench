@@ -37,13 +37,99 @@ def _scene_ir():
     }
 
 
+def _topology_xodr(
+    include_ego_corridor: bool = True,
+    include_route_chain: bool = True,
+) -> str:
+    corridor = (
+        "<road id='1000' name='ego_route_corridor' length='10' junction='-1'>"
+        "<planView><geometry x='0' y='0' hdg='0' length='10'><line/></geometry></planView>"
+        "</road>"
+        if include_ego_corridor
+        else ""
+    )
+    route_chain = (
+        "<road id='2001' name='inferred_route_test_a' length='5' junction='-1'>"
+        "<link><successor elementType='junction' elementId='1' contactPoint='end'/></link>"
+        "<planView><geometry x='0' y='0' hdg='0' length='5'><line/></geometry></planView>"
+        "<userData>"
+        "<property name='route_geometry_authority' value='synthetic_reference_trajectory'/>"
+        "<property name='route_inference_reason' value='source_map_lane_alignment_gap'/>"
+        "<property name='route_source_kind' value='road_block'/>"
+        "<property name='route_source_token' value='test-a'/>"
+        "<property name='route_start_sample_index' value='0'/>"
+        "<property name='route_end_sample_index' value='1'/>"
+        "</userData>"
+        "</road>"
+        "<road id='2002' name='inferred_route_test_b' length='5' junction='-1'>"
+        "<link><predecessor elementType='junction' elementId='1' contactPoint='start'/>"
+        "<successor elementType='junction' elementId='1' contactPoint='end'/></link>"
+        "<planView><geometry x='5' y='0' hdg='0' length='5'><line/></geometry></planView>"
+        "<userData>"
+        "<property name='route_geometry_authority' value='synthetic_reference_trajectory'/>"
+        "<property name='route_inference_reason' value='source_map_lane_alignment_gap'/>"
+        "<property name='route_source_kind' value='road_block'/>"
+        "<property name='route_source_token' value='test-b'/>"
+        "<property name='route_start_sample_index' value='1'/>"
+        "<property name='route_end_sample_index' value='2'/>"
+        "</userData>"
+        "</road>"
+        "<road id='1002' name='inferred_connector_route_chain' length='0.1' junction='1'>"
+        "<link><predecessor elementType='road' elementId='2001' contactPoint='end'/>"
+        "<successor elementType='road' elementId='2002' contactPoint='start'/></link>"
+        "<planView><geometry x='5' y='0' hdg='0' length='0.1'><line/></geometry></planView>"
+        "</road>"
+        "<road id='1003' name='inferred_connector_route_to_map' length='1' junction='1'>"
+        "<link><predecessor elementType='road' elementId='2002' contactPoint='end'/>"
+        "<successor elementType='road' elementId='2' contactPoint='start'/></link>"
+        "<planView><geometry x='10' y='0' hdg='0' length='1'><line/></geometry></planView>"
+        "</road>"
+        if include_route_chain
+        else ""
+    )
+    return (
+        "<OpenDRIVE>"
+        "<road id='1' name='nuscenes_lane_a' length='10' junction='-1'>"
+        "<link><successor elementType='junction' elementId='1' contactPoint='end'/></link>"
+        "<planView><geometry x='0' y='0' hdg='0' length='10'><line/></geometry></planView>"
+        "</road>"
+        "<road id='2' name='nuscenes_lane_b' length='10' junction='-1'>"
+        "<link><predecessor elementType='junction' elementId='1' contactPoint='start'/></link>"
+        "<planView><geometry x='11' y='0' hdg='0' length='10'><line/></geometry></planView>"
+        "</road>"
+        "<road id='1001' name='inferred_connector_1_a_to_b' length='1' junction='1'>"
+        "<link>"
+        "<predecessor elementType='road' elementId='1' contactPoint='end'/>"
+        "<successor elementType='road' elementId='2' contactPoint='start'/>"
+        "</link>"
+        "<planView><geometry x='10' y='0' hdg='0' length='1'><line/></geometry></planView>"
+        "<userData><property name='topology_evidence' value='endpoint_heading'/></userData>"
+        "</road>"
+        + route_chain
+        + corridor
+        + "<junction id='1'><connection id='1' incomingRoad='1' "
+        "connectingRoad='1001' contactPoint='start'><laneLink from='-1' to='-1'/>"
+        "</connection>"
+        "<connection id='2' incomingRoad='2001' connectingRoad='1002' contactPoint='start'>"
+        "<laneLink from='-1' to='-1'/></connection>"
+        "<connection id='3' incomingRoad='2002' connectingRoad='1003' contactPoint='start'>"
+        "<laneLink from='-1' to='-1'/></connection></junction></OpenDRIVE>"
+    )
+
+
 class BuildNuScenesExchangeTests(unittest.TestCase):
     def test_copies_validated_actor_bindings_into_scene_package(self):
         from adapters.actor_binding import build_actor_binding_set
         from runners.build_nuscenes_exchange import build_exchange_from_scenario_ir
 
         def write_road(dataroot, output, **kwargs):
-            output.write_text("<OpenDRIVE/>\n", encoding="utf-8")
+            output.write_text(
+                _topology_xodr(
+                    kwargs.get("include_ego_corridor", True),
+                    kwargs.get("include_route_inference", True),
+                ),
+                encoding="utf-8",
+            )
             return output
 
         with tempfile.TemporaryDirectory() as directory:
@@ -89,7 +175,13 @@ class BuildNuScenesExchangeTests(unittest.TestCase):
         from runners.build_nuscenes_exchange import build_exchange_from_scenario_ir
 
         def write_road(dataroot, output, **kwargs):
-            output.write_text("<OpenDRIVE/>\n", encoding="utf-8")
+            output.write_text(
+                _topology_xodr(
+                    kwargs.get("include_ego_corridor", True),
+                    kwargs.get("include_route_inference", True),
+                ),
+                encoding="utf-8",
+            )
             return output
 
         with tempfile.TemporaryDirectory() as directory:
@@ -187,7 +279,13 @@ class BuildNuScenesExchangeTests(unittest.TestCase):
 
         def write_road(dataroot, output, **kwargs):
             calls["road"] = (dataroot, kwargs)
-            output.write_text("<OpenDRIVE/>\n", encoding="utf-8")
+            output.write_text(
+                _topology_xodr(
+                    kwargs.get("include_ego_corridor", True),
+                    kwargs.get("include_route_inference", True),
+                ),
+                encoding="utf-8",
+            )
             return output
 
         with tempfile.TemporaryDirectory() as directory:

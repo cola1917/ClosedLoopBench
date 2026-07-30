@@ -77,10 +77,89 @@ class NuScenesExchangeEndToEndTests(unittest.TestCase):
 
         opendrive = ET.parse(self.paths["opendrive"]).getroot()
         self.assertEqual(opendrive.tag, "OpenDRIVE")
-        self.assertEqual(len(opendrive.findall("road")), 65)
+        roads = opendrive.findall("road")
+        lane_count = sum(
+            road.attrib.get("name", "").startswith("nuscenes_lane_")
+            for road in roads
+        )
+        connector_count = sum(
+            road.attrib.get("name", "").startswith("inferred_connector_")
+            for road in roads
+        )
+        route_count = sum(
+            road.attrib.get("name", "").startswith("inferred_route_")
+            for road in roads
+        )
+        corridor_count = sum(
+            road.attrib.get("name") == "ego_route_corridor" for road in roads
+        )
+        self.assertGreaterEqual(lane_count, 2)
+        self.assertGreaterEqual(lane_count, 80)
+        self.assertGreater(connector_count, 0)
+        self.assertGreater(route_count, 0)
+        self.assertEqual(route_count, 1)
+        self.assertEqual(corridor_count, 0)
+        self.assertEqual(len(roads), lane_count + connector_count + route_count)
+        self.assertGreater(len(opendrive.findall("junction")), 0)
+        self.assertGreater(len(opendrive.findall("./junction/connection")), 0)
+
+        route_path = sorted(
+            (
+                int(
+                    next(
+                        property_node.attrib["value"]
+                        for property_node in road.findall("./userData/property")
+                        if property_node.attrib.get("name") == "route_path_order"
+                    )
+                ),
+                road,
+            )
+            for road in roads
+            if any(
+                property_node.attrib.get("name") == "route_path_order"
+                for property_node in road.findall("./userData/property")
+            )
+        )
+        self.assertEqual(
+            [order for order, _ in route_path],
+            [1, 2, 3, 4, 5, 6],
+        )
+        self.assertEqual(
+            [
+                next(
+                    property_node.attrib["value"]
+                    for property_node in road.findall("./userData/property")
+                    if property_node.attrib.get("name") == "route_path_kind"
+                )
+                for _, road in route_path
+            ],
+            ["source_gap", "map_lane", "map_connector", "map_lane", "map_connector", "map_lane"],
+        )
+        self.assertEqual(
+            [
+                next(
+                    property_node.attrib["value"]
+                    for property_node in road.findall("./userData/property")
+                    if property_node.attrib.get("name") == "route_geometry_authority"
+                )
+                for _, road in route_path
+            ],
+            [
+                "synthetic_reference_trajectory",
+                "map_lane_network",
+                "map_connector_geometry",
+                "map_lane_network",
+                "map_connector_geometry",
+                "map_lane_network",
+            ],
+        )
 
         package = json.loads(self.paths["scene_package"].read_text(encoding="utf-8"))
         self.assertEqual(package["scene_id"], scene_ir["source"]["scene_token"])
+        self.assertEqual(
+            package["map"]["source"],
+            "nuscenes_topology_map_expansion_with_mixed_route_path",
+        )
         exchange_paths = (
             package["motion"]["scene_ir"],
             package["map"]["opendrive"],

@@ -57,7 +57,13 @@
     {
       "odd_id": "default",
       "parameters": {
-        "route_xodr": "road.nurec-route-extended-both-v7.xodr",
+        "route_xodr": "outputs/scene0061_exchange_v2/road.xodr",
+        "route_xodr_contract": {
+          "artifact_kind": "canonical_nuscenes_topology_exchange",
+          "road_count": 229,
+          "junction_count": 17,
+          "ego_corridor_road_count": 0
+        },
         "reconstruction": "nurec-40k",
         "camera_count": 6
       }

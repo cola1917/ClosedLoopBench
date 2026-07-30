@@ -20,6 +20,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from adapters.nurec_260_client import build_nurec_260_client  # noqa: E402
+from adapters.opendrive_contract import (  # noqa: E402
+    OpenDriveContractError,
+    validate_topology_artifact,
+)
 from adapters.nurec_multimodal import (  # noqa: E402
     NuRecMultimodalError,
     materialize_nurec_rpc_requests,
@@ -962,13 +966,55 @@ def _validate_map_contract(
         raise ValueError(
             f"selected OpenDRIVE basename {xodr_path.name!r} != scene package {declared!r}"
         )
+    map_source = str(map_info.get("source") or "")
+    topology_summary = {
+        "road_count": None,
+        "map_lane_road_count": None,
+        "connector_road_count": None,
+        "route_inference_road_count": None,
+        "ego_corridor_road_count": None,
+        "junction_count": None,
+        "network_component_count": None,
+        "largest_network_component_road_count": None,
+        "isolated_network_road_count": None,
+        "network_connectivity_status": None,
+        "network_connectivity_warnings": [],
+    }
+    if map_source.startswith("nuscenes_topology"):
+        try:
+            scenario_ir_path = xodr_path.parent / "scene_ir.json"
+            has_route_chain = (
+                "with_route_chain" in map_source
+                or "with_mixed_route_path" in map_source
+            )
+            topology_summary = validate_topology_artifact(
+                xodr_path,
+                expected_ego_corridor_count=(
+                    1 if "and_ego_corridor" in map_source else 0
+                ),
+                require_map_topology=True,
+                require_junction_topology=True,
+                require_route_chain=has_route_chain,
+                require_route_map_integration=has_route_chain,
+                require_route_source_audit=has_route_chain,
+                scenario_ir_path=scenario_ir_path if scenario_ir_path.is_file() else None,
+                require_ego_route_coverage=has_route_chain,
+                require_boundary_audit=True,
+            )
+        except OpenDriveContractError as exc:
+            raise ValueError(
+                "topology Scene Package requires a multi-road OpenDRIVE map: "
+                f"{exc}"
+            ) from exc
     return {
         "status": "matched",
         "declared_opendrive": declared,
         "selected_path": str(xodr_path.resolve()),
         "selected_sha256": _sha256_file(xodr_path),
-        "map_source": str(map_info.get("source") or ""),
+        "map_source": map_source,
         "location": str(map_info.get("location") or ""),
+        "network_connectivity_warnings": topology_summary.get("warnings", []),
+        **topology_summary,
     }
 
 

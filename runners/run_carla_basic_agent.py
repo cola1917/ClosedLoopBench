@@ -6,6 +6,7 @@ import importlib
 import json
 import math
 import sys
+from threading import Lock
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -18,6 +19,18 @@ if str(PROJECT_ROOT) not in sys.path:
 from actors.reactive_actor import plan_reactive_actor_control
 from metrics.report import build_closed_loop_report
 from metrics.collector import TickMetricCollector
+from adapters.scene_safety_audit import (
+    SceneSafetyAuditError,
+    audit_collision_tick,
+    audit_lane_tick,
+    audit_lidar_world_tick,
+    audit_visibility_tick,
+)
+from adapters.m8_sensor_evidence import M8SensorEvidenceError
+from adapters.opendrive_contract import (
+    OpenDriveContractError,
+    validate_topology_artifact,
+)
 
 
 def build_basic_agent_plan(
@@ -38,6 +51,9 @@ def build_basic_agent_plan(
     control_timeout_sec: float = 0.5,
     acceptance_evidence: bool = False,
     opendrive_path: str | None = None,
+    scenario_ir_path: str | None = None,
+    expected_opendrive_sha256: str | None = None,
+    require_topology_map: bool | None = None,
     timeout_sec: float = 60.0,
     runtime_route_distance_m: float | None = None,
     physics_smoke: bool = False,
@@ -51,6 +67,11 @@ def build_basic_agent_plan(
     reference = list(ego.get("reference_trajectory") or [])
     destination = dict(reference[-1]) if reference else dict(initial_state)
     scenario_id = str(run_config["scenario_id"])
+    topology_map_required = (
+        bool(opendrive_path)
+        if require_topology_map is None
+        else bool(require_topology_map)
+    )
 
     plan = {
         "schema_version": "basic_agent_plan.mvp.v0",
@@ -64,6 +85,17 @@ def build_basic_agent_plan(
         "world": {
             "map": carla_config.get("map"),
             "opendrive_path": str(opendrive_path) if opendrive_path else None,
+            "expected_opendrive_sha256": (
+                expected_opendrive_sha256
+                if expected_opendrive_sha256 is not None
+                else carla_config.get("opendrive_sha256")
+            ),
+            "scenario_ir_path": (
+                str(Path(scenario_ir_path).expanduser().resolve())
+                if scenario_ir_path
+                else None
+            ),
+            "require_topology_map": topology_map_required,
             "runtime_route_distance_m": (
                 float(runtime_route_distance_m)
                 if runtime_route_distance_m is not None
@@ -116,6 +148,7 @@ def build_basic_agent_plan(
             run_config.get("actor_control_contract") or {}
         ),
         "actor_binding": dict(run_config.get("actor_binding") or {}),
+        "scene_object_registry": dict(run_config.get("scene_object_registry") or {}),
         "ego": {
             "agent": "basic_agent",
             "driver": str(ego_driver),
@@ -139,6 +172,7 @@ def build_basic_agent_plan(
             ),
         },
         "actors": run_config.get("actors", []),
+        "static_obstacles": deepcopy(list(run_config.get("static_obstacles") or [])),
         "reconstruction_package": dict(run_config.get("reconstruction_package") or {}),
         "metrics": (
             [
@@ -174,6 +208,46 @@ def build_basic_agent_plan(
             "acceptance_evidence": bool(acceptance_evidence),
             "physics_smoke": bool(physics_smoke),
             "multimodal_sensor_required": bool(multimodal_sensor_required),
+            "m6_static_obstacle_required": bool(
+                (run_config.get("runtime") or {}).get("m6_static_obstacle_required", False)
+            ),
+            "m7_actor_pose_audit_required": bool(
+                (run_config.get("runtime") or {}).get("m7_actor_pose_audit_required", False)
+            ),
+            "m8_safety_audit_required": bool(
+                (run_config.get("runtime") or {}).get(
+                    "m8_safety_audit_required", False
+                )
+            ),
+            "m8_safety_contract": (
+                (run_config.get("runtime") or {}).get("m8_safety_contract")
+            ),
+            "m8_sensor_config": {
+                "camera_specs": deepcopy(
+                    ((run_config.get("nurec_runtime") or {}).get("camera_specs") or [])
+                ),
+                "lidar_specs": deepcopy(
+                    ((run_config.get("nurec_runtime") or {}).get("lidar_specs") or [])
+                ),
+                "camera_calibration_capture": deepcopy(
+                    (
+                        (run_config.get("runtime") or {})
+                        .get("m8_safety_contract")
+                        or {}
+                    ).get("camera_calibration_capture")
+                    if isinstance(
+                        (run_config.get("runtime") or {}).get("m8_safety_contract"),
+                        Mapping,
+                    )
+                    else None
+                ),
+            },
+            "dynamic_actor_lifecycle": (
+                (run_config.get("runtime") or {}).get("dynamic_actor_lifecycle")
+            ),
+            "static_obstacle_lifecycle": (
+                (run_config.get("runtime") or {}).get("static_obstacle_lifecycle")
+            ),
             "actor_vertical_alignment_max_error_m": float(
                 (run_config.get("runtime") or {}).get(
                     "actor_vertical_alignment_max_error_m", 0.25
@@ -197,6 +271,69 @@ def build_basic_agent_plan(
             "nurec_multimodal_trace": (
                 str(Path(output).with_name("nurec_multimodal_trace.jsonl"))
                 if output
+                else None
+            ),
+            "m8_runtime_trace": (
+                str(Path(output).with_name("m8_runtime_trace.jsonl"))
+                if output
+                and bool(
+                    (run_config.get("runtime") or {}).get(
+                        "m8_safety_audit_required", False
+                    )
+                )
+                else None
+            ),
+            "collision_audit": (
+                str(Path(output).with_name("collision_audit.v1.jsonl"))
+                if output
+                and (
+                    bool(acceptance_evidence)
+                    or bool(
+                        (run_config.get("runtime") or {}).get(
+                            "m8_safety_audit_required", False
+                        )
+                    )
+                )
+                else None
+            ),
+            "lane_audit": (
+                str(Path(output).with_name("lane_audit.v1.jsonl"))
+                if output
+                and bool(
+                    (run_config.get("runtime") or {}).get(
+                        "m8_safety_audit_required", False
+                    )
+                )
+                else None
+            ),
+            "visibility_audit": (
+                str(Path(output).with_name("visibility_audit.v1.jsonl"))
+                if output
+                and bool(
+                    (run_config.get("runtime") or {}).get(
+                        "m8_safety_audit_required", False
+                    )
+                )
+                else None
+            ),
+            "lidar_world_audit": (
+                str(Path(output).with_name("lidar_world_audit.v1.jsonl"))
+                if output
+                and bool(
+                    (run_config.get("runtime") or {}).get(
+                        "m8_safety_audit_required", False
+                    )
+                )
+                else None
+            ),
+            "m8_safety_audit_summary": (
+                str(Path(output).with_name("scene_safety_audit_summary.v1.json"))
+                if output
+                and bool(
+                    (run_config.get("runtime") or {}).get(
+                        "m8_safety_audit_required", False
+                    )
+                )
                 else None
             ),
         },
@@ -276,6 +413,7 @@ def write_basic_agent_plan(
     control_timeout_sec: float = 0.5,
     acceptance_evidence: bool = False,
     opendrive_path: str | None = None,
+    expected_opendrive_sha256: str | None = None,
     timeout_sec: float = 60.0,
     runtime_route_distance_m: float | None = None,
     physics_smoke: bool = False,
@@ -300,6 +438,7 @@ def write_basic_agent_plan(
         control_timeout_sec=control_timeout_sec,
         acceptance_evidence=acceptance_evidence,
         opendrive_path=opendrive_path,
+        expected_opendrive_sha256=expected_opendrive_sha256,
         timeout_sec=timeout_sec,
         runtime_route_distance_m=runtime_route_distance_m,
         physics_smoke=physics_smoke,
@@ -401,7 +540,11 @@ def _run_basic_agent_loop(
     client = None
     world = None
     ego_vehicle = None
+    collision_tracker = None
     collision_sensor = None
+    lane_invasion_tracker = None
+    lane_invasion_sensor = None
+    world_map = None
     physical_frame_probe = None
     ego_driver = None
     traffic_manager = None
@@ -417,11 +560,29 @@ def _run_basic_agent_loop(
     actor_initial_poses: dict[str, dict[str, Any]] = {}
     frame_trace: list[dict[str, Any]] = []
     multimodal_trace: list[dict[str, Any]] = []
+    m8_runtime_trace: list[dict[str, Any]] = []
+    m8_audit_streams: dict[str, list[dict[str, Any]]] = {}
+    collision_audit_rows: list[dict[str, Any]] = []
+    reported_rows: list[dict[str, Any]] = []
+    collision_unmatched_event_count = 0
+    collision_payload_unmatched_event_count = 0
+    lane_invasion_unmatched_event_count = 0
+    m8_collision_unmatched_event_count = 0
+    m8_lane_unmatched_event_count = 0
     cleanup_audit: list[dict[str, Any]] = []
     result: dict[str, Any] | None = None
     termination_reason = "max_ticks"
     acceptance_evidence = False
     multimodal_sensor_required = False
+    static_obstacle_actors: dict[str, Any] = {}
+    actor_temporal_lifecycle_evidence: dict[str, dict[str, Any]] = {}
+    static_obstacle_temporal_lifecycle_evidence: dict[str, dict[str, Any]] = {}
+    static_obstacle_runtime_evidence: dict[str, Any] = {
+        "schema_version": "static_obstacle_runtime_evidence.v1",
+        "status": "not_configured",
+        "records": [],
+        "issues": [],
+    }
     actor_runtime_binding_evidence: dict[str, Any] = {
         "schema_version": "actor_runtime_binding_evidence.v1",
         "status": "not_configured",
@@ -434,6 +595,9 @@ def _run_basic_agent_loop(
         "records": [],
         "issues": [],
     }
+    m8_safety_audit_required = False
+    physical_collision_required = False
+    opendrive_contract_summary: dict[str, Any] | None = None
 
     try:
         connection = plan.get("connection") or {}
@@ -446,6 +610,26 @@ def _run_basic_agent_loop(
                 (plan.get("actor_control") or {}).get("behavior_plugin")
             )
         acceptance_evidence = bool(runtime_options.get("acceptance_evidence", False))
+        m8_safety_audit_required = bool(
+            runtime_options.get("m8_safety_audit_required", False)
+        )
+        physical_collision_required = acceptance_evidence or m8_safety_audit_required
+        dynamic_actor_lifecycle = runtime_options.get("dynamic_actor_lifecycle")
+        if dynamic_actor_lifecycle not in {None, "source_annotation_window"}:
+            raise RuntimeError(
+                "unsupported dynamic actor lifecycle: "
+                f"{dynamic_actor_lifecycle!r}"
+            )
+        static_obstacle_lifecycle = runtime_options.get("static_obstacle_lifecycle")
+        if static_obstacle_lifecycle not in {None, "source_annotation_window"}:
+            raise RuntimeError(
+                "unsupported static obstacle lifecycle: "
+                f"{static_obstacle_lifecycle!r}"
+            )
+        if m8_safety_audit_required and dynamic_actor_lifecycle != "source_annotation_window":
+            raise RuntimeError("M8 requires dynamic_actor_lifecycle=source_annotation_window")
+        if m8_safety_audit_required and static_obstacle_lifecycle != "source_annotation_window":
+            raise RuntimeError("M8 requires static_obstacle_lifecycle=source_annotation_window")
         multimodal_sensor_required = bool(
             runtime_options.get("multimodal_sensor_required", False)
         )
@@ -479,6 +663,65 @@ def _run_basic_agent_loop(
             xodr = xodr_path.read_text(encoding="utf-8")
             if not xodr.strip():
                 raise RuntimeError(f"OpenDRIVE file is empty: {xodr_path}")
+            expected_opendrive_sha256 = world_config.get(
+                "expected_opendrive_sha256"
+            )
+            loaded_opendrive_sha256 = hashlib.sha256(
+                xodr.encode("utf-8")
+            ).hexdigest()
+            if expected_opendrive_sha256 is not None:
+                if (
+                    not isinstance(expected_opendrive_sha256, str)
+                    or len(expected_opendrive_sha256) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in expected_opendrive_sha256
+                    )
+                ):
+                    raise RuntimeError(
+                        "expected_opendrive_sha256 must be a lowercase sha256"
+                    )
+                if loaded_opendrive_sha256 != expected_opendrive_sha256:
+                    raise RuntimeError(
+                        "OpenDRIVE SHA-256 mismatch before CARLA world generation: "
+                        f"expected={expected_opendrive_sha256} "
+                        f"actual={loaded_opendrive_sha256}"
+                    )
+            world_config["loaded_opendrive_sha256"] = loaded_opendrive_sha256
+            if world_config.get("require_topology_map"):
+                scenario_ir_value = world_config.get("scenario_ir_path")
+                scenario_ir_candidate = (
+                    Path(str(scenario_ir_value)).expanduser().resolve()
+                    if scenario_ir_value
+                    else xodr_path.with_name("scene_ir.json")
+                )
+                scenario_ir_for_contract = (
+                    scenario_ir_candidate
+                    if scenario_ir_candidate.is_file()
+                    else None
+                )
+                try:
+                    opendrive_contract_summary = validate_topology_artifact(
+                        xodr_path,
+                        expected_sha256=expected_opendrive_sha256,
+                        expected_ego_corridor_count=0,
+                        require_map_topology=True,
+                        require_junction_topology=True,
+                        require_route_chain=True,
+                        require_route_map_integration=True,
+                        require_route_source_audit=True,
+                        scenario_ir_path=scenario_ir_for_contract,
+                        require_ego_route_coverage=(
+                            scenario_ir_for_contract is not None
+                        ),
+                        require_boundary_audit=True,
+                        require_connector_evidence=True,
+                    )
+                except (OpenDriveContractError, OSError, ValueError) as exc:
+                    raise RuntimeError(
+                        "OpenDRIVE topology preflight failed; refusing to load a "
+                        f"corridor-only or structurally invalid map: {exc}"
+                    ) from exc
             generation_parameters_type = getattr(
                 carla_module, "OpendriveGenerationParameters", None
             )
@@ -499,7 +742,7 @@ def _run_basic_agent_loop(
             raise RuntimeError("CARLA client does not expose load_world or get_world")
 
         if hasattr(world, "get_map"):
-            world.get_map()
+            world_map = world.get_map()
 
         runtime_route_distance_m = world_config.get("runtime_route_distance_m")
         if runtime_route_distance_m is not None:
@@ -543,12 +786,80 @@ def _run_basic_agent_loop(
             world,
             ego_vehicle,
         )
-        _spawn_interactive_actor_vehicles(
+        lane_invasion_tracker, lane_invasion_sensor = _spawn_lane_invasion_tracker(
             carla_module,
             world,
-            plan.get("actors") or [],
-            actor_vehicles,
+            ego_vehicle,
         )
+        if dynamic_actor_lifecycle == "source_annotation_window":
+            actor_temporal_lifecycle_evidence = _initialize_actor_temporal_lifecycle(
+                plan.get("actors") or []
+            )
+            _advance_actor_temporal_lifecycle(
+                carla_module,
+                world,
+                plan.get("actors") or [],
+                actor_vehicles,
+                actor_temporal_lifecycle_evidence,
+                scenario_time_sec=0.0,
+            )
+            lifecycle_issues = _actor_temporal_lifecycle_issues(
+                actor_temporal_lifecycle_evidence
+            )
+            if lifecycle_issues:
+                raise RuntimeError(
+                    "dynamic actor lifecycle initialization failed: "
+                    + ", ".join(lifecycle_issues)
+                )
+        else:
+            _spawn_interactive_actor_vehicles(
+                carla_module,
+                world,
+                plan.get("actors") or [],
+                actor_vehicles,
+            )
+        if static_obstacle_lifecycle == "source_annotation_window":
+            static_obstacle_temporal_lifecycle_evidence = (
+                _initialize_static_obstacle_temporal_lifecycle(
+                    plan.get("static_obstacles") or []
+                )
+            )
+            _advance_static_obstacle_temporal_lifecycle(
+                carla_module,
+                world,
+                plan.get("static_obstacles") or [],
+                static_obstacle_actors,
+                static_obstacle_temporal_lifecycle_evidence,
+                scenario_time_sec=0.0,
+            )
+            lifecycle_issues = _static_obstacle_temporal_lifecycle_issues(
+                static_obstacle_temporal_lifecycle_evidence
+            )
+            if lifecycle_issues:
+                raise RuntimeError(
+                    "static obstacle lifecycle initialization failed: "
+                    + ", ".join(lifecycle_issues)
+                )
+        else:
+            _spawn_static_obstacles(
+                carla_module,
+                world,
+                plan.get("static_obstacles") or [],
+                static_obstacle_actors,
+            )
+        static_obstacle_runtime_evidence = _static_obstacle_runtime_evidence(
+            plan,
+            static_obstacle_actors,
+            temporal_lifecycle=static_obstacle_temporal_lifecycle_evidence,
+        )
+        if (
+            bool(runtime_options.get("m6_static_obstacle_required", False))
+            and static_obstacle_runtime_evidence["status"] != "passed"
+        ):
+            raise RuntimeError(
+                "M6 static obstacle runtime binding failed: "
+                + ", ".join(static_obstacle_runtime_evidence["issues"])
+            )
         actor_initial_poses = {
             actor_id: (
                 _vehicle_pose(vehicle)
@@ -618,13 +929,60 @@ def _run_basic_agent_loop(
             if hasattr(ego_driver, "done") and ego_driver.done():
                 termination_reason = "route_complete"
                 break
+            run_time_sec = (tick_index + 1) * dt_sec
+            if dynamic_actor_lifecycle == "source_annotation_window":
+                lifecycle_events = _advance_actor_temporal_lifecycle(
+                    carla_module,
+                    world,
+                    plan.get("actors") or [],
+                    actor_vehicles,
+                    actor_temporal_lifecycle_evidence,
+                    scenario_time_sec=run_time_sec,
+                )
+                for actor_id in lifecycle_events["spawned_actor_ids"]:
+                    actor = next(
+                        (
+                            item
+                            for item in plan.get("actors") or []
+                            if str(item.get("actor_id", "actor")) == actor_id
+                        ),
+                        None,
+                    )
+                    entity = actor_vehicles.get(actor_id)
+                    if actor is None or entity is None:
+                        raise RuntimeError(
+                            f"lifecycle reported an unavailable spawned actor: {actor_id}"
+                        )
+                    actor_initial_poses.setdefault(actor_id, _vehicle_pose(entity))
+                lifecycle_issues = _actor_temporal_lifecycle_issues(
+                    actor_temporal_lifecycle_evidence
+                )
+                if lifecycle_issues:
+                    raise RuntimeError(
+                        "dynamic actor lifecycle failed: " + ", ".join(lifecycle_issues)
+                    )
+            if static_obstacle_lifecycle == "source_annotation_window":
+                _advance_static_obstacle_temporal_lifecycle(
+                    carla_module,
+                    world,
+                    plan.get("static_obstacles") or [],
+                    static_obstacle_actors,
+                    static_obstacle_temporal_lifecycle_evidence,
+                    scenario_time_sec=run_time_sec,
+                )
+                lifecycle_issues = _static_obstacle_temporal_lifecycle_issues(
+                    static_obstacle_temporal_lifecycle_evidence
+                )
+                if lifecycle_issues:
+                    raise RuntimeError(
+                        "static obstacle lifecycle failed: " + ", ".join(lifecycle_issues)
+                    )
             control = ego_driver.run_step()
             ego_vehicle.apply_control(control)
             tick_frame = None
             if hasattr(world, "tick"):
                 tick_frame = world.tick()
             snapshot_frame = None
-            run_time_sec = (tick_index + 1) * dt_sec
             simulation_time_sec = run_time_sec
             snapshot_delta_sec = dt_sec
             if hasattr(world, "get_snapshot"):
@@ -683,8 +1041,23 @@ def _run_basic_agent_loop(
                     life_time=max(0.1, dt_sec * 3.0),
                 )
             ticks_completed += 1
-            ego_pose = _vehicle_pose(ego_vehicle)
+            ego_transform, ego_pose = _vehicle_transform_and_pose(ego_vehicle)
             ego_speed_mps = _vehicle_speed_mps(ego_vehicle)
+            ego_lane_truth = _sample_lane_truth(
+                carla_module,
+                world_map,
+                ego_vehicle,
+            )
+            collision_tick = (
+                collision_tracker.consume_tick(world_frame)
+                if collision_tracker is not None
+                else None
+            )
+            lane_invasion_tick = (
+                lane_invasion_tracker.consume_tick(world_frame)
+                if lane_invasion_tracker is not None
+                else None
+            )
             if plan.get("despawn_actors_on_reference_exhausted"):
                 actor_despawn_evidence.update(
                     _despawn_reference_exhausted_actors(
@@ -724,6 +1097,16 @@ def _run_basic_agent_loop(
                 transform, pose = _vehicle_transform_and_pose(vehicle)
                 speed = _vehicle_speed_mps(vehicle)
                 actor = actor_by_id.get(actor_id, {})
+                physical_box_state = (
+                    _m8_actor_state(
+                        actor_id,
+                        vehicle,
+                        transform=transform,
+                        origin=pose,
+                    )
+                    if physical_collision_required
+                    else None
+                )
                 render_pose = None
                 render_pose_reference = None
                 if isinstance(actor.get("binding"), dict):
@@ -791,6 +1174,22 @@ def _run_basic_agent_loop(
                         actor.get("_runtime_spawn_evidence") or {}
                     ),
                     "extent_m": _actor_extent(vehicle),
+                    "physical_box_pose": (
+                        dict(physical_box_state["pose"])
+                        if physical_box_state is not None
+                        else None
+                    ),
+                    "physical_box_extent_m": (
+                        dict(physical_box_state["extent_m"])
+                        if physical_box_state is not None
+                        and isinstance(physical_box_state.get("extent_m"), Mapping)
+                        else None
+                    ),
+                    "lane_truth": _sample_lane_truth(
+                        carla_module,
+                        world_map,
+                        vehicle,
+                    ),
                 }
                 initial = actor_initial_poses[actor_id]
                 displacement = math.hypot(
@@ -802,7 +1201,34 @@ def _run_basic_agent_loop(
                         "displacement_m": displacement,
                         "speed_mps": speed,
                     }
+            static_object_states = (
+                _static_object_states(static_obstacle_actors)
+                if physical_collision_required
+                else []
+            )
+            physical_ego_state = (
+                _m8_actor_state(
+                    "ego",
+                    ego_vehicle,
+                    transform=ego_transform,
+                    origin=ego_pose,
+                )
+                if physical_collision_required
+                else None
+            )
+            physical_object_states = [
+                {
+                    "object_id": actor_id,
+                    "carla_runtime_actor_id": state.get("carla_runtime_actor_id"),
+                    "pose": state.get("physical_box_pose"),
+                    "extent_m": state.get("physical_box_extent_m"),
+                }
+                for actor_id, state in actor_states.items()
+                if state.get("physical_box_pose") is not None
+            ]
+            physical_object_states.extend(static_object_states)
             multimodal_summary = None
+            multimodal_evidence_for_tick: dict[str, Any] | None = None
             if sensor_frame_handler is not None:
                 vertical_alignment_issues = _actor_vertical_alignment_issues(
                     actor_states,
@@ -845,6 +1271,7 @@ def _run_basic_agent_loop(
                 evidence = sensor_frame_handler(sensor_context)
                 _validate_sensor_frame_evidence(evidence, world_frame)
                 evidence = dict(evidence)
+                multimodal_evidence_for_tick = dict(evidence)
                 if hasattr(ego_driver, "receive_multimodal_evidence"):
                     ego_driver.receive_multimodal_evidence(
                         evidence,
@@ -889,6 +1316,39 @@ def _run_basic_agent_loop(
                 if hasattr(ego_driver, "route_progress")
                 else _route_progress_from_pose(route, ego_pose)
             )
+            m8_runtime_row = None
+            if m8_safety_audit_required:
+                lane_events = _lane_event_payloads(
+                    lane_invasion_tracker.events_for_frame(world_frame)
+                    if lane_invasion_tracker is not None
+                    else [],
+                )
+                lane_state = _m8_lane_state(
+                    ego_lane_truth,
+                    measured_route_progress,
+                    lane_events,
+                    sensor_available=lane_invasion_sensor is not None,
+                )
+                m8_objects = []
+                m8_objects.extend(physical_object_states)
+                m8_runtime_row = {
+                    "schema_version": "m8_runtime_carla_truth.v1",
+                    "frame_id": world_frame,
+                    "simulation_time_sec": simulation_time_sec,
+                    "ego_state": physical_ego_state,
+                    "object_states": m8_objects,
+                    "collision_events": [],
+                    "collision_detected": (
+                        bool(collision_tick) if collision_tracker is not None else None
+                    ),
+                    "collision_sensor_available": collision_sensor is not None,
+                    "lane_state": lane_state,
+                    "sensor_evidence": multimodal_evidence_for_tick,
+                    "static_obstacle_lifecycle": _static_obstacle_temporal_lifecycle_snapshot(
+                        static_obstacle_temporal_lifecycle_evidence
+                    ),
+                }
+                m8_runtime_trace.append(m8_runtime_row)
             collector.add_tick(
                 t_sec=(tick_index + 1) * dt_sec,
                 ego_pose=ego_pose,
@@ -896,7 +1356,7 @@ def _run_basic_agent_loop(
                 ego_control=_control_dict(control),
                 actor_distances_m=actor_distances_m,
                 ttc=min_ttc,
-                collision=collision_tracker.consume_tick() if collision_tracker is not None else None,
+                collision=collision_tick,
                 route_progress=measured_route_progress,
                 hard_brake=bool(acceleration_mps2 is not None and acceleration_mps2 <= -3.0),
                 longitudinal_acceleration_mps2=acceleration_mps2,
@@ -913,7 +1373,19 @@ def _run_basic_agent_loop(
                     "ego_pose": ego_pose,
                     "ego_speed_mps": ego_speed_mps,
                     "ego_control": _control_dict(control),
+                    "collision": collision_tick,
+                    "ego_lane_truth": ego_lane_truth,
+                    "lane_invasion": lane_invasion_tick,
                     "actor_states": actor_states,
+                    "static_object_states": static_object_states,
+                    "ego_state": physical_ego_state,
+                    "object_states": physical_object_states,
+                    "collision_events": [],
+                    "collision_detected": (
+                        bool(collision_tick) if collision_tracker is not None else None
+                    ),
+                    "collision_sensor_available": collision_sensor is not None,
+                    "m8_runtime": m8_runtime_row,
                     "multimodal_sensor": multimodal_summary,
                     "native_lidar_capture": native_lidar_capture,
                 }
@@ -923,6 +1395,56 @@ def _run_basic_agent_loop(
                 previous_acceleration_mps2 = acceleration_mps2
 
         rows = collector.to_report_rows()
+        _attach_tick_truth(rows, frame_trace)
+        if collision_tracker is not None:
+            collision_tracker.consume_pending()
+        if lane_invasion_tracker is not None:
+            lane_invasion_tracker.consume_pending()
+        collision_unmatched_event_count = _attach_tracker_events(
+            rows,
+            frame_trace,
+            collision_tracker,
+            "collision",
+        )
+        collision_payload_unmatched_event_count = _attach_collision_event_payloads(
+            rows,
+            frame_trace,
+            collision_tracker,
+            actor_vehicles,
+            static_obstacle_actors,
+        )
+        lane_invasion_unmatched_event_count = _attach_tracker_events(
+            rows,
+            frame_trace,
+            lane_invasion_tracker,
+            "lane_invasion",
+        )
+        m8_collision_unmatched_event_count = _attach_m8_tracker_events(
+            frame_trace,
+            m8_runtime_trace,
+            collision_tracker,
+            actor_vehicles,
+            static_obstacle_actors,
+            field="collision_events",
+        )
+        m8_lane_unmatched_event_count = _attach_m8_tracker_events(
+            frame_trace,
+            m8_runtime_trace,
+            lane_invasion_tracker,
+            actor_vehicles,
+            field="lane_invasion_events",
+        )
+        if m8_safety_audit_required:
+            m8_audit_streams = _audit_runtime_m8_trace(
+                plan,
+                m8_runtime_trace,
+                sensor_frame_handler=sensor_frame_handler,
+            )
+            collision_audit_rows = list(m8_audit_streams.get("collision") or [])
+        elif acceptance_evidence:
+            collision_audit_rows = _audit_collision_trace(plan, frame_trace)
+        _attach_collision_audit_rows(frame_trace, collision_audit_rows)
+        reported_rows = rows
         route_progress = (
             float(ego_driver.route_progress())
             if hasattr(ego_driver, "route_progress")
@@ -933,12 +1455,47 @@ def _run_basic_agent_loop(
                 raise RuntimeError("acceptance evidence requires synchronous CARLA stepping")
             if collision_sensor is None:
                 raise RuntimeError("acceptance evidence requires a real collision sensor")
+            if lane_invasion_sensor is None:
+                raise RuntimeError(
+                    "acceptance evidence requires a real lane-invasion sensor"
+                )
             if not frame_trace or not all(
                 isinstance(row.get("world_tick_frame"), int)
                 or isinstance(row.get("snapshot_frame"), int)
                 for row in frame_trace
             ):
                 raise RuntimeError("acceptance evidence requires CARLA frame identities")
+            if not collision_audit_rows:
+                raise RuntimeError(
+                    "acceptance evidence requires per-tick physical collision audit"
+                )
+            failed_collision_audits = [
+                row
+                for row in collision_audit_rows
+                if row.get("status") != "passed"
+            ]
+            if failed_collision_audits:
+                issues = sorted(
+                    {
+                        str(issue)
+                        for row in failed_collision_audits
+                        for issue in row.get("issues") or []
+                    }
+                )
+                raise RuntimeError(
+                    "acceptance evidence physical collision audit failed: "
+                    + ", ".join(issues or ["unknown_failure"])
+                )
+            incomplete_lane_truth = [
+                index
+                for index, row in enumerate(frame_trace)
+                if not _lane_truth_is_complete(row.get("ego_lane_truth"))
+            ]
+            if incomplete_lane_truth:
+                raise RuntimeError(
+                    "acceptance evidence requires complete ego lane truth on every tick: "
+                    + ", ".join(str(index) for index in incomplete_lane_truth[:5])
+                )
             if route_progress < 0.95:
                 raise RuntimeError(
                     f"route_incomplete: progress={route_progress:.6f}, "
@@ -949,7 +1506,10 @@ def _run_basic_agent_loop(
                     "runtime topology route did not terminate with route_complete: "
                     + termination_reason
                 )
-            if sum(1 for row in rows if row.get("collision") is True) != 0:
+            if (
+                collision_tracker is not None
+                and collision_tracker.event_count > 0
+            ) or sum(1 for row in rows if row.get("collision") is True) != 0:
                 raise RuntimeError("acceptance evidence requires a collision-free run")
             expected_interactive = {
                 str(actor.get("actor_id", "actor"))
@@ -971,6 +1531,7 @@ def _run_basic_agent_loop(
             plan,
             actor_execution_evidence,
             actor_control_mode_evidence,
+            temporal_lifecycle=actor_temporal_lifecycle_evidence,
         )
         if actor_control_mode_evidence["status"] == "failed":
             raise RuntimeError(
@@ -1001,25 +1562,74 @@ def _run_basic_agent_loop(
             if actor_id in interactive_actor_ids
         }
         status = "interactive_closed_loop" if physical_actor_evidence else "ego_closed_loop"
+        m8_audit_summary = _m8_audit_summary(m8_audit_streams)
+        m8_failure_reason = None
+        if m8_safety_audit_required and m8_audit_summary["status"] != "passed":
+            status = "failed"
+            m8_failure_reason = "m8_four_stream_audit_failed"
         report = build_closed_loop_report(runtime_config, tick_metrics=rows, status=status)
+        _add_lane_invasion_summary(report, rows)
         report["summary"]["control_timeout_count"] = int(
             driver_diagnostics.get("fallback_count", 0)
         )
         report["runtime"] = {
             "ego_driver": str(ego_config.get("driver", "basic_agent")),
             "route_binding": dict(ego_config.get("route_binding") or {}),
+            "opendrive_contract": opendrive_contract_summary,
             "collision_sensor_available": collision_sensor is not None,
+            "collision_event_count": (
+                collision_tracker.event_count if collision_tracker is not None else None
+            ),
+            "collision_event_frames": (
+                collision_tracker.event_frames if collision_tracker is not None else []
+            ),
+            "collision_event_unmatched_count": collision_unmatched_event_count,
+            "collision_event_payload_unmatched_count": collision_payload_unmatched_event_count,
+            "m8_collision_event_unmatched_count": m8_collision_unmatched_event_count,
+            "lane_invasion_sensor_available": lane_invasion_sensor is not None,
+            "lane_invasion_event_count": (
+                lane_invasion_tracker.event_count
+                if lane_invasion_tracker is not None
+                else None
+            ),
+            "lane_invasion_event_frames": (
+                lane_invasion_tracker.event_frames
+                if lane_invasion_tracker is not None
+                else []
+            ),
+            "lane_invasion_event_unmatched_count": lane_invasion_unmatched_event_count,
+            "m8_lane_event_unmatched_count": m8_lane_unmatched_event_count,
+            "lane_truth_sample_count": sum(
+                _lane_truth_is_complete(row.get("ego_lane_truth"))
+                for row in frame_trace
+            ),
+            "lane_truth_tick_count": len(frame_trace),
             "actor_control_evidence": dict(actor_execution_evidence),
             "actor_control_mode_evidence": actor_control_mode_evidence,
             "actor_despawn_evidence": dict(actor_despawn_evidence),
+            "actor_temporal_lifecycle": _actor_temporal_lifecycle_snapshot(
+                actor_temporal_lifecycle_evidence
+            ),
             "actor_physical_response": dict(actor_physical_response),
             "actor_runtime_binding": actor_runtime_binding_evidence,
+            "static_obstacle_temporal_lifecycle": _static_obstacle_temporal_lifecycle_snapshot(
+                static_obstacle_temporal_lifecycle_evidence
+            ),
+            "static_obstacle_runtime": static_obstacle_runtime_evidence,
             "multimodal_sensor": _multimodal_runtime_summary(
                 multimodal_trace,
                 required=multimodal_sensor_required,
                 handler_present=sensor_frame_handler is not None,
             ),
             "frame_trace_count": len(frame_trace),
+            "m8_safety_audit_required": m8_safety_audit_required,
+            "collision_physical_audit": _collision_audit_summary(
+                collision_audit_rows,
+                required=physical_collision_required,
+            ),
+            "m8_runtime_trace_count": len(m8_runtime_trace),
+            "m8_audit_summary": m8_audit_summary,
+            "m8_failure_reason": m8_failure_reason,
             "termination_reason": termination_reason,
             "ego_driver_diagnostics": driver_diagnostics,
             "actor_behavior_plugin": (
@@ -1030,6 +1640,7 @@ def _run_basic_agent_loop(
         _write_report_if_requested(plan, report)
         result = {
             "status": status,
+            "reason": m8_failure_reason,
             "scenario_id": plan.get("scenario_id"),
             "summary": {
                 "ticks": ticks_completed,
@@ -1040,11 +1651,63 @@ def _run_basic_agent_loop(
         }
         return result
     except Exception as exc:
+        rows = collector.to_report_rows()
+        _attach_tick_truth(rows, frame_trace)
+        if collision_tracker is not None:
+            collision_tracker.consume_pending()
+        if lane_invasion_tracker is not None:
+            lane_invasion_tracker.consume_pending()
+        collision_unmatched_event_count = _attach_tracker_events(
+            rows,
+            frame_trace,
+            collision_tracker,
+            "collision",
+        )
+        collision_payload_unmatched_event_count = _attach_collision_event_payloads(
+            rows,
+            frame_trace,
+            collision_tracker,
+            actor_vehicles,
+            static_obstacle_actors,
+        )
+        lane_invasion_unmatched_event_count = _attach_tracker_events(
+            rows,
+            frame_trace,
+            lane_invasion_tracker,
+            "lane_invasion",
+        )
+        m8_collision_unmatched_event_count = _attach_m8_tracker_events(
+            frame_trace,
+            m8_runtime_trace,
+            collision_tracker,
+            actor_vehicles,
+            static_obstacle_actors,
+            field="collision_events",
+        )
+        m8_lane_unmatched_event_count = _attach_m8_tracker_events(
+            frame_trace,
+            m8_runtime_trace,
+            lane_invasion_tracker,
+            actor_vehicles,
+            field="lane_invasion_events",
+        )
+        if m8_safety_audit_required:
+            m8_audit_streams = _audit_runtime_m8_trace(
+                plan,
+                m8_runtime_trace,
+                sensor_frame_handler=sensor_frame_handler,
+            )
+            collision_audit_rows = list(m8_audit_streams.get("collision") or [])
+        elif acceptance_evidence:
+            collision_audit_rows = _audit_collision_trace(plan, frame_trace)
+        _attach_collision_audit_rows(frame_trace, collision_audit_rows)
+        reported_rows = rows
         report = build_closed_loop_report(
             runtime_config,
-            tick_metrics=collector.to_report_rows(),
+            tick_metrics=rows,
             status="failed",
         )
+        _add_lane_invasion_summary(report, rows)
         failure_diagnostics = (
             ego_driver.diagnostics()
             if ego_driver is not None and hasattr(ego_driver, "diagnostics")
@@ -1057,15 +1720,56 @@ def _run_basic_agent_loop(
             "ego_driver": str((plan.get("ego") or {}).get("driver", "basic_agent")),
             "route_binding": dict((plan.get("ego") or {}).get("route_binding") or {}),
             "collision_sensor_available": collision_sensor is not None,
+            "collision_event_count": (
+                collision_tracker.event_count if collision_tracker is not None else None
+            ),
+            "collision_event_frames": (
+                collision_tracker.event_frames if collision_tracker is not None else []
+            ),
+            "collision_event_unmatched_count": collision_unmatched_event_count,
+            "collision_event_payload_unmatched_count": collision_payload_unmatched_event_count,
+            "m8_collision_event_unmatched_count": m8_collision_unmatched_event_count,
+            "lane_invasion_sensor_available": lane_invasion_sensor is not None,
+            "lane_invasion_event_count": (
+                lane_invasion_tracker.event_count
+                if lane_invasion_tracker is not None
+                else None
+            ),
+            "lane_invasion_event_frames": (
+                lane_invasion_tracker.event_frames
+                if lane_invasion_tracker is not None
+                else []
+            ),
+            "lane_invasion_event_unmatched_count": lane_invasion_unmatched_event_count,
+            "m8_lane_event_unmatched_count": m8_lane_unmatched_event_count,
+            "lane_truth_sample_count": sum(
+                _lane_truth_is_complete(row.get("ego_lane_truth"))
+                for row in frame_trace
+            ),
+            "lane_truth_tick_count": len(frame_trace),
             "actor_control_evidence": dict(actor_execution_evidence),
             "actor_control_mode_evidence": actor_control_mode_evidence,
+            "actor_temporal_lifecycle": _actor_temporal_lifecycle_snapshot(
+                actor_temporal_lifecycle_evidence
+            ),
             "actor_runtime_binding": actor_runtime_binding_evidence,
+            "static_obstacle_temporal_lifecycle": _static_obstacle_temporal_lifecycle_snapshot(
+                static_obstacle_temporal_lifecycle_evidence
+            ),
+            "static_obstacle_runtime": static_obstacle_runtime_evidence,
             "multimodal_sensor": _multimodal_runtime_summary(
                 multimodal_trace,
                 required=multimodal_sensor_required,
                 handler_present=sensor_frame_handler is not None,
             ),
             "frame_trace_count": len(frame_trace),
+            "m8_safety_audit_required": m8_safety_audit_required,
+            "collision_physical_audit": _collision_audit_summary(
+                collision_audit_rows,
+                required=physical_collision_required,
+            ),
+            "m8_runtime_trace_count": len(m8_runtime_trace),
+            "m8_audit_summary": _m8_audit_summary(m8_audit_streams),
             "termination_reason": termination_reason,
             "ego_driver_diagnostics": failure_diagnostics,
         }
@@ -1111,6 +1815,21 @@ def _run_basic_agent_loop(
                 cleanup_audit.append({"action": "collision_sensor.destroy", "status": "succeeded"})
             except Exception:
                 cleanup_audit.append({"action": "collision_sensor.destroy", "status": "failed"})
+        if lane_invasion_sensor is not None:
+            try:
+                if hasattr(lane_invasion_sensor, "stop"):
+                    lane_invasion_sensor.stop()
+                if hasattr(lane_invasion_sensor, "destroy"):
+                    lane_invasion_sensor.destroy()
+                if acceptance_evidence and getattr(lane_invasion_sensor, "is_alive", False):
+                    raise RuntimeError("lane-invasion sensor remains alive after destroy")
+                cleanup_audit.append(
+                    {"action": "lane_invasion_sensor.destroy", "status": "succeeded"}
+                )
+            except Exception:
+                cleanup_audit.append(
+                    {"action": "lane_invasion_sensor.destroy", "status": "failed"}
+                )
         if traffic_manager is not None and hasattr(traffic_manager, "set_synchronous_mode"):
             try:
                 traffic_manager.set_synchronous_mode(False)
@@ -1166,6 +1885,29 @@ def _run_basic_agent_loop(
                 cleanup_audit.append({"action": "actor.destroy", "status": "succeeded"})
             except Exception:
                 cleanup_audit.append({"action": "actor.destroy", "status": "failed"})
+        for object_id, static_actor in static_obstacle_actors.items():
+            try:
+                if hasattr(static_actor, "destroy"):
+                    static_actor.destroy()
+                if acceptance_evidence and getattr(static_actor, "is_alive", False):
+                    raise RuntimeError(
+                        f"static obstacle {object_id} remains alive after destroy"
+                    )
+                cleanup_audit.append(
+                    {
+                        "action": "static_obstacle.destroy",
+                        "object_id": object_id,
+                        "status": "succeeded",
+                    }
+                )
+            except Exception:
+                cleanup_audit.append(
+                    {
+                        "action": "static_obstacle.destroy",
+                        "object_id": object_id,
+                        "status": "failed",
+                    }
+                )
         if ego_vehicle is not None and hasattr(ego_vehicle, "destroy"):
             try:
                 ego_vehicle.destroy()
@@ -1193,9 +1935,12 @@ def _run_basic_agent_loop(
         _write_runtime_evidence(
             plan,
             frame_trace,
-            collector.to_report_rows(),
+            reported_rows or collector.to_report_rows(),
             cleanup_audit,
             multimodal_trace,
+            m8_runtime_trace,
+            m8_audit_streams,
+            collision_audit_rows,
         )
 
 
@@ -1446,37 +2191,1104 @@ def _build_ego_driver(
     raise ValueError(f"unsupported ego driver: {driver_kind}")
 
 
-class _CollisionTracker:
+class _SensorEventTracker:
+    """Collect sensor callbacks without losing their CARLA frame identity."""
+
     def __init__(self) -> None:
-        self._pending = 0
+        self._lock = Lock()
+        self._pending_indices: list[int] = []
+        self._events: list[dict[str, Any]] = []
 
-    def on_collision(self, _event: Any) -> None:
-        self._pending += 1
+    def _record_event(self, event: Any) -> None:
+        frame = _event_frame(event)
+        record = {
+            "frame": frame,
+            "effective_frame": frame,
+            "frame_source": "event" if frame is not None else None,
+            # Kept in-memory only.  The raw CARLA event is converted to a
+            # JSON-safe attribution record before it reaches persisted output.
+            "_event": event,
+        }
+        with self._lock:
+            self._events.append(record)
+            self._pending_indices.append(len(self._events) - 1)
 
-    def consume_tick(self) -> bool:
-        collided = self._pending > 0
-        self._pending = 0
-        return collided
+    def consume_tick(self, frame: int | None = None) -> bool:
+        """Consume callbacks seen before this loop iteration.
+
+        A callback without a frame is conservatively associated with the current
+        synchronous tick. Events with a native frame remain keyed by that frame
+        and are reconciled after the complete trace is available.
+        """
+
+        with self._lock:
+            pending = list(self._pending_indices)
+            self._pending_indices.clear()
+            if _valid_frame(frame):
+                for index in pending:
+                    record = self._events[index]
+                    if record.get("effective_frame") is None:
+                        record["effective_frame"] = frame
+                        record["frame_source"] = "consume_tick"
+        return bool(pending)
+
+    def consume_pending(self, frame: int | None = None) -> bool:
+        return self.consume_tick(frame)
+
+    @property
+    def event_count(self) -> int:
+        with self._lock:
+            return len(self._events)
+
+    @property
+    def event_frames(self) -> list[int]:
+        with self._lock:
+            return [
+                int(record["frame"])
+                for record in self._events
+                if _valid_frame(record.get("frame"))
+            ]
+
+    @property
+    def event_records(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [dict(record) for record in self._events]
+
+    def events_for_frame(self, frame: int | None) -> list[Any]:
+        if not _valid_frame(frame):
+            return []
+        with self._lock:
+            return [
+                record["_event"]
+                for record in self._events
+                if record.get("effective_frame") == frame and "_event" in record
+            ]
 
 
-def _spawn_collision_tracker(carla_module: Any, world: Any, ego_vehicle: Any) -> tuple[Any | None, Any | None]:
+class _CollisionTracker(_SensorEventTracker):
+    def on_collision(self, event: Any) -> None:
+        self._record_event(event)
+
+
+class _LaneInvasionTracker(_SensorEventTracker):
+    def on_lane_invasion(self, event: Any) -> None:
+        self._record_event(event)
+
+
+def _valid_frame(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _event_frame(event: Any) -> int | None:
+    try:
+        frame = getattr(event, "frame", None)
+    except Exception:
+        return None
+    return int(frame) if _valid_frame(frame) else None
+
+
+def _sensor_transform(carla_module: Any) -> Any:
+    transform_type = getattr(carla_module, "Transform", None)
+    if transform_type is None:
+        return SimpleNamespace()
+    try:
+        return transform_type()
+    except TypeError:
+        location_type = getattr(carla_module, "Location", None)
+        rotation_type = getattr(carla_module, "Rotation", None)
+        if location_type is not None and rotation_type is not None:
+            return transform_type(location_type(), rotation_type())
+        return SimpleNamespace()
+
+
+def _spawn_sensor_tracker(
+    carla_module: Any,
+    world: Any,
+    ego_vehicle: Any,
+    *,
+    blueprint_id: str,
+    tracker: _SensorEventTracker,
+    callback_name: str,
+) -> tuple[_SensorEventTracker | None, Any | None]:
     if not hasattr(world, "get_blueprint_library") or not hasattr(world, "spawn_actor"):
         return None, None
     library = world.get_blueprint_library()
     if not hasattr(library, "find"):
         return None, None
+    sensor = None
     try:
-        blueprint = library.find("sensor.other.collision")
-        sensor = world.spawn_actor(
-            blueprint,
-            carla_module.Transform(),
-            attach_to=ego_vehicle,
-        )
-        tracker = _CollisionTracker()
-        sensor.listen(tracker.on_collision)
+        blueprint = library.find(blueprint_id)
+        transform = _sensor_transform(carla_module)
+        try:
+            sensor = world.spawn_actor(
+                blueprint,
+                transform,
+                attach_to=ego_vehicle,
+            )
+        except TypeError:
+            sensor = world.spawn_actor(blueprint, transform, ego_vehicle)
+        callback = getattr(tracker, callback_name)
+        if sensor is None or not hasattr(sensor, "listen"):
+            raise RuntimeError(f"CARLA sensor {blueprint_id} does not expose listen()")
+        sensor.listen(callback)
         return tracker, sensor
     except Exception:
+        if sensor is not None:
+            try:
+                if hasattr(sensor, "stop"):
+                    sensor.stop()
+                if hasattr(sensor, "destroy"):
+                    sensor.destroy()
+            except Exception:
+                pass
         return None, None
+
+
+def _spawn_collision_tracker(
+    carla_module: Any,
+    world: Any,
+    ego_vehicle: Any,
+) -> tuple[_CollisionTracker | None, Any | None]:
+    tracker = _CollisionTracker()
+    result_tracker, sensor = _spawn_sensor_tracker(
+        carla_module,
+        world,
+        ego_vehicle,
+        blueprint_id="sensor.other.collision",
+        tracker=tracker,
+        callback_name="on_collision",
+    )
+    return result_tracker, sensor
+
+
+def _spawn_lane_invasion_tracker(
+    carla_module: Any,
+    world: Any,
+    ego_vehicle: Any,
+) -> tuple[_LaneInvasionTracker | None, Any | None]:
+    tracker = _LaneInvasionTracker()
+    result_tracker, sensor = _spawn_sensor_tracker(
+        carla_module,
+        world,
+        ego_vehicle,
+        blueprint_id="sensor.other.lane_invasion",
+        tracker=tracker,
+        callback_name="on_lane_invasion",
+    )
+    return result_tracker, sensor
+
+
+def _attach_tick_truth(
+    rows: list[dict[str, Any]],
+    frame_trace: list[dict[str, Any]],
+) -> None:
+    """Copy physical frame and lane truth into the persisted metric rows."""
+
+    for index, row in enumerate(rows):
+        if index >= len(frame_trace):
+            break
+        trace = frame_trace[index]
+        for key in (
+            "world_tick_frame",
+            "snapshot_frame",
+            "collision",
+            "collision_detected",
+            "collision_sensor_available",
+            "collision_events",
+            "collision_event_frame_unmatched_event_count",
+            "lane_invasion",
+            "ego_lane_truth",
+        ):
+            if key in trace:
+                row[key] = deepcopy(trace[key])
+
+
+def _attach_tracker_events(
+    rows: list[dict[str, Any]],
+    frame_trace: list[dict[str, Any]],
+    tracker: _SensorEventTracker | None,
+    field: str,
+) -> int:
+    """Reconcile asynchronous sensor events to exact physical tick rows."""
+
+    if tracker is None:
+        return 0
+    for row in rows:
+        if isinstance(row.get(field), bool):
+            row[field] = False
+    for trace in frame_trace:
+        if isinstance(trace.get(field), bool):
+            trace[field] = False
+    frame_to_indices: dict[int, set[int]] = {}
+    for index, trace in enumerate(frame_trace):
+        for key in ("world_tick_frame", "snapshot_frame"):
+            frame = trace.get(key)
+            if _valid_frame(frame):
+                frame_to_indices.setdefault(frame, set()).add(index)
+
+    unmatched = 0
+    for record in tracker.event_records:
+        frame = record.get("effective_frame")
+        indices = frame_to_indices.get(frame, set()) if _valid_frame(frame) else set()
+        if not indices:
+            unmatched += 1
+            continue
+        for index in indices:
+            if index < len(frame_trace):
+                frame_trace[index][field] = True
+            if index < len(rows):
+                rows[index][field] = True
+
+    if unmatched and rows:
+        # Preserve the event in the report while making the loss of exact frame
+        # matching visible to downstream acceptance tooling.
+        rows[-1][field] = True
+        rows[-1][f"{field}_frame_unmatched_event_count"] = unmatched
+        if frame_trace:
+            frame_trace[-1][field] = True
+            frame_trace[-1][f"{field}_frame_unmatched_event_count"] = unmatched
+    return unmatched
+
+
+def _attach_collision_event_payloads(
+    rows: list[dict[str, Any]],
+    frame_trace: list[dict[str, Any]],
+    tracker: _SensorEventTracker | None,
+    actor_vehicles: Mapping[str, Any],
+    static_obstacle_actors: Mapping[str, Any] | None = None,
+) -> int:
+    """Persist native-frame collision callbacks with object attribution."""
+
+    if tracker is None:
+        return 0
+    frame_to_indices: dict[int, set[int]] = {}
+    for index, trace in enumerate(frame_trace):
+        for key in ("world_tick_frame", "snapshot_frame"):
+            frame = trace.get(key)
+            if _valid_frame(frame):
+                frame_to_indices.setdefault(frame, set()).add(index)
+
+    unmatched = 0
+    for record in tracker.event_records:
+        event = record.get("_event")
+        payloads = _collision_event_payloads(
+            [event] if event is not None else [],
+            actor_vehicles,
+            static_obstacle_actors,
+        )
+        frame = record.get("effective_frame")
+        indices = frame_to_indices.get(frame, set()) if _valid_frame(frame) else set()
+        if not indices:
+            unmatched += 1
+            if frame_trace:
+                target = frame_trace[-1]
+                _append_collision_payload(target, payloads)
+                target["collision_event_frame_unmatched_event_count"] = (
+                    int(target.get("collision_event_frame_unmatched_event_count", 0))
+                    + 1
+                )
+            if rows:
+                target = rows[-1]
+                _append_collision_payload(target, payloads)
+                target["collision_event_frame_unmatched_event_count"] = (
+                    int(target.get("collision_event_frame_unmatched_event_count", 0))
+                    + 1
+                )
+            continue
+        for index in indices:
+            _append_collision_payload(frame_trace[index], payloads)
+            if index < len(rows):
+                _append_collision_payload(rows[index], payloads)
+    return unmatched
+
+
+def _append_collision_payload(
+    row: dict[str, Any], payloads: list[dict[str, Any]]
+) -> None:
+    existing = row.setdefault("collision_events", [])
+    if not isinstance(existing, list):
+        existing = []
+        row["collision_events"] = existing
+    for payload in payloads:
+        if payload not in existing:
+            existing.append(payload)
+    if existing:
+        row["collision_detected"] = True
+
+
+def _audit_collision_trace(
+    plan: Mapping[str, Any],
+    frame_trace: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Run the physical collision contract on ordinary acceptance frames."""
+
+    registry = _load_m8_registry(plan)
+    rows: list[dict[str, Any]] = []
+    for raw in frame_trace:
+        if registry is None:
+            audit = _failed_m8_audit_row(
+                "collision_audit.v1",
+                raw,
+                ["scene_object_registry_missing"],
+            )
+        else:
+            try:
+                audit = audit_collision_tick(registry, raw)
+            except (SceneSafetyAuditError, TypeError, ValueError) as exc:
+                audit = _failed_m8_audit_row(
+                    "collision_audit.v1",
+                    raw,
+                    [f"collision_audit_input_invalid:{exc}"],
+                )
+        extra_issues: list[str] = []
+        if raw.get("collision_sensor_available") is not True:
+            extra_issues.append("collision_sensor_unavailable")
+        if raw.get("collision_event_frame_unmatched_event_count"):
+            extra_issues.append("collision_event_frame_unmatched")
+        _add_audit_issues(audit, extra_issues)
+        rows.append(audit)
+    return rows
+
+
+def _attach_collision_audit_rows(
+    frame_trace: list[dict[str, Any]],
+    audit_rows: list[dict[str, Any]],
+) -> None:
+    for index, audit in enumerate(audit_rows):
+        if index >= len(frame_trace):
+            break
+        frame_trace[index]["collision_audit"] = deepcopy(audit)
+
+
+def _m8_actor_state(
+    object_id: str,
+    actor: Any,
+    *,
+    transform: Any | None = None,
+    origin: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Capture a JSON-safe physical CARLA box state for one actor."""
+
+    if transform is None or origin is None:
+        transform, actor_origin = _vehicle_transform_and_pose(actor)
+        origin = actor_origin
+    pose = _bounding_box_center_pose(actor, transform, origin)
+    return {
+        "object_id": str(object_id),
+        "carla_runtime_actor_id": getattr(actor, "id", None),
+        "pose": pose,
+        "extent_m": _actor_extent(actor),
+    }
+
+
+def _static_object_states(
+    static_obstacle_actors: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        _m8_actor_state(object_id, actor)
+        for object_id, actor in sorted(static_obstacle_actors.items())
+    ]
+
+
+def _bounding_box_center_pose(
+    actor: Any,
+    transform: Any | None,
+    origin: Mapping[str, Any],
+) -> dict[str, float]:
+    """Resolve CARLA's local bounding-box offset into the canonical frame."""
+
+    pose = {
+        "x": float(origin.get("x", 0.0)),
+        "y": float(origin.get("y", 0.0)),
+        "z": float(origin.get("z", 0.0)),
+        "roll": float(origin.get("roll", 0.0)),
+        "pitch": float(origin.get("pitch", 0.0)),
+        "yaw": float(origin.get("yaw", 0.0)),
+    }
+    bounding_box = getattr(actor, "bounding_box", None)
+    offset = getattr(bounding_box, "location", None)
+    if offset is not None and transform is not None and hasattr(transform, "transform"):
+        try:
+            world_location = transform.transform(offset)
+        except Exception:
+            world_location = None
+        if world_location is not None:
+            pose.update(
+                {
+                    "x": float(getattr(world_location, "x", pose["x"])),
+                    "y": -float(getattr(world_location, "y", -pose["y"])),
+                    "z": float(getattr(world_location, "z", pose["z"])),
+                }
+            )
+    elif offset is not None:
+        # Fallback for test doubles and older CARLA wrappers without
+        # Transform.transform().  CARLA's native y axis is reflected here.
+        local_x = float(getattr(offset, "x", 0.0))
+        local_y = -float(getattr(offset, "y", 0.0))
+        yaw = math.radians(pose["yaw"])
+        pose["x"] += math.cos(yaw) * local_x - math.sin(yaw) * local_y
+        pose["y"] += math.sin(yaw) * local_x + math.cos(yaw) * local_y
+        pose["z"] += float(getattr(offset, "z", 0.0))
+
+    # BoundingBox.rotation is expressed in CARLA's native basis.  The
+    # canonical frame reflects yaw, hence subtract the local native yaw.
+    box_rotation = getattr(bounding_box, "rotation", None)
+    if box_rotation is not None:
+        pose["yaw"] -= float(getattr(box_rotation, "yaw", 0.0))
+    return pose
+
+
+def _collision_event_payloads(
+    events: list[Any],
+    actor_vehicles: Mapping[str, Any],
+    static_obstacle_actors: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    registered_actors = {
+        **dict(actor_vehicles),
+        **dict(static_obstacle_actors or {}),
+    }
+    by_runtime_id = {
+        getattr(actor, "id", None): str(object_id)
+        for object_id, actor in registered_actors.items()
+        if isinstance(getattr(actor, "id", None), int)
+    }
+    result: list[dict[str, Any]] = []
+    for event in events:
+        other_actor = getattr(event, "other_actor", None)
+        runtime_id = getattr(other_actor, "id", None)
+        object_id = by_runtime_id.get(runtime_id)
+        if object_id is None:
+            object_id = (
+                f"unregistered_runtime_actor:{runtime_id}"
+                if runtime_id is not None
+                else "unregistered_world_contact"
+            )
+        impulse = getattr(event, "normal_impulse", None)
+        impulse_magnitude = None
+        if impulse is not None:
+            impulse_magnitude = math.sqrt(
+                sum(
+                    float(getattr(impulse, axis, 0.0)) ** 2
+                    for axis in ("x", "y", "z")
+                )
+            )
+        result.append(
+            {
+                "object_id": object_id,
+                "carla_runtime_actor_id": runtime_id,
+                "sensor_event_frame": _event_frame(event),
+                "classification": (
+                    "registered_object"
+                    if object_id in by_runtime_id.values()
+                    else "unregistered_or_world_contact"
+                ),
+                "normal_impulse_magnitude": impulse_magnitude,
+            }
+        )
+    return result
+
+
+def _lane_event_payloads(events: list[Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for event in events:
+        markings = getattr(event, "crossed_lane_markings", []) or []
+        result.append(
+            {
+                "sensor_event_frame": _event_frame(event),
+                "crossed_lane_markings": [
+                    str(getattr(marking, "type", marking)) for marking in markings
+                ],
+            }
+        )
+    return result
+
+
+def _m8_lane_state(
+    lane_truth: Mapping[str, Any] | None,
+    route_progress: float,
+    lane_events: list[dict[str, Any]],
+    *,
+    sensor_available: bool,
+) -> dict[str, Any]:
+    truth = dict(lane_truth or {})
+    lane_width = truth.get("lane_width_m")
+    center_distance = truth.get("center_distance_m")
+    boundary_distance = (
+        float(lane_width) * 0.5 - abs(float(center_distance))
+        if _finite_number(lane_width) and _finite_number(center_distance)
+        else None
+    )
+    return {
+        "road_id": truth.get("road_id"),
+        "section_id": truth.get("section_id"),
+        "lane_id": truth.get("lane_id"),
+        "lane_type": truth.get("lane_type"),
+        "is_junction": truth.get("is_junction"),
+        "is_on_road": (
+            bool(truth.get("available")) if "available" in truth else None
+        ),
+        "inside_lane": truth.get("inside_lane"),
+        "lane_width_m": lane_width,
+        "center_distance_m": center_distance,
+        "signed_centerline_distance_m": center_distance,
+        "signed_boundary_distance_m": boundary_distance,
+        "route_progress": float(route_progress),
+        "lane_invasion_events": lane_events,
+        "lane_invasion_sensor_available": bool(sensor_available),
+        "projection_mode": truth.get("projection_mode"),
+    }
+
+
+def _attach_m8_tracker_events(
+    frame_trace: list[dict[str, Any]],
+    m8_runtime_trace: list[dict[str, Any]],
+    tracker: _SensorEventTracker | None,
+    actor_vehicles: Mapping[str, Any],
+    static_obstacle_actors: Mapping[str, Any] | None = None,
+    *,
+    field: str,
+) -> int:
+    """Attach delayed sensor events to raw M8 rows by native CARLA frame."""
+
+    if tracker is None or not m8_runtime_trace:
+        return 0
+    frame_to_indices: dict[int, set[int]] = {}
+    for index, trace in enumerate(m8_runtime_trace):
+        frame = trace.get("frame_id")
+        if _valid_frame(frame):
+            frame_to_indices.setdefault(frame, set()).add(index)
+    unmatched = 0
+    for record in tracker.event_records:
+        event = record.get("_event")
+        if field == "collision_events":
+            payloads = _collision_event_payloads(
+                [event] if event is not None else [],
+                actor_vehicles,
+                static_obstacle_actors,
+            )
+        else:
+            payloads = _lane_event_payloads([event] if event is not None else [])
+        frame = record.get("effective_frame")
+        indices = frame_to_indices.get(frame, set()) if _valid_frame(frame) else set()
+        if not indices:
+            unmatched += 1
+            if m8_runtime_trace:
+                target = m8_runtime_trace[-1]
+                _append_m8_event(target, field, payloads)
+                target[f"{field}_frame_unmatched_event_count"] = (
+                    int(target.get(f"{field}_frame_unmatched_event_count", 0)) + 1
+                )
+            continue
+        for index in indices:
+            _append_m8_event(m8_runtime_trace[index], field, payloads)
+    for index, trace in enumerate(m8_runtime_trace):
+        if index < len(frame_trace) and isinstance(frame_trace[index], dict):
+            frame_trace[index]["m8_runtime"] = trace
+    return unmatched
+
+
+def _append_m8_event(row: dict[str, Any], field: str, payloads: list[dict[str, Any]]) -> None:
+    if field == "lane_invasion_events":
+        lane_state = row.get("lane_state")
+        if not isinstance(lane_state, dict):
+            lane_state = {}
+            row["lane_state"] = lane_state
+        existing = lane_state.setdefault(field, [])
+    else:
+        existing = row.setdefault(field, [])
+    for payload in payloads:
+        if payload not in existing:
+            existing.append(payload)
+    if field == "collision_events" and existing:
+        row["collision_detected"] = True
+
+
+def _load_m8_registry(plan: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    reference = plan.get("scene_object_registry")
+    if not isinstance(reference, Mapping):
+        reference = (plan.get("runtime") or {}).get("scene_object_registry")
+    if isinstance(reference, Mapping) and isinstance(reference.get("records"), list):
+        return reference
+    path_value = reference.get("path") if isinstance(reference, Mapping) else reference
+    if not path_value:
+        return None
+    path = Path(str(path_value)).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.is_file():
+        return None
+    try:
+        registry = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(registry, Mapping) or not isinstance(registry.get("records"), list):
+        return None
+    expected_sha = reference.get("sha256") if isinstance(reference, Mapping) else None
+    if expected_sha:
+        actual_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual_sha != str(expected_sha):
+            return None
+    return registry
+
+
+def _failed_m8_audit_row(
+    schema_version: str,
+    row: Mapping[str, Any],
+    issues: list[str],
+) -> dict[str, Any]:
+    return {
+        "schema_version": schema_version,
+        "frame_id": row.get("frame_id"),
+        "simulation_time_sec": row.get("simulation_time_sec"),
+        "records": [],
+        "status": "failed",
+        "issues": sorted(set(issues)),
+    }
+
+
+def _audit_runtime_m8_trace(
+    plan: Mapping[str, Any],
+    m8_runtime_trace: list[dict[str, Any]],
+    *,
+    sensor_frame_handler: Any = None,
+) -> dict[str, list[dict[str, Any]]]:
+    registry = _load_m8_registry(plan)
+    collision_rows: list[dict[str, Any]] = []
+    lane_rows: list[dict[str, Any]] = []
+    visibility_rows: list[dict[str, Any]] = []
+    lidar_world_rows: list[dict[str, Any]] = []
+    for raw in m8_runtime_trace:
+        if registry is None:
+            collision = _failed_m8_audit_row(
+                "collision_audit.v1",
+                raw,
+                ["scene_object_registry_missing"],
+            )
+        else:
+            try:
+                collision = audit_collision_tick(registry, raw)
+            except (SceneSafetyAuditError, TypeError, ValueError) as exc:
+                collision = _failed_m8_audit_row(
+                    "collision_audit.v1",
+                    raw,
+                    [f"collision_audit_input_invalid:{exc}"],
+                )
+        extra_collision_issues: list[str] = []
+        if raw.get("collision_sensor_available") is not True:
+            extra_collision_issues.append("collision_sensor_unavailable")
+        if raw.get("collision_events_frame_unmatched_event_count"):
+            extra_collision_issues.append("collision_event_frame_unmatched")
+        _add_audit_issues(collision, extra_collision_issues)
+        try:
+            lane = audit_lane_tick(raw)
+        except (SceneSafetyAuditError, TypeError, ValueError) as exc:
+            lane = _failed_m8_audit_row(
+                "lane_audit.v1",
+                raw,
+                [f"lane_audit_input_invalid:{exc}"],
+            )
+        extra_lane_issues: list[str] = []
+        if raw.get("lane_state", {}).get("lane_invasion_events") if isinstance(raw.get("lane_state"), Mapping) else False:
+            # audit_lane_tick already records lane invasion; this branch keeps
+            # the explicit raw condition visible for older lane payloads.
+            extra_lane_issues.append("lane_invasion")
+        if raw.get("lane_invasion_events_frame_unmatched_event_count"):
+            extra_lane_issues.append("lane_event_frame_unmatched")
+        _add_audit_issues(lane, extra_lane_issues)
+        try:
+            sensor_payloads = _m8_sensor_payloads(
+                plan,
+                raw,
+                sensor_frame_handler=sensor_frame_handler,
+            )
+            visibility = audit_visibility_tick(
+                {
+                    "frame_id": raw.get("frame_id"),
+                    "simulation_time_sec": raw.get("simulation_time_sec"),
+                    **dict(sensor_payloads["visibility"]),
+                }
+            )
+            lidar_world = audit_lidar_world_tick(
+                {
+                    "frame_id": raw.get("frame_id"),
+                    "simulation_time_sec": raw.get("simulation_time_sec"),
+                    **dict(sensor_payloads["lidar_world"]),
+                }
+            )
+        except (M8SensorEvidenceError, SceneSafetyAuditError, TypeError, ValueError) as exc:
+            detail = f"m8_sensor_evidence_invalid:{exc}"
+            visibility = _failed_m8_audit_row(
+                "visibility_audit.v1", raw, [detail]
+            )
+            lidar_world = _failed_m8_audit_row(
+                "lidar_world_audit.v1", raw, [detail]
+            )
+        collision_rows.append(collision)
+        lane_rows.append(lane)
+        visibility_rows.append(visibility)
+        lidar_world_rows.append(lidar_world)
+    return {
+        "collision": collision_rows,
+        "lane": lane_rows,
+        "visibility": visibility_rows,
+        "lidar_world": lidar_world_rows,
+    }
+
+
+def _m8_sensor_payloads(
+    plan: Mapping[str, Any],
+    raw: Mapping[str, Any],
+    *,
+    sensor_frame_handler: Any = None,
+) -> Mapping[str, Mapping[str, Any]]:
+    """Resolve explicit same-frame RGB/LiDAR evidence for one M8 row."""
+
+    direct = raw.get("m8_sensor_evidence")
+    if isinstance(direct, Mapping):
+        payloads = direct
+    else:
+        builder = getattr(sensor_frame_handler, "m8_evidence_builder", None)
+        sensor_evidence = raw.get("sensor_evidence")
+        if callable(builder):
+            if not isinstance(sensor_evidence, Mapping):
+                raise M8SensorEvidenceError(
+                    "M8 sensor provider has no same-frame NuRec evidence"
+                )
+            payloads = builder(raw, sensor_evidence)
+        else:
+            config = (plan.get("runtime") or {}).get("m8_sensor_config")
+            if not isinstance(config, Mapping) or not isinstance(
+                sensor_evidence, Mapping
+            ):
+                raise M8SensorEvidenceError(
+                    "M8 sensor evidence provider is missing"
+                )
+            from adapters.m8_sensor_evidence import (
+                build_m8_sensor_evidence,
+                load_camera_calibration_capture,
+            )
+
+            contract = (plan.get("runtime") or {}).get("m8_safety_contract")
+            contract = contract if isinstance(contract, Mapping) else {}
+            payloads = build_m8_sensor_evidence(
+                raw,
+                sensor_evidence,
+                camera_specs=config.get("camera_specs") or [],
+                lidar_specs=config.get("lidar_specs") or [],
+                camera_calibration_capture=load_camera_calibration_capture(
+                    contract.get("camera_calibration_capture")
+                    or config.get("camera_calibration_capture")
+                ),
+                max_lidar_range_m=float(contract.get("lidar_max_range_m", 80.0)),
+                lidar_tolerance_m=float(contract.get("lidar_box_tolerance_m", 0.10)),
+                required_camera_ids=contract.get("camera_ids"),
+            )
+    if not isinstance(payloads, Mapping):
+        raise M8SensorEvidenceError("M8 sensor provider must return an object")
+    for name in ("visibility", "lidar_world"):
+        if not isinstance(payloads.get(name), Mapping):
+            raise M8SensorEvidenceError(f"M8 sensor provider lacks {name} payload")
+        if payloads[name].get("frame_id") != raw.get("frame_id"):
+            raise M8SensorEvidenceError(f"M8 {name} frame identity mismatch")
+        if payloads[name].get("simulation_time_sec") != raw.get(
+            "simulation_time_sec"
+        ):
+            raise M8SensorEvidenceError(f"M8 {name} simulation time mismatch")
+    return payloads
+
+
+def _add_audit_issues(row: dict[str, Any], issues: list[str]) -> None:
+    if not issues:
+        return
+    normalized = sorted(set(list(row.get("issues") or []) + issues))
+    row["issues"] = normalized
+    row["status"] = "failed"
+
+
+def _collision_audit_summary(
+    rows: list[Mapping[str, Any]],
+    *,
+    required: bool,
+) -> dict[str, Any]:
+    if not required:
+        return {
+            "status": "not_required",
+            "tick_count": 0,
+            "failed_tick_count": 0,
+            "issues": [],
+        }
+    failed_rows = [row for row in rows if row.get("status") != "passed"]
+    issues = sorted(
+        {
+            str(issue)
+            for row in failed_rows
+            for issue in row.get("issues") or []
+        }
+    )
+    return {
+        "status": "passed" if rows and not failed_rows else "failed",
+        "tick_count": len(rows),
+        "failed_tick_count": len(failed_rows),
+        "issues": issues,
+    }
+
+
+def _m8_audit_summary(
+    streams: Mapping[str, list[Mapping[str, Any]]]
+) -> dict[str, Any]:
+    if not streams:
+        return {"status": "not_required", "tick_count": 0, "failed_tick_count": 0}
+    required_streams = ("collision", "lane", "visibility", "lidar_world")
+    missing_streams = [
+        name
+        for name in required_streams
+        if name not in streams
+        or not streams.get(name)
+        or _m8_stream_is_unavailable(streams.get(name) or [])
+    ]
+    frame_ids: dict[str, list[int]] = {}
+    duplicate_frames: list[str] = []
+    for name in required_streams:
+        values = [
+            row.get("frame_id")
+            for row in streams.get(name) or []
+            if isinstance(row, Mapping)
+        ]
+        valid = [value for value in values if isinstance(value, int) and not isinstance(value, bool)]
+        frame_ids[name] = valid
+        if len(valid) != len(set(valid)):
+            duplicate_frames.append(name)
+    nonempty_sets = [set(value) for value in frame_ids.values() if value]
+    common_frames = set.intersection(*nonempty_sets) if nonempty_sets else set()
+    frame_mismatch = [
+        name
+        for name, values in frame_ids.items()
+        if values and set(values) != common_frames
+    ]
+    rows = [
+        row
+        for name in required_streams
+        for row in streams.get(name, [])
+        if isinstance(row, Mapping)
+    ]
+    failed = sum(row.get("status") != "passed" for row in rows)
+    tick_count = len(common_frames)
+    return {
+        "status": (
+            "passed"
+            if (
+                tick_count > 0
+                and failed == 0
+                and not missing_streams
+                and not frame_mismatch
+                and not duplicate_frames
+                and all(len(frame_ids[name]) == tick_count for name in required_streams)
+            )
+            else "failed"
+        ),
+        "tick_count": tick_count,
+        "failed_tick_count": failed,
+        "missing_streams": missing_streams,
+        "common_frame_ids": sorted(common_frames),
+        "stream_frame_ids": frame_ids,
+        "frame_mismatch_streams": sorted(set(frame_mismatch)),
+        "duplicate_frame_streams": sorted(set(duplicate_frames)),
+        "streams": {
+            name: {
+                "tick_count": len(streams.get(name) or []),
+                "failed_tick_count": sum(
+                    row.get("status") != "passed" for row in streams.get(name) or []
+                ),
+            }
+            for name in required_streams
+        },
+    }
+
+
+def _m8_stream_is_unavailable(rows: list[Mapping[str, Any]]) -> bool:
+    """Distinguish an unavailable sensor stream from a present failed frame.
+
+    A failed audit row is useful diagnostic output, but a provider error must
+    not make an absent RGB/LiDAR stream look present to the four-stream gate.
+    Only provider/stream-resolution failures count as unavailable; payload
+    hash, frame, calibration, and physical occupancy failures remain present
+    streams with failed rows.
+    """
+
+    if not rows:
+        return True
+    unavailable_markers = (
+        "M8 sensor evidence provider is missing",
+        "M8 sensor provider has no same-frame NuRec evidence",
+        "M8 sensor provider lacks visibility payload",
+        "M8 sensor provider lacks lidar_world payload",
+    )
+    for row in rows:
+        issues = row.get("issues") if isinstance(row, Mapping) else None
+        if not isinstance(issues, list) or not any(
+            any(marker in str(issue) for marker in unavailable_markers)
+            for issue in issues
+        ):
+            return False
+    return True
+
+
+def _lane_truth_is_complete(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if not isinstance(value.get("road_id"), int) or isinstance(value.get("road_id"), bool):
+        return False
+    if not isinstance(value.get("lane_id"), int) or isinstance(value.get("lane_id"), bool):
+        return False
+    if not isinstance(value.get("lane_type"), str) or not value["lane_type"]:
+        return False
+    if not isinstance(value.get("is_junction"), bool):
+        return False
+    lane_width = value.get("lane_width_m")
+    center_distance = value.get("center_distance_m")
+    if not _finite_number(lane_width) or float(lane_width) <= 0.0:
+        return False
+    if not _finite_number(center_distance) or float(center_distance) < 0.0:
+        return False
+    return isinstance(value.get("inside_lane"), bool)
+
+
+def _finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _lane_truth_waypoint(
+    carla_module: Any,
+    world_map: Any,
+    location: Any,
+) -> tuple[Any | None, str | None]:
+    lane_type = getattr(getattr(carla_module, "LaneType", None), "Driving", None)
+    attempts = []
+    if lane_type is not None:
+        attempts.append({"project_to_road": False, "lane_type": lane_type})
+    attempts.append({"project_to_road": False})
+    if lane_type is not None:
+        attempts.append({"project_to_road": True, "lane_type": lane_type})
+    attempts.append({"project_to_road": True})
+    for kwargs in attempts:
+        try:
+            waypoint = world_map.get_waypoint(location, **kwargs)
+        except TypeError:
+            continue
+        except Exception:
+            return None, None
+        if waypoint is not None:
+            return waypoint, "exact" if not kwargs.get("project_to_road") else "projected"
+    return None, None
+
+
+def _enum_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    name = getattr(value, "name", None)
+    text = str(name if name is not None else value)
+    return text if text else None
+
+
+def _sample_lane_truth(
+    carla_module: Any,
+    world_map: Any,
+    vehicle: Any,
+) -> dict[str, Any] | None:
+    if world_map is None or not hasattr(world_map, "get_waypoint"):
+        return {
+            "available": False,
+            "reason": "world_map_waypoint_api_unavailable",
+        }
+    if not hasattr(vehicle, "get_transform"):
+        return {"available": False, "reason": "vehicle_transform_api_unavailable"}
+    try:
+        transform = vehicle.get_transform()
+        location = getattr(transform, "location", None)
+        if location is None:
+            return {"available": False, "reason": "vehicle_location_unavailable"}
+        waypoint, projection_mode = _lane_truth_waypoint(
+            carla_module,
+            world_map,
+            location,
+        )
+        if waypoint is None:
+            return {"available": False, "reason": "no_lane_waypoint"}
+        waypoint_transform = getattr(waypoint, "transform", None)
+        waypoint_location = getattr(waypoint_transform, "location", None)
+        if waypoint_location is None:
+            return {"available": False, "reason": "waypoint_location_unavailable"}
+        center_distance_m = math.hypot(
+            float(getattr(location, "x", 0.0))
+            - float(getattr(waypoint_location, "x", 0.0)),
+            float(getattr(location, "y", 0.0))
+            - float(getattr(waypoint_location, "y", 0.0)),
+        )
+        lane_width_m = getattr(waypoint, "lane_width", None)
+        lane_width_m = (
+            float(lane_width_m) if _finite_number(lane_width_m) else None
+        )
+        inside_lane = (
+            bool(center_distance_m <= lane_width_m * 0.5 + 0.05)
+            if lane_width_m is not None and lane_width_m > 0.0
+            else None
+        )
+        waypoint_rotation = getattr(waypoint_transform, "rotation", None)
+        vehicle_rotation = getattr(transform, "rotation", None)
+        heading_error_deg = None
+        if waypoint_rotation is not None and vehicle_rotation is not None:
+            delta = (
+                float(getattr(vehicle_rotation, "yaw", 0.0))
+                - float(getattr(waypoint_rotation, "yaw", 0.0))
+                + 180.0
+            ) % 360.0 - 180.0
+            heading_error_deg = abs(delta)
+        return {
+            "available": True,
+            "projection_mode": projection_mode,
+            "road_id": getattr(waypoint, "road_id", None),
+            "section_id": getattr(waypoint, "section_id", None),
+            "lane_id": getattr(waypoint, "lane_id", None),
+            "lane_type": _enum_text(getattr(waypoint, "lane_type", None)),
+            "is_junction": bool(getattr(waypoint, "is_junction", False)),
+            "lane_width_m": lane_width_m,
+            "center_distance_m": center_distance_m,
+            "inside_lane": inside_lane,
+            "heading_error_deg": heading_error_deg,
+            "waypoint_id": getattr(waypoint, "id", None),
+        }
+    except (TypeError, ValueError, AttributeError, OverflowError):
+        return {"available": False, "reason": "lane_truth_sampling_error"}
+
+
+def _add_lane_invasion_summary(
+    report: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> None:
+    values = [row.get("lane_invasion") for row in rows]
+    known = any(isinstance(value, bool) for value in values)
+    event_count = 0
+    active = False
+    for value in values:
+        current = value is True
+        if current and not active:
+            event_count += 1
+        active = current
+    truth_samples = sum(
+        _lane_truth_is_complete(row.get("ego_lane_truth")) for row in rows
+    )
+    summary = report.setdefault("summary", {})
+    summary["lane_invasion_count"] = event_count if known else None
+    summary["lane_invasion_tick_count"] = sum(value is True for value in values) if known else None
+    summary["lane_truth_sample_count"] = truth_samples
+    summary["lane_truth_tick_count"] = len(rows)
+    availability = summary.setdefault("metric_availability", {})
+    availability["lane_invasion_count"] = known
+    availability["lane_truth"] = bool(rows) and truth_samples == len(rows)
 
 
 def _runtime_report_config(plan: dict[str, Any]) -> dict[str, Any]:
@@ -1619,6 +3431,374 @@ def _spawn_interactive_actor_vehicles(
             continue
         actor_id = str(actor.get("actor_id", "actor"))
         actor_vehicles[actor_id] = _spawn_actor_vehicle(carla_module, world, actor, actor_id)
+
+
+def _initialize_actor_temporal_lifecycle(
+    actors: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Create an explicit source-time lifecycle for every spawned actor."""
+
+    evidence: dict[str, dict[str, Any]] = {}
+    for actor in actors:
+        if not _should_spawn_actor(actor):
+            continue
+        actor_id = str(actor.get("actor_id", "actor"))
+        if actor_id in evidence:
+            raise RuntimeError(f"duplicate dynamic actor id in lifecycle: {actor_id}")
+        window = _actor_annotation_window(actor)
+        record: dict[str, Any] = {
+            "actor_id": actor_id,
+            "schema_version": "actor_temporal_lifecycle_evidence.v1",
+            "state": "deferred",
+            "events": [],
+            "issues": [],
+        }
+        if window is None:
+            record["state"] = "failed"
+            record["issues"] = ["source_annotation_window_missing"]
+        else:
+            record["source_annotation_window"] = {
+                "start_sec": window[0],
+                "end_sec": window[1],
+            }
+        evidence[actor_id] = record
+    return evidence
+
+
+def _actor_temporal_lifecycle_state(
+    window: tuple[float, float], scenario_time_sec: float
+) -> str:
+    if scenario_time_sec < window[0]:
+        return "deferred"
+    if scenario_time_sec <= window[1]:
+        return "active"
+    return "despawned"
+
+
+def _spawn_actor_at_annotation_start(
+    carla_module: Any,
+    world: Any,
+    actor: dict[str, Any],
+    actor_id: str,
+    window: tuple[float, float],
+) -> Any:
+    start_pose = _reference_pose_at_time(actor, window[0])
+    if start_pose is None:
+        raise RuntimeError(f"actor {actor_id} has no source pose at lifecycle start")
+    spawn_actor = dict(actor)
+    initial_state = dict(actor.get("initial_state") or {})
+    initial_state.update(start_pose)
+    spawn_actor["initial_state"] = initial_state
+    entity = _spawn_actor_vehicle(carla_module, world, spawn_actor, actor_id)
+    if "_runtime_spawn_evidence" in spawn_actor:
+        actor["_runtime_spawn_evidence"] = dict(spawn_actor["_runtime_spawn_evidence"])
+    return entity
+
+
+def _advance_actor_temporal_lifecycle(
+    carla_module: Any,
+    world: Any,
+    actors: list[dict[str, Any]],
+    actor_vehicles: dict[str, Any],
+    evidence: dict[str, dict[str, Any]],
+    *,
+    scenario_time_sec: float,
+) -> dict[str, list[str]]:
+    """Apply source windows before the CARLA frame being observed."""
+
+    actor_by_id = {
+        str(actor.get("actor_id", "actor")): actor
+        for actor in actors
+        if _should_spawn_actor(actor)
+    }
+    spawned_actor_ids: list[str] = []
+    despawned_actor_ids: list[str] = []
+    for actor_id, record in evidence.items():
+        actor = actor_by_id.get(actor_id)
+        if actor is None or record.get("state") == "failed":
+            continue
+        window_data = record.get("source_annotation_window") or {}
+        window = (float(window_data["start_sec"]), float(window_data["end_sec"]))
+        desired_state = _actor_temporal_lifecycle_state(window, scenario_time_sec)
+        entity = actor_vehicles.get(actor_id)
+        if desired_state == "active" and entity is None:
+            entity = _spawn_actor_at_annotation_start(
+                carla_module, world, actor, actor_id, window
+            )
+            actor_vehicles[actor_id] = entity
+            spawned_actor_ids.append(actor_id)
+            event = "spawned"
+        elif desired_state != "active" and entity is not None:
+            destroyed = False
+            try:
+                if hasattr(entity, "destroy"):
+                    entity.destroy()
+                    destroyed = True
+            except RuntimeError:
+                destroyed = False
+            actor_vehicles.pop(actor_id, None)
+            despawned_actor_ids.append(actor_id)
+            event = "despawned"
+            if not destroyed:
+                record.setdefault("issues", []).append("carla_destroy_failed")
+        else:
+            event = None
+        record["state"] = desired_state
+        record["last_scenario_time_sec"] = float(scenario_time_sec)
+        if event is not None:
+            record.setdefault("events", []).append(
+                {"event": event, "scenario_time_sec": float(scenario_time_sec)}
+            )
+    return {
+        "spawned_actor_ids": spawned_actor_ids,
+        "despawned_actor_ids": despawned_actor_ids,
+    }
+
+
+def _actor_temporal_lifecycle_issues(
+    evidence: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    return sorted(
+        f"{actor_id}:{issue}"
+        for actor_id, record in evidence.items()
+        for issue in record.get("issues") or []
+    )
+
+
+def _actor_temporal_lifecycle_snapshot(
+    evidence: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "actor_temporal_lifecycle_evidence.v1",
+        "records": [dict(record) for _, record in sorted(evidence.items())],
+        "issues": _actor_temporal_lifecycle_issues(evidence),
+    }
+
+
+def _static_obstacle_annotation_window(
+    obstacle: Mapping[str, Any],
+) -> tuple[float, float] | None:
+    interval = obstacle.get("time_interval")
+    if interval is None:
+        return 0.0, math.inf
+    if not isinstance(interval, Mapping) or interval.get("start_sec") is None:
+        return None
+    try:
+        start_sec = float(interval["start_sec"])
+        end_value = interval.get("end_sec")
+        end_sec = math.inf if end_value is None else float(end_value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(start_sec) or end_sec < start_sec:
+        return None
+    return start_sec, end_sec
+
+
+def _initialize_static_obstacle_temporal_lifecycle(
+    obstacles: list[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    evidence: dict[str, dict[str, Any]] = {}
+    for obstacle in obstacles:
+        object_id = str(obstacle.get("object_id") or "")
+        if not object_id or object_id in evidence:
+            raise RuntimeError("static obstacles require unique non-empty object_id values")
+        window = _static_obstacle_annotation_window(obstacle)
+        record: dict[str, Any] = {
+            "object_id": object_id,
+            "schema_version": "static_obstacle_temporal_lifecycle_evidence.v1",
+            "state": "deferred",
+            "events": [],
+            "issues": [],
+        }
+        if window is None:
+            record["state"] = "failed"
+            record["issues"] = ["source_annotation_window_invalid"]
+        else:
+            record["source_annotation_window"] = {
+                "start_sec": window[0],
+                "end_sec": None if math.isinf(window[1]) else window[1],
+            }
+        evidence[object_id] = record
+    return evidence
+
+
+def _advance_static_obstacle_temporal_lifecycle(
+    carla_module: Any,
+    world: Any,
+    obstacles: list[Mapping[str, Any]],
+    spawned: dict[str, Any],
+    evidence: dict[str, dict[str, Any]],
+    *,
+    scenario_time_sec: float,
+) -> dict[str, list[str]]:
+    obstacle_by_id = {str(item.get("object_id") or ""): item for item in obstacles}
+    spawned_ids: list[str] = []
+    despawned_ids: list[str] = []
+    for object_id, record in evidence.items():
+        obstacle = obstacle_by_id.get(object_id)
+        if obstacle is None or record.get("state") == "failed":
+            continue
+        window = _static_obstacle_annotation_window(obstacle)
+        if window is None:
+            record.setdefault("issues", []).append("source_annotation_window_invalid")
+            record["state"] = "failed"
+            continue
+        desired_state = _actor_temporal_lifecycle_state(window, scenario_time_sec)
+        entity = spawned.get(object_id)
+        if desired_state == "active" and entity is None:
+            _spawn_static_obstacles(carla_module, world, [obstacle], spawned)
+            entity = spawned.get(object_id)
+            spawned_ids.append(object_id)
+            event = "spawned"
+        elif desired_state != "active" and entity is not None:
+            destroyed = False
+            try:
+                if hasattr(entity, "destroy"):
+                    entity.destroy()
+                    destroyed = True
+            except RuntimeError:
+                destroyed = False
+            spawned.pop(object_id, None)
+            despawned_ids.append(object_id)
+            event = "despawned"
+            if not destroyed:
+                record.setdefault("issues", []).append("carla_destroy_failed")
+        else:
+            event = None
+        record["state"] = desired_state
+        record["last_scenario_time_sec"] = float(scenario_time_sec)
+        if event is not None:
+            event_record = {"event": event, "scenario_time_sec": float(scenario_time_sec)}
+            if event == "spawned":
+                event_record["carla_runtime_actor_id"] = getattr(entity, "id", None)
+            record.setdefault("events", []).append(event_record)
+    return {"spawned_object_ids": spawned_ids, "despawned_object_ids": despawned_ids}
+
+
+def _static_obstacle_temporal_lifecycle_issues(
+    evidence: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    return sorted(
+        f"{object_id}:{issue}"
+        for object_id, record in evidence.items()
+        for issue in record.get("issues") or []
+    )
+
+
+def _static_obstacle_temporal_lifecycle_snapshot(
+    evidence: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "schema_version": "static_obstacle_temporal_lifecycle_evidence.v1",
+        "records": [dict(record) for _, record in sorted(evidence.items())],
+        "issues": _static_obstacle_temporal_lifecycle_issues(evidence),
+    }
+
+
+def _spawn_static_obstacles(
+    carla_module: Any,
+    world: Any,
+    obstacles: list[Mapping[str, Any]],
+    spawned: dict[str, Any],
+) -> None:
+    """Spawn exact-placement M6 collision proxies; never use a map fallback."""
+
+    seen: set[str] = set()
+    blueprint_library = world.get_blueprint_library()
+    for obstacle in obstacles:
+        object_id = str(obstacle.get("object_id") or "")
+        if not object_id or object_id in seen:
+            raise RuntimeError("static obstacles require unique non-empty object_id values")
+        seen.add(object_id)
+        if str(obstacle.get("collision_policy") or "") != "required":
+            raise RuntimeError(f"static obstacle {object_id} has no required collision policy")
+        placement = obstacle.get("placement")
+        if not isinstance(placement, Mapping):
+            raise RuntimeError(f"static obstacle {object_id} has no declared placement")
+        requested_filter = str(obstacle.get("blueprint") or "static.prop.*")
+        candidates = blueprint_library.filter(requested_filter)
+        effective_filter = requested_filter
+        if not candidates and requested_filter != "static.prop.*":
+            candidates = blueprint_library.filter("static.prop.*")
+            effective_filter = "static.prop.*"
+        if not candidates:
+            raise RuntimeError(
+                f"no CARLA static-prop blueprint matched {requested_filter} for {object_id}"
+            )
+        blueprint = candidates[0]
+        _set_blueprint_attribute(blueprint, "role_name", f"static.{object_id[:24]}")
+        actor = _try_spawn(
+            world,
+            blueprint,
+            _carla_transform(carla_module, dict(placement)),
+        )
+        if actor is None:
+            raise RuntimeError(
+                f"failed to spawn static obstacle {object_id} at declared pose; "
+                "map fallback would invalidate physical/render consistency"
+            )
+        spawned[object_id] = actor
+        if isinstance(obstacle, dict):
+            obstacle["_runtime_blueprint_filter"] = effective_filter
+
+
+def _static_obstacle_runtime_evidence(
+    plan: Mapping[str, Any],
+    spawned: Mapping[str, Any],
+    *,
+    temporal_lifecycle: Mapping[str, Mapping[str, Any]] | None = None,
+    require_window_entered: bool = False,
+) -> dict[str, Any]:
+    declared = plan.get("static_obstacles") or []
+    if not declared:
+        return {
+            "schema_version": "static_obstacle_runtime_evidence.v1",
+            "status": "not_configured",
+            "records": [],
+            "issues": [],
+        }
+    records = []
+    issues = []
+    for obstacle in declared:
+        object_id = str(obstacle.get("object_id") or "")
+        entity = spawned.get(object_id)
+        lifecycle = (temporal_lifecycle or {}).get(object_id) or {}
+        lifecycle_state = lifecycle.get("state")
+        events = lifecycle.get("events") or []
+        spawn_events = [event for event in events if event.get("event") == "spawned"]
+        runtime_actor_id = getattr(entity, "id", None) if entity is not None else (
+            spawn_events[-1].get("carla_runtime_actor_id") if spawn_events else None
+        )
+        record_issues = []
+        lifecycle_active = temporal_lifecycle is None or lifecycle_state == "active"
+        if lifecycle_active and entity is None:
+            record_issues.append("runtime_actor_missing")
+        if require_window_entered and temporal_lifecycle is not None and not spawn_events:
+            record_issues.append("source_annotation_window_never_entered")
+        if str(obstacle.get("collision_policy") or "") != "required":
+            record_issues.append("collision_policy_not_required")
+        record = {
+            "object_id": object_id,
+            "semantic_class": obstacle.get("semantic_class"),
+            "source": dict(obstacle.get("source") or {}),
+            "declared_placement": dict(obstacle.get("placement") or {}),
+            "requested_blueprint": obstacle.get("blueprint"),
+            "effective_blueprint_filter": obstacle.get("_runtime_blueprint_filter"),
+            "collision_policy": obstacle.get("collision_policy"),
+            "carla_runtime_actor_id": runtime_actor_id,
+            "temporal_lifecycle_state": lifecycle_state,
+            "temporal_lifecycle_events": [dict(event) for event in events],
+            "status": "passed" if not record_issues else "failed",
+            "issues": record_issues,
+        }
+        records.append(record)
+        issues.extend(f"{object_id}:{issue}" for issue in record_issues)
+    return {
+        "schema_version": "static_obstacle_runtime_evidence.v1",
+        "status": "passed" if not issues else "failed",
+        "records": records,
+        "issues": sorted(issues),
+    }
 
 
 def _spawn_actor_vehicle(carla_module: Any, world: Any, actor: dict[str, Any], actor_id: str) -> Any:
@@ -3025,6 +5205,8 @@ def _actor_control_execution_evidence(
     plan: Mapping[str, Any],
     actual: Mapping[str, str],
     preflight: Mapping[str, Any],
+    *,
+    temporal_lifecycle: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if preflight.get("status") == "not_configured":
         return dict(preflight)
@@ -3032,8 +5214,23 @@ def _actor_control_execution_evidence(
     issues = list(result.get("issues") or [])
     for record in result.get("records") or []:
         actor_id = str(record.get("actor_id") or "")
+        lifecycle_record = (temporal_lifecycle or {}).get(actor_id) or {}
+        lifecycle_events = lifecycle_record.get("events") or []
+        entered_source_window = any(
+            isinstance(event, Mapping) and event.get("event") == "spawned"
+            for event in lifecycle_events
+        ) or lifecycle_record.get("state") == "active"
+        if temporal_lifecycle is not None and not entered_source_window:
+            record["actual_execution_evidence"] = None
+            record["execution_requirement"] = (
+                "not_required_outside_source_annotation_window"
+            )
+            record["temporal_lifecycle_state"] = lifecycle_record.get("state")
+            record["status"] = "passed" if not record.get("issues") else "failed"
+            continue
         observed = actual.get(actor_id)
         record["actual_execution_evidence"] = observed
+        record["execution_requirement"] = "required_while_source_annotation_active"
         if observed != record.get("expected_execution_evidence"):
             issue = "runtime_executor_evidence_mismatch"
             record.setdefault("issues", []).append(issue)
@@ -3476,12 +5673,16 @@ def _write_runtime_evidence(
     metrics_trace: list[dict[str, Any]],
     cleanup_audit: list[dict[str, Any]],
     multimodal_trace: list[dict[str, Any]],
+    m8_runtime_trace: list[dict[str, Any]],
+    m8_audit_streams: Mapping[str, list[dict[str, Any]]],
+    collision_audit_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     artifacts = plan.get("artifacts") or {}
     for name, rows in (
         ("frame_trace", frame_trace),
         ("metrics_trace", metrics_trace),
         ("nurec_multimodal_trace", multimodal_trace),
+        ("m8_runtime_trace", m8_runtime_trace),
     ):
         target = artifacts.get(name)
         if not target:
@@ -3492,6 +5693,48 @@ def _write_runtime_evidence(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+    for name in ("collision", "lane", "visibility", "lidar_world"):
+        target = artifacts.get(f"{name}_audit")
+        if not target:
+            continue
+        path = Path(target)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        records = (
+            collision_audit_rows
+            if name == "collision" and collision_audit_rows is not None
+            else (m8_audit_streams.get(name) or [])
+        )
+        path.write_text(
+            "".join(
+                json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                for row in records
+            ),
+            encoding="utf-8",
+        )
+    summary_target = artifacts.get("m8_safety_audit_summary")
+    if summary_target:
+        path = Path(summary_target)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        summary = _m8_audit_summary(m8_audit_streams)
+        summary["schema_version"] = "scene_safety_audit_summary.v1"
+        summary["artifacts"] = {
+            name: {
+                "tick_count": len(m8_audit_streams.get(name) or []),
+                "failed_tick_count": sum(
+                    row.get("status") != "passed"
+                    for row in m8_audit_streams.get(name) or []
+                ),
+            }
+            for name in ("collision", "lane", "visibility", "lidar_world")
+        }
+        path.write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
     target = artifacts.get("cleanup_audit")
@@ -3563,6 +5806,33 @@ def main(argv=None) -> int:
         help="Generate the CARLA world from this OpenDRIVE file instead of loading a native map.",
     )
     parser.add_argument(
+        "--scenario-ir",
+        default=None,
+        help=(
+            "Scenario IR paired with --opendrive for route coverage validation; "
+            "when omitted, a sibling scene_ir.json is used if present."
+        ),
+    )
+    parser.add_argument(
+        "--expected-opendrive-sha256",
+        default=None,
+        help="refuse CARLA world generation unless --opendrive has this exact SHA-256",
+    )
+    topology_gate = parser.add_mutually_exclusive_group()
+    topology_gate.add_argument(
+        "--require-topology-map",
+        dest="require_topology_map",
+        action="store_true",
+        help="Fail before CARLA world generation unless the XODR is the canonical multi-road route map.",
+    )
+    topology_gate.add_argument(
+        "--allow-corridor-only-opendrive",
+        dest="require_topology_map",
+        action="store_false",
+        help="Explicitly allow a single-road diagnostic corridor; never use for formal map evidence.",
+    )
+    topology_gate.set_defaults(require_topology_map=None)
+    parser.add_argument(
         "--runtime-route-distance-m",
         default=None,
         type=float,
@@ -3606,6 +5876,13 @@ def main(argv=None) -> int:
         control_timeout_sec=args.control_timeout_sec,
         acceptance_evidence=args.acceptance_evidence,
         opendrive_path=args.opendrive,
+        scenario_ir_path=args.scenario_ir,
+        expected_opendrive_sha256=args.expected_opendrive_sha256,
+        require_topology_map=(
+            bool(args.opendrive)
+            if args.require_topology_map is None
+            else bool(args.require_topology_map)
+        ),
         timeout_sec=args.timeout_sec,
         runtime_route_distance_m=args.runtime_route_distance_m,
         physics_smoke=args.physics_smoke,

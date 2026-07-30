@@ -79,6 +79,8 @@ def run_native_closed_loop(
         acceptance_evidence=False,
         multimodal_sensor_required=False,
         opendrive_path=str(xodr),
+        scenario_ir_path=xodr.with_name("scene_ir.json").as_posix(),
+        require_topology_map=True,
         ego_driver=ego_driver,
         actor_autopilot=False,
         timeout_sec=timeout_sec,

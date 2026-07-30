@@ -710,6 +710,8 @@ def prepare_live_tick(
         acceptance_evidence=True,
         multimodal_sensor_required=require_multimodal,
         opendrive_path=str(xodr),
+        scenario_ir_path=xodr.with_name("scene_ir.json").as_posix(),
+        require_topology_map=True,
         ego_driver=ego_driver,
         snap_to_map=True,
     )

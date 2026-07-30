@@ -45,8 +45,12 @@
     },
     {
       "role": "opendrive",
-      "logical_ref": "evidence://scene0061/road.nurec-route-extended-both-v7.xodr",
-      "sha256": "d3913c4d0019d4c9165ae90e2a5025703ed5e1b423d688168951428341892537",
+      "logical_ref": "evidence://scene0061/scene0061_exchange_v2/road.xodr",
+      "sha256": "eb117dd99f84cdd8072e13aaacc502702dd815658ed4b53e81a00ace931b109e",
+      "artifact_kind": "canonical_nuscenes_topology_exchange",
+      "road_count": 229,
+      "junction_count": 17,
+      "ego_corridor_road_count": 0,
       "immutable": true
     }
   ],
@@ -430,5 +434,5 @@
       "remote_validation_required": true
     }
   ],
-  "immutable_matrix_sha256": "a56e5f3bbeb29387701a071f33d7c7508889fff9b40e2fb7e77b9ab6da2e8fde"
+  "immutable_matrix_sha256": "3cdfcf03ca62baa5b7da084d86cfed5cb6016ed4215366cf41a30e95d96137c6"
 }

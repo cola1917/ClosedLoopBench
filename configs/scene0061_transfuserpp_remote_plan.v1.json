@@ -6,7 +6,7 @@
   "scene_version": "formal40k-v1",
   "source_counterfactual_matrix": {
     "path": "configs/scene0061_counterfactual_matrix.v1.json",
-    "immutable_matrix_sha256": "a56e5f3bbeb29387701a071f33d7c7508889fff9b40e2fb7e77b9ab6da2e8fde"
+    "immutable_matrix_sha256": "3cdfcf03ca62baa5b7da084d86cfed5cb6016ed4215366cf41a30e95d96137c6"
   },
   "algorithm": {
     "algorithm_id": "transfuserpp_v5",

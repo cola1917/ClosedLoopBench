@@ -41,7 +41,7 @@
     "artifact_sha256": "69e2c36e31e113f9ad66968a0a0a4243c7989dae5582a91a43d150051eaf98b4",
     "scene_package_sha256": "0d6b724b0dea9ff3f97717f893f19baf69904057511ad374cfd510c5cc9b9119",
     "scenario_ir_sha256": "ae340b43c2ecbcf416cb89895e63ea59241b240ff83bc9dc4e6f1632a3f1ded7",
-    "immutable_matrix_sha256": "a56e5f3bbeb29387701a071f33d7c7508889fff9b40e2fb7e77b9ab6da2e8fde",
+    "immutable_matrix_sha256": "3cdfcf03ca62baa5b7da084d86cfed5cb6016ed4215366cf41a30e95d96137c6",
     "source_run_config_sha256": "REPLACE_WITH_SOURCE_RUN_CONFIG_SHA256",
     "variant_config_sha256": "REPLACE_WITH_VARIANT_CONFIG_SHA256"
   },

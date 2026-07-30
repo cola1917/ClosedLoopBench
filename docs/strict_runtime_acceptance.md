@@ -69,7 +69,7 @@ python runners/capture_runtime_alignment_observations.py `
   --scene scene-0061 `
   --scene-package /path/to/scene_package.json `
   --artifact /path/to/last.usdz `
-  --opendrive /path/to/road.nurec-route-extended-both-v7.xodr `
+  --opendrive /path/to/ClosedLoopBench/outputs/scene0061_exchange_v2/road.xodr `
   --nurec-example-root /path/to/CARLA_0.9.16/PythonAPI/examples/nvidia/nurec `
   --carla-python-api /path/to/CARLA_0.9.16/PythonAPI/carla `
   --renderer-version 26.4.146 `

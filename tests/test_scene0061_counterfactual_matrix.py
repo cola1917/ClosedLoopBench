@@ -33,6 +33,48 @@ class Scene0061CounterfactualMatrixTests(unittest.TestCase):
         self.assertEqual(first["cases"][5]["required_actor_outcomes"], ["yield"])
         self.assertEqual(first["cases"][6]["required_actor_outcomes"], ["crossing"])
 
+    def test_formal_matrix_binds_multiroad_canonical_opendrive(self):
+        from runtime.scene0061_counterfactual import (
+            CounterfactualMatrixError,
+            build_scene0061_counterfactual_matrix,
+            validate_scene0061_counterfactual_matrix,
+        )
+
+        matrix = build_scene0061_counterfactual_matrix()
+        opendrive = next(
+            item for item in matrix["immutable_inputs"] if item["role"] == "opendrive"
+        )
+        self.assertEqual(
+            opendrive["logical_ref"],
+            "evidence://scene0061/scene0061_exchange_v2/road.xodr",
+        )
+        self.assertEqual(opendrive["road_count"], 229)
+        self.assertEqual(opendrive["junction_count"], 17)
+        self.assertEqual(opendrive["ego_corridor_road_count"], 0)
+
+        opendrive["logical_ref"] = "evidence://scene0061/road.nurec-route-extended-both-v7.xodr"
+        with self.assertRaisesRegex(CounterfactualMatrixError, "canonical scene0061"):
+            validate_scene0061_counterfactual_matrix(matrix)
+
+        matrix = build_scene0061_counterfactual_matrix()
+        opendrive = next(
+            item for item in matrix["immutable_inputs"] if item["role"] == "opendrive"
+        )
+        opendrive["ego_corridor_road_count"] = 1
+        with self.assertRaisesRegex(CounterfactualMatrixError, "must not include"):
+            validate_scene0061_counterfactual_matrix(matrix)
+
+    def test_checked_in_formal_matrix_matches_generator(self):
+        from runtime.scene0061_counterfactual import (
+            build_scene0061_counterfactual_matrix,
+            validate_scene0061_counterfactual_matrix,
+        )
+
+        path = Path(__file__).resolve().parents[1] / "configs" / "scene0061_counterfactual_matrix.v1.json"
+        checked_in = json.loads(path.read_text(encoding="utf-8"))
+        validate_scene0061_counterfactual_matrix(checked_in)
+        self.assertEqual(checked_in, build_scene0061_counterfactual_matrix())
+
     def test_rejects_pedestrian_free_space_vehicle_large_shift_and_removal_promotion(self):
         from runtime.scene0061_counterfactual import (
             CounterfactualMatrixError,

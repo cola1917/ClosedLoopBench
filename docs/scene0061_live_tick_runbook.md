@@ -70,7 +70,7 @@ set -euo pipefail
 REPO=/home/cwadmin/workspace/ClosedLoopBench
 PY=/home/cwadmin/sim-env/miniconda3/envs/autodrive/bin/python
 CONFIG=$DERIVED_CONFIG
-XODR=$REPO/outputs/scene-0061-final-closure-v2/runtime/road.nurec-route-extended-both-v7.sidewalks8m.bfe8fe6.xodr
+XODR=$REPO/outputs/scene0061_exchange_v2/road.xodr
 CARLA_PYTHON_API=/home/cwadmin/sim-env/data/CARLA_0.9.16/PythonAPI/carla
 RUN_LABEL="$(git -C "$REPO" rev-parse --short=7 HEAD)-r19"
 OUT=$REPO/outputs/scene-0061-final-closure-v2/diagnostics/scene0061_live_tick_${RUN_LABEL}

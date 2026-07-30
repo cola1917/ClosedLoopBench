@@ -17,8 +17,10 @@ The checked-in matrix freezes:
   `0d6b724b0dea9ff3f97717f893f19baf69904057511ad374cfd510c5cc9b9119`;
 - actor-ready Scenario IR SHA-256
   `ae340b43c2ecbcf416cb89895e63ea59241b240ff83bc9dc4e6f1632a3f1ded7`;
-- OpenDRIVE SHA-256
-  `d3913c4d0019d4c9165ae90e2a5025703ed5e1b423d688168951428341892537`;
+- canonical topology-exchange OpenDRIVE at
+  `outputs/scene0061_exchange_v2/road.xodr`, SHA-256
+  `eb117dd99f84cdd8072e13aaacc502702dd815658ed4b53e81a00ace931b109e`;
+  it contains 229 roads and 17 junctions and has no diagnostic Ego corridor;
 - vehicle track `c1958768d48640948f6053d04cffd35b` and pedestrian track
   `71603dd1a2ba4e9daf095535e38310ac`.
 
@@ -142,7 +144,7 @@ Harmonizer is an optional A/B input and cannot upgrade failed source evidence.
 python -m runners.run_carla_acceptance_triplicate \
   --run-config /path/to/run_config.json \
   --output-root /new/path/to/acceptance \
-  --opendrive /path/to/road.xodr \
+  --opendrive /path/to/ClosedLoopBench/outputs/scene0061_exchange_v2/road.xodr \
   --sensor-handler-factory adapters.nurec_260_client:build_nurec_260_handler \
   --require-multimodal
 

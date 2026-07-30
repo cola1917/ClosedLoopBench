@@ -119,13 +119,43 @@ Build ScenarioRunner-oriented config:
 python runners/build_carla_config.py --scenario-ir E:/code/TriggerEngine/outputs/scenario_ir/scene-1077.mvp.json --output outputs/scene-1077/carla_run_config.json
 ```
 
-Build exchange artifacts without CARLA:
+Build an Ego-only control-corridor diagnostic without CARLA:
 
 ```bash
 python runners/build_opendrive.py --scenario-ir E:/code/TriggerEngine/outputs/scenario_ir/scene-1077.mvp.json --output outputs/scene-1077/road.xodr
 python runners/build_openscenario.py --scenario-ir E:/code/TriggerEngine/outputs/scenario_ir/scene-1077.mvp.json --output outputs/scene-1077/scenario.xosc --road-file road.xodr
 python runners/esmini_smoke.py --xosc outputs/scene-1077/scenario.xosc
 ```
+
+`build_opendrive.py` intentionally emits one `ego_route_corridor` road. A
+Scenario IR does not contain the nuScenes lane graph, so this artifact is not a
+map and must not be used as the scene exchange map. For a multi-road nuScenes
+map, use `build_nuscenes_exchange.py` (or the explicit topology wrapper) with
+the nuScenes dataroot and scene name shown above.
+
+Inspect the structural and connectivity status of a generated map:
+
+```bash
+python -m adapters.opendrive_contract --xodr outputs/scene0061_exchange_v2/road.xodr --require-junction-topology --require-boundary-audit --require-connector-evidence --expected-ego-corridor-count 0
+```
+
+For the canonical route-chain exchange, validate the Ego coverage explicitly:
+
+```bash
+python -m adapters.opendrive_contract --xodr outputs/scene0061_exchange_v2/road.xodr --scenario-ir outputs/scene0061_exchange_v2/scene_ir.json --require-junction-topology --require-boundary-audit --require-connector-evidence --require-route-chain --require-route-map-integration --require-route-source-audit --require-ego-route-coverage --expected-ego-corridor-count 0
+```
+
+`status=passed` means the OpenDRIVE links and junction contracts are valid;
+it does not by itself mean that every Ego sample lies on a map centerline.
+Inspect `route_geometry_authority`, `route_source_gap_road_count`, and
+`route_map_geometry_road_ratio` for that distinction. The current scene-0061
+artifact declares a mixed six-road route path:
+`source-gap -> map lane -> map connector -> map lane -> map connector -> map
+lane`. Five of the six route-path roads use map geometry, while the explicit
+source-gap remains separately auditable. A
+`network_connectivity_status=partial` result additionally means the selected
+local map has multiple disconnected components and is not evidence of a fully
+connected CARLA road network.
 
 The esmini smoke test skips cleanly when esmini is not installed. Set `ESMINI_BIN` to enable it.
 

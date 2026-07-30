@@ -20,6 +20,9 @@ build the GPU image, then run and debug real inference.
 - scene ID: `cc8c0bf57f984915a77078b10eb33198`
 - vehicle track: `c1958768d48640948f6053d04cffd35b`
 - pedestrian track: `71603dd1a2ba4e9daf095535e38310ac`
+- canonical OpenDRIVE: `outputs/scene0061_exchange_v2/road.xodr`
+  (229 roads, 17 junctions, no diagnostic Ego corridor; SHA-256
+  `eb117dd99f84cdd8072e13aaacc502702dd815658ed4b53e81a00ace931b109e`)
 - matrix: `configs/scene0061_counterfactual_matrix.v1.json`
 - focused remote plan: `configs/scene0061_transfuserpp_remote_plan.v1.json`
 - runtime template:

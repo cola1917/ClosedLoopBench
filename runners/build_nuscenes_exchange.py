@@ -1,9 +1,12 @@
+"""Build the canonical topology-aware nuScenes exchange bundle."""
+
 from __future__ import annotations
 
 import argparse
 import json
 import shutil
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,9 +20,16 @@ from adapters.reconstruction_package import (
     load_reconstruction_result,
     materialize_reconstruction_package,
 )
-from runners.build_nuscenes_opendrive import write_nuscenes_opendrive
+from runners.build_nuscenes_topology_exchange import _validate_topology_artifact
+from runners.build_nuscenes_topology_opendrive import (
+    write_nuscenes_topology_opendrive,
+)
 from runners.build_openscenario import write_openscenario
 from runners.build_scene_ir_from_nuscenes import write_scene_ir
+
+# Keep the historical import name available to downstream callers and tests;
+# it now resolves to the topology-aware writer rather than lane strips.
+write_nuscenes_opendrive = write_nuscenes_topology_opendrive
 
 
 def build_nuscenes_exchange(
@@ -28,7 +38,17 @@ def build_nuscenes_exchange(
     scene: str,
     output_dir: Path,
     *,
-    radius_m: float = 35.0,
+    radius_m: float = 50.0,
+    connection_tolerance_m: float = 8.0,
+    boundary_connection_tolerance_m: float | None = 20.0,
+    boundary_region_tolerance_m: float = 5.0,
+    junction_tolerance_m: float = 20.0,
+    max_turn_deg: float = 135.0,
+    include_ego_corridor: bool = False,
+    include_route_inference: bool = True,
+    route_alignment_distance_m: float = 1.0,
+    route_alignment_heading_deg: float = 5.0,
+    route_region_tolerance_m: float = 3.0,
 ) -> dict[str, Path]:
     """Build the portable P1 exchange bundle for one complete nuScenes scene."""
 
@@ -45,6 +65,16 @@ def build_nuscenes_exchange(
         dataroot,
         paths,
         radius_m=radius_m,
+        connection_tolerance_m=connection_tolerance_m,
+        boundary_connection_tolerance_m=boundary_connection_tolerance_m,
+        boundary_region_tolerance_m=boundary_region_tolerance_m,
+        junction_tolerance_m=junction_tolerance_m,
+        max_turn_deg=max_turn_deg,
+        include_ego_corridor=include_ego_corridor,
+        include_route_inference=include_route_inference,
+        route_alignment_distance_m=route_alignment_distance_m,
+        route_alignment_heading_deg=route_alignment_heading_deg,
+        route_region_tolerance_m=route_region_tolerance_m,
         reconstruction_package_path=None,
         actor_binding_set_path=None,
     )
@@ -59,7 +89,17 @@ def build_exchange_from_scenario_ir(
     reconstruction_result_path: Path | None = None,
     actor_binding_set_path: Path | None = None,
     exchange_root: Path | None = None,
-    radius_m: float = 35.0,
+    radius_m: float = 50.0,
+    connection_tolerance_m: float = 8.0,
+    boundary_connection_tolerance_m: float | None = 20.0,
+    boundary_region_tolerance_m: float = 5.0,
+    junction_tolerance_m: float = 20.0,
+    max_turn_deg: float = 135.0,
+    include_ego_corridor: bool = False,
+    include_route_inference: bool = True,
+    route_alignment_distance_m: float = 1.0,
+    route_alignment_heading_deg: float = 5.0,
+    route_region_tolerance_m: float = 3.0,
 ) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = {
@@ -75,6 +115,16 @@ def build_exchange_from_scenario_ir(
         dataroot,
         paths,
         radius_m=radius_m,
+        connection_tolerance_m=connection_tolerance_m,
+        boundary_connection_tolerance_m=boundary_connection_tolerance_m,
+        boundary_region_tolerance_m=boundary_region_tolerance_m,
+        junction_tolerance_m=junction_tolerance_m,
+        max_turn_deg=max_turn_deg,
+        include_ego_corridor=include_ego_corridor,
+        include_route_inference=include_route_inference,
+        route_alignment_distance_m=route_alignment_distance_m,
+        route_alignment_heading_deg=route_alignment_heading_deg,
+        route_region_tolerance_m=route_region_tolerance_m,
         reconstruction_package_path=reconstruction_package_path,
         reconstruction_result_path=reconstruction_result_path,
         actor_binding_set_path=actor_binding_set_path,
@@ -87,6 +137,16 @@ def _build_exchange_from_ir(
     paths: dict[str, Path],
     *,
     radius_m: float,
+    connection_tolerance_m: float,
+    boundary_connection_tolerance_m: float | None,
+    boundary_region_tolerance_m: float,
+    junction_tolerance_m: float,
+    max_turn_deg: float,
+    include_ego_corridor: bool,
+    include_route_inference: bool,
+    route_alignment_distance_m: float,
+    route_alignment_heading_deg: float,
+    route_region_tolerance_m: float,
     reconstruction_package_path: Path | None,
     reconstruction_result_path: Path | None = None,
     actor_binding_set_path: Path | None = None,
@@ -97,6 +157,22 @@ def _build_exchange_from_ir(
         paths["opendrive"],
         scenario_ir_path=paths["scene_ir"],
         radius_m=radius_m,
+        connection_tolerance_m=connection_tolerance_m,
+        boundary_connection_tolerance_m=boundary_connection_tolerance_m,
+        boundary_region_tolerance_m=boundary_region_tolerance_m,
+        junction_tolerance_m=junction_tolerance_m,
+        max_turn_deg=max_turn_deg,
+        include_ego_corridor=include_ego_corridor,
+        include_route_inference=include_route_inference,
+        route_alignment_distance_m=route_alignment_distance_m,
+        route_alignment_heading_deg=route_alignment_heading_deg,
+        route_region_tolerance_m=route_region_tolerance_m,
+    )
+    _validate_topology_artifact(
+        paths["opendrive"],
+        include_ego_corridor=include_ego_corridor,
+        require_route_chain=include_route_inference,
+        scenario_ir_path=paths["scene_ir"],
     )
     write_openscenario(
         paths["scene_ir"],
@@ -141,12 +217,17 @@ def _build_exchange_from_ir(
             reconstruction,
             paths["scene_package"].parent,
         )
+    map_source_parts = ["nuscenes_topology_map_expansion"]
+    if include_route_inference:
+        map_source_parts.append("with_mixed_route_path")
+    if include_ego_corridor:
+        map_source_parts.append("and_ego_corridor")
     package = build_scene_package(
         scene_ir,
         scene_ir_path=paths["scene_ir"].name,
         openscenario_path=paths["openscenario"].name,
         opendrive_path=paths["opendrive"].name,
-        map_source="nuscenes_map_expansion",
+        map_source="_".join(map_source_parts),
         actor_bindings_path=actor_bindings_name,
         nurec_usdz=reconstruction_paths.get("nurec_usdz"),
         nurec_checkpoint=reconstruction_paths.get("nurec_checkpoint"),
@@ -174,7 +255,51 @@ def main(argv=None) -> int:
     parser.add_argument("--actor-bindings", help="Validated actor_binding_set.v1 JSON to include in the bundle.")
     parser.add_argument("--exchange-root")
     parser.add_argument("--output-dir", required=True)
-    parser.add_argument("--radius-m", type=float, default=35.0)
+    parser.add_argument("--radius-m", type=float, default=50.0)
+    parser.add_argument("--connection-tolerance-m", type=float, default=8.0)
+    parser.add_argument(
+        "--boundary-connection-tolerance-m",
+        type=float,
+        default=20.0,
+        help=(
+            "allow larger endpoint gaps only inside or near source intersections "
+            "(default: 12 m)"
+        ),
+    )
+    parser.add_argument("--boundary-region-tolerance-m", type=float, default=5.0)
+    parser.add_argument("--junction-tolerance-m", type=float, default=20.0)
+    parser.add_argument("--max-turn-deg", type=float, default=135.0)
+    route_inference = parser.add_mutually_exclusive_group()
+    route_inference.add_argument(
+        "--include-route-inference",
+        dest="include_route_inference",
+        action="store_true",
+        help="add separately named route roads for source-map geometry gaps (default)",
+    )
+    route_inference.add_argument(
+        "--no-route-inference",
+        dest="include_route_inference",
+        action="store_false",
+        help="disable inferred route roads for raw map diagnostics",
+    )
+    parser.set_defaults(include_route_inference=True)
+    parser.add_argument("--route-alignment-distance-m", type=float, default=1.0)
+    parser.add_argument("--route-alignment-heading-deg", type=float, default=5.0)
+    parser.add_argument("--route-region-tolerance-m", type=float, default=3.0)
+    corridor = parser.add_mutually_exclusive_group()
+    corridor.add_argument(
+        "--include-ego-corridor",
+        dest="include_ego_corridor",
+        action="store_true",
+        help="include the separate Ego corridor for diagnostics (opt-in)",
+    )
+    corridor.add_argument(
+        "--map-only",
+        dest="include_ego_corridor",
+        action="store_false",
+        help="emit the route-chain map without the diagnostic corridor (default)",
+    )
+    parser.set_defaults(include_ego_corridor=False)
     args = parser.parse_args(argv)
 
     if args.scenario_ir:
@@ -191,6 +316,16 @@ def main(argv=None) -> int:
             actor_binding_set_path=(Path(args.actor_bindings) if args.actor_bindings else None),
             exchange_root=Path(args.exchange_root) if args.exchange_root else None,
             radius_m=args.radius_m,
+            connection_tolerance_m=args.connection_tolerance_m,
+            boundary_connection_tolerance_m=args.boundary_connection_tolerance_m,
+            boundary_region_tolerance_m=args.boundary_region_tolerance_m,
+            junction_tolerance_m=args.junction_tolerance_m,
+            max_turn_deg=args.max_turn_deg,
+            include_ego_corridor=args.include_ego_corridor,
+            include_route_inference=args.include_route_inference,
+            route_alignment_distance_m=args.route_alignment_distance_m,
+            route_alignment_heading_deg=args.route_alignment_heading_deg,
+            route_region_tolerance_m=args.route_region_tolerance_m,
         )
     else:
         if args.reconstruction_package or args.reconstruction_result or args.actor_bindings:
@@ -201,8 +336,60 @@ def main(argv=None) -> int:
             args.scene,
             Path(args.output_dir),
             radius_m=args.radius_m,
+            connection_tolerance_m=args.connection_tolerance_m,
+            boundary_connection_tolerance_m=args.boundary_connection_tolerance_m,
+            boundary_region_tolerance_m=args.boundary_region_tolerance_m,
+            junction_tolerance_m=args.junction_tolerance_m,
+            max_turn_deg=args.max_turn_deg,
+            include_ego_corridor=args.include_ego_corridor,
+            include_route_inference=args.include_route_inference,
+            route_alignment_distance_m=args.route_alignment_distance_m,
+            route_alignment_heading_deg=args.route_alignment_heading_deg,
+            route_region_tolerance_m=args.route_region_tolerance_m,
         )
-    print(json.dumps({key: str(path) for key, path in paths.items()}, ensure_ascii=False, indent=2))
+    root = ET.parse(paths["opendrive"]).getroot()
+    roads = root.findall("road")
+    print(
+        json.dumps(
+            {
+                "paths": {key: str(path) for key, path in paths.items()},
+                "scope": "nuscenes_topology_exchange",
+                "road_count": len(roads),
+                "map_lane_road_count": sum(
+                    road.attrib.get("name", "").startswith("nuscenes_lane_")
+                    for road in roads
+                ),
+                "connector_road_count": sum(
+                    road.attrib.get("name", "").startswith("inferred_connector_")
+                    for road in roads
+                ),
+                "map_connector_road_count": sum(
+                    road.attrib.get("name", "").startswith("inferred_connector_")
+                    and not road.attrib.get("name", "").startswith(
+                        "inferred_connector_route_"
+                    )
+                    for road in roads
+                ),
+                "route_connector_road_count": sum(
+                    road.attrib.get("name", "").startswith(
+                        "inferred_connector_route_"
+                    )
+                    for road in roads
+                ),
+                "route_inference_road_count": sum(
+                    road.attrib.get("name", "").startswith("inferred_route_")
+                    for road in roads
+                ),
+                "ego_corridor_road_count": sum(
+                    road.attrib.get("name") == "ego_route_corridor" for road in roads
+                ),
+                "junction_count": len(root.findall("junction")),
+                "ego_corridor_included": args.include_ego_corridor,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

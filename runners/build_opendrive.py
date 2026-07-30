@@ -21,13 +21,29 @@ def write_opendrive(scenario_ir_path: Path, output: Path) -> Path:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Build minimal OpenDRIVE road from Scenario IR.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Build a single-road Ego control corridor from Scenario IR; "
+            "this is not a nuScenes map topology export."
+        )
+    )
     parser.add_argument("--scenario-ir", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args(argv)
 
     output = write_opendrive(Path(args.scenario_ir), Path(args.output))
-    print(json.dumps({"opendrive": str(output)}, ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "opendrive": str(output),
+                "scope": "ego_control_corridor_only",
+                "road_count": 1,
+                "map_reconstruction": False,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

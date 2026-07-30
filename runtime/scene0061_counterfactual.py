@@ -10,6 +10,14 @@ from typing import Any
 SCHEMA_VERSION = "scene_counterfactual_matrix.v1"
 VEHICLE_TRACK = "c1958768d48640948f6053d04cffd35b"
 PEDESTRIAN_TRACK = "71603dd1a2ba4e9daf095535e38310ac"
+CANONICAL_OPENDRIVE_LOGICAL_REF = (
+    "evidence://scene0061/scene0061_exchange_v2/road.xodr"
+)
+CANONICAL_OPENDRIVE_SHA256 = (
+    "eb117dd99f84cdd8072e13aaacc502702dd815658ed4b53e81a00ace931b109e"
+)
+CANONICAL_OPENDRIVE_ROAD_COUNT = 229
+CANONICAL_OPENDRIVE_JUNCTION_COUNT = 17
 CASE_IDS = (
     "S0_original_replay",
     "S1_lead_slowdown",
@@ -82,8 +90,12 @@ def build_scene0061_counterfactual_matrix(
             },
             {
                 "role": "opendrive",
-                "logical_ref": "evidence://scene0061/road.nurec-route-extended-both-v7.xodr",
-                "sha256": "d3913c4d0019d4c9165ae90e2a5025703ed5e1b423d688168951428341892537",
+                "logical_ref": CANONICAL_OPENDRIVE_LOGICAL_REF,
+                "sha256": CANONICAL_OPENDRIVE_SHA256,
+                "artifact_kind": "canonical_nuscenes_topology_exchange",
+                "road_count": CANONICAL_OPENDRIVE_ROAD_COUNT,
+                "junction_count": CANONICAL_OPENDRIVE_JUNCTION_COUNT,
+                "ego_corridor_road_count": 0,
                 "immutable": True,
             },
         ],
@@ -131,6 +143,34 @@ def validate_scene0061_counterfactual_matrix(matrix: dict[str, Any]) -> None:
         if not str(item.get("logical_ref") or "").startswith(("formal://", "evidence://", "repo://")):
             raise CounterfactualMatrixError("immutable input must use a logical reference")
         _require_hash(item.get("sha256"), f"immutable input {item.get('role')}")
+    opendrive = next(
+        (item for item in inputs if item.get("role") == "opendrive"),
+        None,
+    )
+    if opendrive is None:
+        raise CounterfactualMatrixError("immutable_inputs must include opendrive")
+    if opendrive.get("logical_ref") != CANONICAL_OPENDRIVE_LOGICAL_REF:
+        raise CounterfactualMatrixError(
+            "opendrive must bind the canonical scene0061 topology exchange"
+        )
+    if opendrive.get("sha256") != CANONICAL_OPENDRIVE_SHA256:
+        raise CounterfactualMatrixError(
+            "opendrive must bind the canonical scene0061 topology exchange SHA-256"
+        )
+    if opendrive.get("artifact_kind") != "canonical_nuscenes_topology_exchange":
+        raise CounterfactualMatrixError(
+            "opendrive artifact_kind must identify the canonical topology exchange"
+        )
+    if opendrive.get("road_count") != CANONICAL_OPENDRIVE_ROAD_COUNT:
+        raise CounterfactualMatrixError("canonical opendrive road_count is incorrect")
+    if opendrive.get("junction_count") != CANONICAL_OPENDRIVE_JUNCTION_COUNT:
+        raise CounterfactualMatrixError(
+            "canonical opendrive junction_count is incorrect"
+        )
+    if opendrive.get("ego_corridor_road_count") != 0:
+        raise CounterfactualMatrixError(
+            "canonical opendrive must not include an ego corridor"
+        )
     actors = matrix.get("actors") or {}
     if (actors.get("lead_vehicle") or {}).get("track_id") != VEHICLE_TRACK:
         raise CounterfactualMatrixError("formal lead vehicle track is required")

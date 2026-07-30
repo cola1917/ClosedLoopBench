@@ -16,6 +16,11 @@ from adapters.nurec_multimodal import (
     validate_nurec_multimodal_evidence,
 )
 from adapters.nurec_runtime_handler import make_nurec_sensor_frame_handler
+from adapters.m8_sensor_evidence import (
+    M8SensorEvidenceError,
+    build_m8_sensor_evidence,
+    load_camera_calibration_capture,
+)
 from runtime.scene0061_lidar_axis_normalization import (
     LiDARAxisNormalizationError,
     normalize_lidar_xyzi,
@@ -636,12 +641,46 @@ def build_nurec_260_handler(
     scene_package = _load_json(config, "scene_package")
     binding_set = _load_json(config, "actor_bindings")
     _validate_runtime_actor_binding_contract(run_config, config, binding_set)
+
+    runtime_options = run_config.get("runtime") or {}
+    m8_contract = runtime_options.get("m8_safety_contract")
+    m8_contract = m8_contract if isinstance(m8_contract, Mapping) else {}
+    calibration_reference = (
+        m8_contract.get("camera_calibration_capture")
+        or config.get("camera_calibration_capture")
+    )
+    calibration_capture = load_camera_calibration_capture(calibration_reference)
+
+    def build_m8_evidence(
+        runtime_row: Mapping[str, Any], sensor_evidence: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
+        try:
+            return build_m8_sensor_evidence(
+                runtime_row,
+                sensor_evidence,
+                camera_specs=config.get("camera_specs") or [],
+                lidar_specs=config.get("lidar_specs") or [],
+                camera_calibration_capture=calibration_capture,
+                max_lidar_range_m=float(
+                    m8_contract.get("lidar_max_range_m", 80.0)
+                ),
+                lidar_tolerance_m=float(
+                    m8_contract.get("lidar_box_tolerance_m", 0.10)
+                ),
+                required_camera_ids=m8_contract.get("camera_ids"),
+            )
+        except M8SensorEvidenceError:
+            raise
+        except (TypeError, ValueError) as exc:
+            raise M8SensorEvidenceError(str(exc)) from exc
+
     handler = make_nurec_sensor_frame_handler(
         scene_package,
         binding_set,
         camera_specs=config.get("camera_specs") or [],
         lidar_specs=config.get("lidar_specs") or [],
         dispatch_frame=client.dispatch_frame,
+        m8_evidence_builder=build_m8_evidence,
     )
     handler.close = client.close  # type: ignore[attr-defined]
     handler.attempt_dir = str(attempt_dir)  # type: ignore[attr-defined]

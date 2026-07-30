@@ -11,6 +11,9 @@ from adapters.nurec_multimodal import (
 
 
 FrameDispatcher = Callable[[Mapping[str, Any]], Mapping[str, Any]]
+M8EvidenceBuilder = Callable[
+    [Mapping[str, Any], Mapping[str, Any]], Mapping[str, Any]
+]
 
 
 def make_nurec_sensor_frame_handler(
@@ -21,6 +24,7 @@ def make_nurec_sensor_frame_handler(
     lidar_specs: Iterable[Mapping[str, Any]],
     dispatch_frame: FrameDispatcher,
     require_runtime_validated_alignment: bool = True,
+    m8_evidence_builder: M8EvidenceBuilder | None = None,
 ) -> Callable[[Mapping[str, Any]], dict[str, Any]]:
     """Adapt CARLA runner frame contexts to synchronized NuRec dispatch calls."""
 
@@ -28,6 +32,8 @@ def make_nurec_sensor_frame_handler(
     lidars = _freeze_specs("lidar", lidar_specs)
     if not callable(dispatch_frame):
         raise NuRecMultimodalError("dispatch_frame must be callable")
+    if m8_evidence_builder is not None and not callable(m8_evidence_builder):
+        raise NuRecMultimodalError("m8_evidence_builder must be callable")
 
     def handle(context: Mapping[str, Any]) -> dict[str, Any]:
         if context.get("schema_version") != "carla_nurec_frame_context.v1":
@@ -61,6 +67,7 @@ def make_nurec_sensor_frame_handler(
         "clock": "carla_snapshot",
         "dynamic_objects": "actor_binding_set.v1",
     }
+    handle.m8_evidence_builder = m8_evidence_builder  # type: ignore[attr-defined]
     return handle
 
 

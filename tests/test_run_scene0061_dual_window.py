@@ -124,6 +124,63 @@ class Scene0061DualWindowTests(unittest.TestCase):
             )
         self.assertEqual(report["status"], "matched")
 
+    def test_topology_scene_package_rejects_corridor_only_xodr(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            path = Path(raw_root) / "road.xodr"
+            path.write_text(
+                "<OpenDRIVE><road id='1000' name='ego_route_corridor' "
+                "length='1' junction='-1'><link><successor elementType='road' "
+                "elementId='1000' contactPoint='start'/></link></road></OpenDRIVE>",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "multi-road OpenDRIVE"):
+                _validate_map_contract(
+                    {
+                        "map": {
+                            "opendrive": "road.xodr",
+                            "source": "nuscenes_topology_map_expansion_with_ego_corridor",
+                        }
+                    },
+                    path,
+                )
+
+    def test_topology_scene_package_reports_loaded_road_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_root:
+            path = Path(raw_root) / "road.xodr"
+            path.write_text(
+                "<OpenDRIVE>"
+                "<road id='1' name='nuscenes_lane_a' length='1' junction='-1'>"
+                "<link><successor elementType='junction' elementId='1' contactPoint='end'/></link>"
+                "<planView><geometry x='0' y='0' hdg='0' length='1'><line/></geometry></planView>"
+                "</road>"
+                "<road id='2' name='nuscenes_lane_b' length='1' junction='-1'>"
+                "<link><predecessor elementType='junction' elementId='1' contactPoint='start'/></link>"
+                "<planView><geometry x='1' y='0' hdg='0' length='1'><line/></geometry></planView>"
+                "</road>"
+                "<road id='1001' name='inferred_connector_1_a_to_b' length='1' junction='1'>"
+                "<link><predecessor elementType='road' elementId='1' contactPoint='end'/>"
+                "<successor elementType='road' elementId='2' contactPoint='start'/></link>"
+                "<planView><geometry x='1' y='0' hdg='0' length='1'><line/></geometry></planView>"
+                "</road>"
+                "<junction id='1'><connection id='1' incomingRoad='1' connectingRoad='1001' contactPoint='start'>"
+                "<laneLink from='-1' to='-1'/></connection></junction>"
+                "</OpenDRIVE>",
+                encoding="utf-8",
+            )
+            report = _validate_map_contract(
+                {"map": {"opendrive": "road.xodr", "source": "nuscenes_topology_map_expansion"}},
+                path,
+            )
+        self.assertEqual(report["road_count"], 3)
+        self.assertEqual(report["map_lane_road_count"], 2)
+        self.assertEqual(report["connector_road_count"], 1)
+        self.assertEqual(report["route_inference_road_count"], 0)
+        self.assertEqual(report["ego_corridor_road_count"], 0)
+        self.assertEqual(report["junction_count"], 1)
+        self.assertEqual(report["network_component_count"], 1)
+        self.assertEqual(report["network_connectivity_status"], "connected")
+        self.assertEqual(report["network_connectivity_warnings"], [])
+
     def test_state_explainer_renders_lane_surface_compact_hud_and_controlled_trace(self) -> None:
         try:
             import cv2

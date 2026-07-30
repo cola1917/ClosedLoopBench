@@ -433,14 +433,30 @@ All four must exist and pass on every required tick. An independent RGB
 detector is explicitly deferred until after M11; installing one cannot repair
 or promote M8.
 
+The same physical collision contract is now required for ordinary CARLA
+`acceptance_evidence` runs, even when the four-stream M8 audit is disabled.
+Those runs capture ego/object physical bounding boxes and native-frame collision
+payloads in `frame_trace.jsonl`, write `collision_audit.v1.jsonl`, and fail
+closed on an OBB overlap without an attributed callback, an unregistered
+callback, missing scene-object registry, or an unmatched native frame. A zero
+`collision_count` or a historical video is not sufficient evidence.
+
 ## Physical-road and map boundary
 
-The current `road.xodr` is a limited derivative of nuScenes lane polygons:
-each selected `CAR` lane becomes an independent OpenDRIVE road. It currently
-does not reconstruct junction objects, road links, or lane links, so it is not
-a complete topology-valid CARLA road network. The disconnected lane strips
-seen in older BEV screenshots are an honest symptom of this limitation, not a
-road-fidelity pass.
+The current canonical `road.xodr` is a local derivative of nuScenes lane
+polygons: each selected `CAR` lane becomes an OpenDRIVE road, ambiguous
+transitions use explicit junction connector roads, and the recorded Ego route
+declares a mixed path
+`2001(source-gap) -> 44(map lane) -> 1133(map connector) -> 7(map lane) ->
+1053(map connector) -> 33(map lane)`. Only `2001` carries explicit
+`synthetic_reference_trajectory` source-gap metadata; the other five
+route-path roads use source map geometry. The mixed path covers all 39 scene
+Ego samples, but the map centerline alignment and CARLA waypoint continuity
+remain runtime gates. The separate one-road `ego_route_corridor` is
+diagnostic-only and is not part of the canonical exchange default. The
+selected local lane network still has boundary components, so this is
+structural topology and route continuity evidence, not a claim of a complete
+or physically verified CARLA road network.
 
 The static BEV renderer can instead draw direct nuScenes `drivable_area`,
 `road_segment`, intersection, and lane polygons. That background is explicitly
@@ -452,8 +468,9 @@ separate physical acceptance evidence.
 Before treating the generated world as physically road-faithful, complete this
 remediation gate:
 
-1. Reconstruct junction, road, and lane links in the XODR conversion rather
-   than connecting only unambiguous nearby lane endpoints.
+1. Expand/verify the selected local lane network and junction, road, and lane
+   links at the required CARLA map boundary rather than accepting disconnected
+   lane strips as a full map.
 2. Generate a fresh CARLA world from that map and validate waypoint continuity
    and route connectivity at every relevant branch/intersection.
 3. Run lane-invasion fault injection and repeated replay, retaining the CARLA
