@@ -19,8 +19,9 @@ non-zero point count, or a static map result alone.
 
 Verify each checkout before editing:
 
-- ClosedLoopBench: `master` at `d1e3eadb5a79d5476d6f64a1607f1f0e5446070a`
-  (`feat: add scene0061 topology and runtime audit gates`)
+- ClosedLoopBench implementation baseline: `d1e3eadb5a79d5476d6f64a1607f1f0e5446070a`
+  (`feat: add scene0061 topology and runtime audit gates`). The checkout may
+  be at a newer descendant containing handoff-only documentation commits.
 - NeuralSceneBridge: `main` at `cae8fa66a93d0d24cd084851b293f24f87e0ac48`
   (`feat: add NuRec registry track closure recipes`)
 
@@ -35,7 +36,14 @@ git status --short --branch
 git diff --cached --stat
 ```
 
-If a required SHA is absent, stop and report the mismatch. Do not use
+Verify the implementation baseline with:
+
+```bash
+git merge-base --is-ancestor d1e3eadb5a79d5476d6f64a1607f1f0e5446070a HEAD
+git merge-base --is-ancestor cae8fa66a93d0d24cd084851b293f24f87e0ac48 HEAD
+```
+
+If a required implementation SHA is absent, stop and report the mismatch. Do not use
 `git reset --hard`, force-push, or overwrite a divergent branch. Obtain the
 source through the normal Git remote flow and verify the exact SHA before
 continuing. Do not commit remote runtime outputs, caches, checkpoints,

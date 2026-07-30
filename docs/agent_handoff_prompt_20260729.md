@@ -118,17 +118,18 @@ Current source baseline (2026-07-30):
 
 - ClosedLoopBench checkout: `E:\code\ClosedLoopBench`
 - ClosedLoopBench branch: `master`
-- ClosedLoopBench local HEAD: `d1e3eadb5a79d5476d6f64a1607f1f0e5446070a`
-  (`feat: add scene0061 topology and runtime audit gates`). It is one local
-  commit ahead of `origin/master`; it has not been pushed by this handoff.
+- ClosedLoopBench implementation baseline: `d1e3eadb5a79d5476d6f64a1607f1f0e5446070a`
+  (`feat: add scene0061 topology and runtime audit gates`). Handoff-only
+  documentation commits may be descendants of this implementation baseline.
 - NeuralSceneBridge checkout: `E:\code\NeuralSceneBridge`
 - NeuralSceneBridge branch: `main`
 - NeuralSceneBridge local HEAD: `cae8fa66a93d0d24cd084851b293f24f87e0ac48`
   (`feat: add NuRec registry track closure recipes`). It is three local
   commits ahead of `origin/main`; it has not been pushed by this handoff.
-- These two SHAs are the source baseline for the next agent. Always run
-  `git rev-parse HEAD`, `git status --short`, and compare local, GitHub, and
-  remote SHAs before attributing a result to code.
+- These two SHAs are the implementation baseline for the next agent. Always
+  run `git rev-parse HEAD`, `git status --short`, and compare local, GitHub,
+  and remote SHAs before attributing a result to code. A newer descendant that
+  only updates handoff documentation is acceptable; verify ancestry explicitly.
 - ClosedLoopBench currently has only local generated `tmp_test/` and
   `.tmp_test/` directories outside the commit. Do not stage them. Local
   `.claude/settings.local.json` is also not source and must not be committed.
