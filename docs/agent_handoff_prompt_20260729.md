@@ -1,4 +1,4 @@
-# ClosedLoopBench Agent Handoff Prompt
+# ClosedLoopBench Agent Handoff Prompt (2026-07-30)
 
 Copy the block below to the next agent as the authoritative handoff. The
 prompt intentionally contains no password or private key material.
@@ -114,19 +114,24 @@ deferred. They must not be relabeled as NuRec multimodal closure. S6 is the
 only integration stage that combines passed component capabilities; its
 multimodal TF++ variant remains blocked by S4/M8.
 
-Current source baseline:
+Current source baseline (2026-07-30):
 
-- Local checkout: `E:\code\ClosedLoopBench`
-- Current branch: `master`
-- Last verified runtime-source baseline after endpoint-history redaction:
-  `1ea65e36f99755e0413b501b62b04ee0bc5c2198`. This handoff may be a
-  documentation-only successor to that baseline. Always run `git rev-parse
-  HEAD` and compare the local, GitHub, and remote SHAs before attributing a
-  remote result to code.
-- GitHub remote: `origin` (`git@github.com:cola1917/ClosedLoopBench.git`)
-- Local `master` and GitHub `origin/master` were verified equal at the runtime
-  baseline on 2026-07-29; the remote test checkout was offline at this handoff.
-  Its SHA is unknown until the host is explicitly restored and checked.
+- ClosedLoopBench checkout: `E:\code\ClosedLoopBench`
+- ClosedLoopBench branch: `master`
+- ClosedLoopBench local HEAD: `d1e3eadb5a79d5476d6f64a1607f1f0e5446070a`
+  (`feat: add scene0061 topology and runtime audit gates`). It is one local
+  commit ahead of `origin/master`; it has not been pushed by this handoff.
+- NeuralSceneBridge checkout: `E:\code\NeuralSceneBridge`
+- NeuralSceneBridge branch: `main`
+- NeuralSceneBridge local HEAD: `cae8fa66a93d0d24cd084851b293f24f87e0ac48`
+  (`feat: add NuRec registry track closure recipes`). It is three local
+  commits ahead of `origin/main`; it has not been pushed by this handoff.
+- These two SHAs are the source baseline for the next agent. Always run
+  `git rev-parse HEAD`, `git status --short`, and compare local, GitHub, and
+  remote SHAs before attributing a result to code.
+- ClosedLoopBench currently has only local generated `tmp_test/` and
+  `.tmp_test/` directories outside the commit. Do not stage them. Local
+  `.claude/settings.local.json` is also not source and must not be committed.
 - M8 experiment branches are deliberately not merged into `master`.
 
 ## Runtime boundary and local validation limit
@@ -143,9 +148,11 @@ Current source baseline:
   collected with the bare system Python because `scene_exchange_contracts` is
   not installed there; treat that as an environment-precondition failure, not
   proof that the M8 runtime is correct or incorrect.
-- The remote host is currently offline. No local test, generated PNG, or
-  historical evidence may be relabeled as a new remote result while it remains
-  offline.
+- The remote runtime host was reported offline on 2026-07-29. That is a
+  historical fact, not a current availability claim. A remote development
+  agent must verify its own checkout, branch, exact SHA, and runtime service
+  state before use. No local test, generated PNG, or historical evidence may
+  be relabeled as a new remote result.
 
 Remote test host (configured out of band; values must not be committed):
 
@@ -155,11 +162,12 @@ Remote test host (configured out of band; values must not be committed):
   concrete values into source, evidence, prompts, or commits.
 - Use the existing SSH authentication on the machine. Never request,
   echo, store, or commit a password or private key.
-- The remote checkout is a test checkout, not a development checkout.
-- The host was reported offline on 2026-07-29. Do not probe, restart, stop, or
-  otherwise operate it until its owner reports it restored. When it returns,
-  recheck the NuRec service state before use; do not stop or restart it unless
-  explicitly authorized.
+- The remote runtime checkout is not automatically a development checkout.
+  The user may authorize a separate remote development agent; it must first
+  verify its absolute checkout path, branch, remotes, and exact source SHA.
+- Do not probe, restart, stop, or otherwise operate the runtime host until its
+  owner reports it restored. When it returns, recheck NuRec service state
+  before use; do not stop or restart it unless explicitly authorized.
 
 ## Mandatory development and sync policy
 
@@ -634,28 +642,52 @@ CARLA collision meshes do not automatically become NuRec USDZ/LiDAR content.
 
 ## First actions for the next agent
 
-1. Read this prompt and `docs/development_sync_policy.md`.
-2. Record `git status --short` and `git diff --cached` in every active
-   worktree before editing. Preserve the main-checkout BEV files and the two
-   staged historical documents in the M8 worktrees.
-3. Inspect the Artifact021 manifest, smoke report, corrected visibility
+1. Read this prompt and `docs/development_sync_policy.md`. If operating as
+   the user-authorized remote development agent, treat the two source SHAs in
+   the current source baseline as required starting points; do not reconstruct
+   or silently replace them.
+2. Record `git rev-parse --show-toplevel`, `git remote -v`, `git branch
+   --show-current`, `git rev-parse HEAD`, `git status --short`, and
+   `git diff --cached` in every active worktree before editing. Preserve the
+   main-checkout BEV files and the two staged historical documents in the M8
+   worktrees.
+3. Confirm that the remote development checkout is not the runtime-only test
+   checkout. Keep source changes in Git, and keep runtime outputs, caches,
+   checkpoints, credentials, and evidence outside tracked source.
+4. Run focused tests for the newly committed source in the correct environment
+   before beginning a new repair. For ClosedLoopBench, include
+   `tests/test_opendrive_contract.py`,
+   `tests/test_nuscenes_topology_exchange.py`,
+   `tests/test_nuscenes_topology_opendrive.py`,
+   `tests/test_route_aligned_opendrive.py`,
+   `tests/test_scene_safety_audit.py`,
+   `tests/test_esmini_xodr_runtime_audit.py`, and
+   `tests/test_carla_xodr_runtime_audit.py`. For NeuralSceneBridge, include
+   `tests/test_nurec_dynamic_tracks.py`,
+   `tests/test_nurec_scene0061_recipes.py`,
+   `tests/test_validate_nurec_artifacts.py`,
+   `tests/test_validate_nurec_usdz_tracks.py`, and
+   `tests/test_derive_nurec_controllable_tracks_usdz.py`. Report missing
+   dependencies as preconditions, not as pass or fail evidence.
+5. Inspect the Artifact021 manifest, smoke report, corrected visibility
    manifest, and four-stream files locally. Review committed correction
    `b98e4b9`; do not claim M8.3 or M8 passed and do not exchange camera sides.
-4. Review `fix/m8-source-lidar-frame-index` against
+6. Review `fix/m8-source-lidar-frame-index` against
    `integration/m8-run-converged-20260729`, including the pedestrian
    centre-reference dependency. Run its focused quality/smoke/promotion tests
    before deciding a narrow integration sequence; do not assume its tools are
    present on `master`.
-5. Build a native-NCore-timestamp ego-corridor plus LiDAR-quality selection
+7. Build a native-NCore-timestamp ego-corridor plus LiDAR-quality selection
    manifest. It must cover both protected tracks inside their source
    lifecycles, preserve the full CARLA registry, and identify static geometry
    paths before any NuRec configuration or training is edited.
-6. Advance independent S1-S3 work with isolated fixtures when useful, but keep
+8. Advance independent S1-S3 work with isolated fixtures when useful, but keep
    M8/M9/M10/M11 promotion claims separate. Keep every M8 source change on a
    feature branch; do not merge a formal M8 claim into `master` until its
    complete exit gate passes.
-7. The remote host is offline. Do not probe it. Once it is restored, follow:
-   focused local tests -> commit -> GitHub push -> remote `pull --ff-only` ->
-   exact-SHA verification -> remote evidence. Only the formal promotion gate
-   may authorize a 40k reconstruction.
+9. For a remote development session, follow focused tests -> focused commit ->
+   normal GitHub push -> remote checkout update -> exact-SHA verification. Do
+   not use `git reset --hard`, force-push, source bundles, or bulk-add local
+   runtime directories. Only the formal promotion gate may authorize a 40k
+   reconstruction.
 ```
