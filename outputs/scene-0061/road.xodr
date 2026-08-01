@@ -506,9 +506,6 @@
     <road name="nuscenes_lane_5e73e2b0-3c82-4124-a405-fecff46c2d25" rule="LHT" id="12" junction="-1" length="8.998493203265184">
         <userData code="nuScenesToken" value="5e73e2b0-3c82-4124-a405-fecff46c2d25"/>
         <userData code="nuScenesLayer" value="lane"/>
-        <userData code="topologyRole" value="two_to_one_merge_target"/>
-        <userData code="mergeIncomingRoads" value="56,58"/>
-        <userData code="mergeEvidence" value="nuScenes connectivity and coincident arcline endpoints"/>
         <userData code="outgoingManeuvers" value="left,straight"/>
         <link>
             <predecessor elementType="junction" elementId="1" contactPoint="start"/>
@@ -2603,8 +2600,6 @@
         <userData code="nuScenesToken" value="9b76cd1e-5d2e-4848-b4e8-16681d8a4f14"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
-        <userData code="topologyRole" value="merge_incoming"/>
-        <userData code="mergeTargetRoad" value="12"/>
         <link>
             <predecessor elementType="road" elementId="24" contactPoint="end"/>
             <successor elementType="road" elementId="12" contactPoint="start"/>
@@ -2694,8 +2689,6 @@
         <userData code="nuScenesToken" value="bfdbd392-4753-485b-96a7-f26ed396ccba"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="left"/>
-        <userData code="topologyRole" value="merge_incoming"/>
-        <userData code="mergeTargetRoad" value="12"/>
         <link>
             <predecessor elementType="road" elementId="4" contactPoint="end"/>
             <successor elementType="road" elementId="12" contactPoint="start"/>
