@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <OpenDRIVE>
     <userData code="source" value="nuScenes map expansion arcline_path_3"/>
-    <header name="nuScenes_scene_0061_native" revMajor="1" revMinor="5" date="2026-07-31 21:20:26.615092" north="0.0" south="0.0" east="0.0" west="0.0"/>
+    <header name="nuScenes_scene_0061_native" revMajor="1" revMinor="5" date="2026-08-01 08:24:57.340505" north="0.0" south="0.0" east="0.0" west="0.0"/>
     <road name="nuscenes_lane_03c94004-f3e2-4b92-87cb-5b57fa6ebe73" rule="LHT" id="1" junction="-1" length="10.22471750883904">
         <userData code="nuScenesToken" value="03c94004-f3e2-4b92-87cb-5b57fa6ebe73"/>
         <userData code="nuScenesLayer" value="lane"/>
@@ -22,7 +22,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -66,7 +66,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -109,7 +109,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -163,7 +163,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -209,7 +209,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -254,7 +254,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -299,7 +299,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -344,7 +344,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -388,7 +388,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -414,8 +414,10 @@
     <road name="nuscenes_lane_4eb18137-6ccb-4f54-854b-e12997e50ca5" rule="LHT" id="10" junction="-1" length="3.24002776861051">
         <userData code="nuScenesToken" value="4eb18137-6ccb-4f54-854b-e12997e50ca5"/>
         <userData code="nuScenesLayer" value="lane"/>
+        <userData code="outgoingManeuvers" value="straight"/>
         <link>
             <predecessor elementType="junction" elementId="1" contactPoint="start"/>
+            <successor elementType="junction" elementId="1" contactPoint="end"/>
         </link>
         <planView>
             <geometry s="0" x="58.96974511593385" y="-11.991402459851045" hdg="3.1009105331704685" length="0.0002734676432880594">
@@ -431,12 +433,13 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
                         <link>
                             <predecessor id="1"/>
+                            <successor id="1"/>
                         </link>
                         <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
                         <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
@@ -476,7 +479,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -522,7 +525,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -566,7 +569,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -647,7 +650,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -693,7 +696,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -739,7 +742,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -763,7 +766,51 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_79d8b56f-ba80-46da-9881-d10176b250da" rule="LHT" id="17" junction="-1" length="20.90813978439429">
+    <road name="nuscenes_lane_74857537-1b32-468d-999a-89ec9bcc34f6" rule="LHT" id="17" junction="-1" length="9.720311575151317">
+        <userData code="nuScenesToken" value="74857537-1b32-468d-999a-89ec9bcc34f6"/>
+        <userData code="nuScenesLayer" value="lane"/>
+        <userData code="outgoingManeuvers" value="left"/>
+        <link>
+            <successor elementType="junction" elementId="1" contactPoint="end"/>
+        </link>
+        <planView>
+            <geometry s="0" x="60.06491578733619" y="-25.33583826399647" hdg="2.0404666507375633" length="9.433571359024803">
+                <arc curvature="0.04846175347418381"/>
+            </geometry>
+            <geometry s="9.433571359024803" x="54.05292489061486" y="-18.17280620952094" hdg="2.4976340603197444" length="0.28658763464838843">
+                <line/>
+            </geometry>
+            <geometry s="9.720158993673191" x="53.823733472522065" y="-18.00074875921445" hdg="2.4976340603197444" length="0.00015258147812636567">
+                <arc curvature="0.04846175347418381"/>
+            </geometry>
+        </planView>
+        <elevationProfile/>
+        <lateralProfile/>
+        <lanes>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
+            <laneSection s="0.0">
+                <left>
+                    <lane id="1" type="driving" level="false">
+                        <link>
+                            <successor id="1"/>
+                        </link>
+                        <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
+                        <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
+                            <type name="broken" width="0.12">
+                                <line length="3.0" space="3.0" tOffset="0" width="0.12" sOffset="0" rule="none"/>
+                            </type>
+                        </roadMark>
+                    </lane>
+                </left>
+                <center>
+                    <lane id="0" type="none" level="false">
+                        <roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.1"/>
+                    </lane>
+                </center>
+            </laneSection>
+        </lanes>
+    </road>
+    <road name="nuscenes_lane_79d8b56f-ba80-46da-9881-d10176b250da" rule="LHT" id="18" junction="-1" length="20.90813978439429">
         <userData code="nuScenesToken" value="79d8b56f-ba80-46da-9881-d10176b250da"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -785,7 +832,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -809,7 +856,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_7b690728-97e7-4fe9-9116-a4a41ab39e41" rule="LHT" id="18" junction="-1" length="22.564224122735514">
+    <road name="nuscenes_lane_7b690728-97e7-4fe9-9116-a4a41ab39e41" rule="LHT" id="19" junction="-1" length="22.564224122735514">
         <userData code="nuScenesToken" value="7b690728-97e7-4fe9-9116-a4a41ab39e41"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -831,7 +878,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -855,7 +902,50 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_8c163dc2-eae9-4b7d-a30a-f8fd7d023439" rule="LHT" id="19" junction="-1" length="106.04241621498151">
+    <road name="nuscenes_lane_7eaaa816-34ab-4400-9085-756aab7dd0eb" rule="LHT" id="20" junction="-1" length="131.80078801941255">
+        <userData code="nuScenesToken" value="7eaaa816-34ab-4400-9085-756aab7dd0eb"/>
+        <userData code="nuScenesLayer" value="lane"/>
+        <link>
+            <predecessor elementType="junction" elementId="1" contactPoint="start"/>
+        </link>
+        <planView>
+            <geometry s="0" x="36.29890467503958" y="-11.068589264424105" hdg="3.0760688679435932" length="36.53568580700971">
+                <arc curvature="0.001000001000001"/>
+            </geometry>
+            <geometry s="36.53568580700971" x="-0.19396461332017623" y="-9.342800165409471" hdg="3.1126045902863253" length="44.38545752047043">
+                <line/>
+            </geometry>
+            <geometry s="80.92114332748014" x="-44.56077471624992" y="-8.056331902273216" hdg="3.1126045902863253" length="50.8796446919324">
+                <arc curvature="-0.001000001000001"/>
+            </geometry>
+        </planView>
+        <elevationProfile/>
+        <lateralProfile/>
+        <lanes>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
+            <laneSection s="0.0">
+                <left>
+                    <lane id="1" type="driving" level="false">
+                        <link>
+                            <predecessor id="1"/>
+                        </link>
+                        <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
+                        <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
+                            <type name="broken" width="0.12">
+                                <line length="3.0" space="3.0" tOffset="0" width="0.12" sOffset="0" rule="none"/>
+                            </type>
+                        </roadMark>
+                    </lane>
+                </left>
+                <center>
+                    <lane id="0" type="none" level="false">
+                        <roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.1"/>
+                    </lane>
+                </center>
+            </laneSection>
+        </lanes>
+    </road>
+    <road name="nuscenes_lane_8c163dc2-eae9-4b7d-a30a-f8fd7d023439" rule="LHT" id="21" junction="-1" length="106.04241621498151">
         <userData code="nuScenesToken" value="8c163dc2-eae9-4b7d-a30a-f8fd7d023439"/>
         <userData code="nuScenesLayer" value="lane"/>
         <link>
@@ -875,7 +965,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -898,7 +988,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_8e181296-79dc-4741-9b62-9fefc0bc102a" rule="LHT" id="20" junction="-1" length="4.522807185649959">
+    <road name="nuscenes_lane_8e181296-79dc-4741-9b62-9fefc0bc102a" rule="LHT" id="22" junction="-1" length="4.522807185649959">
         <userData code="nuScenesToken" value="8e181296-79dc-4741-9b62-9fefc0bc102a"/>
         <userData code="nuScenesLayer" value="lane"/>
         <link>
@@ -915,7 +1005,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -938,7 +1028,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_90c1258b-bf90-49e9-a921-cb195217ea75" rule="LHT" id="21" junction="-1" length="38.227790186049575">
+    <road name="nuscenes_lane_90c1258b-bf90-49e9-a921-cb195217ea75" rule="LHT" id="23" junction="-1" length="38.227790186049575">
         <userData code="nuScenesToken" value="90c1258b-bf90-49e9-a921-cb195217ea75"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -960,7 +1050,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -984,7 +1074,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_98a785d0-4797-4655-8bc6-3b4b72da1548" rule="LHT" id="22" junction="-1" length="4.172952427448277">
+    <road name="nuscenes_lane_98a785d0-4797-4655-8bc6-3b4b72da1548" rule="LHT" id="24" junction="-1" length="4.172952427448277">
         <userData code="nuScenesToken" value="98a785d0-4797-4655-8bc6-3b4b72da1548"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -1006,7 +1096,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1030,7 +1120,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_9bdcf3c5-3181-4099-a2b6-e6fcf428c755" rule="LHT" id="23" junction="-1" length="165.658912398646">
+    <road name="nuscenes_lane_9bdcf3c5-3181-4099-a2b6-e6fcf428c755" rule="LHT" id="25" junction="-1" length="165.658912398646">
         <userData code="nuScenesToken" value="9bdcf3c5-3181-4099-a2b6-e6fcf428c755"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -1051,7 +1141,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1074,7 +1164,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_ad1abbe5-c1ab-4cbb-b9d2-ef3a3f06581c" rule="LHT" id="24" junction="-1" length="14.589216298942306">
+    <road name="nuscenes_lane_ad1abbe5-c1ab-4cbb-b9d2-ef3a3f06581c" rule="LHT" id="26" junction="-1" length="14.589216298942306">
         <userData code="nuScenesToken" value="ad1abbe5-c1ab-4cbb-b9d2-ef3a3f06581c"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="right"/>
@@ -1096,7 +1186,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1120,7 +1210,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_af22deab-c58e-4ab4-b58c-f783be8e27af" rule="LHT" id="25" junction="-1" length="15.664149431339217">
+    <road name="nuscenes_lane_af22deab-c58e-4ab4-b58c-f783be8e27af" rule="LHT" id="27" junction="-1" length="15.664149431339217">
         <userData code="nuScenesToken" value="af22deab-c58e-4ab4-b58c-f783be8e27af"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -1139,7 +1229,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1163,7 +1253,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_cb87e228-5e10-477f-8438-320802139e05" rule="LHT" id="26" junction="-1" length="25.252669688030725">
+    <road name="nuscenes_lane_cb87e228-5e10-477f-8438-320802139e05" rule="LHT" id="28" junction="-1" length="25.252669688030725">
         <userData code="nuScenesToken" value="cb87e228-5e10-477f-8438-320802139e05"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="right,straight"/>
@@ -1184,7 +1274,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1207,7 +1297,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_d58aa99a-059a-4436-8c20-6db30841ab6f" rule="LHT" id="27" junction="-1" length="35.26371541388229">
+    <road name="nuscenes_lane_d58aa99a-059a-4436-8c20-6db30841ab6f" rule="LHT" id="29" junction="-1" length="35.26371541388229">
         <userData code="nuScenesToken" value="d58aa99a-059a-4436-8c20-6db30841ab6f"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="right"/>
@@ -1229,7 +1319,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1253,7 +1343,51 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_ddba49df-bc04-4a91-b75f-a0f480336300" rule="LHT" id="28" junction="-1" length="3.352451661429817">
+    <road name="nuscenes_lane_d6f48dbf-3377-4e3a-9d1d-36c6dce63600" rule="LHT" id="30" junction="-1" length="2.3938867240777477">
+        <userData code="nuScenesToken" value="d6f48dbf-3377-4e3a-9d1d-36c6dce63600"/>
+        <userData code="nuScenesLayer" value="lane"/>
+        <userData code="outgoingManeuvers" value="straight"/>
+        <link>
+            <successor elementType="junction" elementId="1" contactPoint="end"/>
+        </link>
+        <planView>
+            <geometry s="0" x="58.415625193809575" y="-14.826512832378715" hdg="3.087242687210976" length="0.00033101612944772365">
+                <arc curvature="-0.001000001000001"/>
+            </geometry>
+            <geometry s="0.00033101612944772365" x="58.41529466646017" y="-14.826494850464314" hdg="3.0872423561945155" length="2.3932223218059274">
+                <line/>
+            </geometry>
+            <geometry s="2.393553337935375" x="56.02560620993395" y="-14.696486534055403" hdg="3.0872423561945155" length="0.00033338614237283615">
+                <arc curvature="0.001000001000001"/>
+            </geometry>
+        </planView>
+        <elevationProfile/>
+        <lateralProfile/>
+        <lanes>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
+            <laneSection s="0.0">
+                <left>
+                    <lane id="1" type="driving" level="false">
+                        <link>
+                            <successor id="1"/>
+                        </link>
+                        <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
+                        <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
+                            <type name="broken" width="0.12">
+                                <line length="3.0" space="3.0" tOffset="0" width="0.12" sOffset="0" rule="none"/>
+                            </type>
+                        </roadMark>
+                    </lane>
+                </left>
+                <center>
+                    <lane id="0" type="none" level="false">
+                        <roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.1"/>
+                    </lane>
+                </center>
+            </laneSection>
+        </lanes>
+    </road>
+    <road name="nuscenes_lane_ddba49df-bc04-4a91-b75f-a0f480336300" rule="LHT" id="31" junction="-1" length="3.352451661429817">
         <userData code="nuScenesToken" value="ddba49df-bc04-4a91-b75f-a0f480336300"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -1275,7 +1409,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1299,7 +1433,74 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_f493215c-bc0b-47db-ba48-7338e21afe3d" rule="LHT" id="29" junction="-1" length="35.43804684187225">
+    <road name="nuscenes_lane_ec65b625-ab99-49a2-bd3e-ba1716184c0a" rule="LHT" id="32" junction="-1" length="130.00536422905427">
+        <userData code="nuScenesToken" value="ec65b625-ab99-49a2-bd3e-ba1716184c0a"/>
+        <userData code="nuScenesLayer" value="lane"/>
+        <link>
+            <predecessor elementType="junction" elementId="1" contactPoint="start"/>
+        </link>
+        <planView>
+            <geometry s="0" x="36.794696486425295" y="-13.710775624661231" hdg="3.0871458973151595" length="2.15495701922651e-05">
+                <arc curvature="0.0019188470805240436"/>
+            </geometry>
+            <geometry s="2.15495701922651e-05" x="36.794674968788506" y="-13.710774451937027" hdg="3.0871459386654894" length="23.501312337886066">
+                <line/>
+            </geometry>
+            <geometry s="23.50133388745626" x="13.328188197599019" y="-12.431837307091905" hdg="3.0871459386654894" length="31.83078540885567">
+                <arc curvature="0.0019188470805240436"/>
+            </geometry>
+            <geometry s="55.33211929631193" x="-18.488554750043054" y="-11.671033247579771" hdg="3.148224348318059" length="20.097700642398642">
+                <line/>
+            </geometry>
+            <geometry s="75.42981993871058" x="-38.58581345190511" y="-11.80431408604056" hdg="3.148224348318059" length="0.2523765426888917">
+                <arc curvature="-0.19911144464054112"/>
+            </geometry>
+            <geometry s="75.68219648139947" x="-38.838120288159075" y="-11.799647433179588" hdg="3.0979732903098887" length="13.944734890055377">
+                <arc curvature="-0.0029128990048527532"/>
+            </geometry>
+            <geometry s="89.62693137145484" x="-52.75341255233987" y="-10.908840523057904" hdg="3.057353685925711" length="0.023168715157241802">
+                <line/>
+            </geometry>
+            <geometry s="89.65010008661208" x="-52.776499111136744" y="-10.9068911218791" hdg="3.057353685925711" length="8.570174127756774">
+                <arc curvature="0.0029128990048527532"/>
+            </geometry>
+            <geometry s="98.22027421436886" x="-61.324396574098785" y="-10.29246520706431" hdg="3.0823177376138684" length="10.246622136611899">
+                <arc curvature="0.002298920461524052"/>
+            </geometry>
+            <geometry s="108.46689635098076" x="-71.55922631629211" y="-9.80597733947019" hdg="3.105873906905231" length="0.0337170422839229">
+                <line/>
+            </geometry>
+            <geometry s="108.50061339326469" x="-71.59292185227483" y="-9.804773265048162" hdg="3.105873906905231" length="21.50475083578958">
+                <arc curvature="-0.002298920461524052"/>
+            </geometry>
+        </planView>
+        <elevationProfile/>
+        <lateralProfile/>
+        <lanes>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
+            <laneSection s="0.0">
+                <left>
+                    <lane id="1" type="driving" level="false">
+                        <link>
+                            <predecessor id="1"/>
+                        </link>
+                        <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
+                        <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
+                            <type name="broken" width="0.12">
+                                <line length="3.0" space="3.0" tOffset="0" width="0.12" sOffset="0" rule="none"/>
+                            </type>
+                        </roadMark>
+                    </lane>
+                </left>
+                <center>
+                    <lane id="0" type="none" level="false">
+                        <roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.1"/>
+                    </lane>
+                </center>
+            </laneSection>
+        </lanes>
+    </road>
+    <road name="nuscenes_lane_f493215c-bc0b-47db-ba48-7338e21afe3d" rule="LHT" id="33" junction="-1" length="35.43804684187225">
         <userData code="nuScenesToken" value="f493215c-bc0b-47db-ba48-7338e21afe3d"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="right"/>
@@ -1320,7 +1521,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1343,7 +1544,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_fc54378d-a2ee-401d-a1ed-245253eddc48" rule="LHT" id="30" junction="-1" length="18.123812876930128">
+    <road name="nuscenes_lane_fc54378d-a2ee-401d-a1ed-245253eddc48" rule="LHT" id="34" junction="-1" length="18.123812876930128">
         <userData code="nuScenesToken" value="fc54378d-a2ee-401d-a1ed-245253eddc48"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -1362,7 +1563,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1386,7 +1587,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_lane_ff42ed22-6e94-4616-ab60-bfb597ed393c" rule="LHT" id="31" junction="-1" length="26.257907362134812">
+    <road name="nuscenes_lane_ff42ed22-6e94-4616-ab60-bfb597ed393c" rule="LHT" id="35" junction="-1" length="26.257907362134812">
         <userData code="nuScenesToken" value="ff42ed22-6e94-4616-ab60-bfb597ed393c"/>
         <userData code="nuScenesLayer" value="lane"/>
         <userData code="outgoingManeuvers" value="straight"/>
@@ -1407,7 +1608,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1430,13 +1631,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_0282d0e3-b6bf-4bcd-be24-35c9ce4c6591" rule="LHT" id="32" junction="1" length="22.57025263154046">
+    <road name="nuscenes_connector_0282d0e3-b6bf-4bcd-be24-35c9ce4c6591" rule="LHT" id="36" junction="1" length="22.57025263154046">
         <userData code="nuScenesToken" value="0282d0e3-b6bf-4bcd-be24-35c9ce4c6591"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="left"/>
         <link>
             <predecessor elementType="road" elementId="11" contactPoint="end"/>
-            <successor elementType="road" elementId="20" contactPoint="start"/>
+            <successor elementType="road" elementId="22" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="82.2410444657275" y="9.410368883434497" hdg="-1.62296444242606" length="22.38062258312781">
@@ -1452,7 +1653,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1476,13 +1677,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_092b05cd-12bd-4b45-ab0c-510c886fa06b" rule="LHT" id="33" junction="1" length="41.72619259913473">
+    <road name="nuscenes_connector_092b05cd-12bd-4b45-ab0c-510c886fa06b" rule="LHT" id="37" junction="1" length="41.72619259913473">
         <userData code="nuScenesToken" value="092b05cd-12bd-4b45-ab0c-510c886fa06b"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="26" contactPoint="end"/>
-            <successor elementType="road" elementId="28" contactPoint="start"/>
+            <predecessor elementType="road" elementId="28" contactPoint="end"/>
+            <successor elementType="road" elementId="31" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="68.58724961778815" y="-35.924051252545354" hdg="1.5333172764215148" length="18.89018763296789">
@@ -1498,7 +1699,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1522,7 +1723,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_0a73738e-b9ab-469d-85d0-6e44a0184f67" rule="LHT" id="34" junction="1" length="12.048226755277456">
+    <road name="nuscenes_connector_0a73738e-b9ab-469d-85d0-6e44a0184f67" rule="LHT" id="38" junction="1" length="12.048226755277456">
         <userData code="nuScenesToken" value="0a73738e-b9ab-469d-85d0-6e44a0184f67"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="left"/>
@@ -1544,7 +1745,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1568,13 +1769,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_0b017756-14bc-4451-949b-2bef62b9f50e" rule="LHT" id="35" junction="1" length="6.4735295791040395">
+    <road name="nuscenes_connector_0b017756-14bc-4451-949b-2bef62b9f50e" rule="LHT" id="39" junction="1" length="6.4735295791040395">
         <userData code="nuScenesToken" value="0b017756-14bc-4451-949b-2bef62b9f50e"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="30" contactPoint="end"/>
-            <successor elementType="road" elementId="24" contactPoint="start"/>
+            <predecessor elementType="road" elementId="34" contactPoint="end"/>
+            <successor elementType="road" elementId="26" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="36.87360011982367" y="-6.451536128799596" hdg="-0.044682091550665604" length="0.00027348381344819827">
@@ -1590,7 +1791,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1614,13 +1815,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_16233dfa-88a2-4ae6-84e0-f9c5aa584bdc" rule="LHT" id="36" junction="1" length="6.524801058575914">
+    <road name="nuscenes_connector_16233dfa-88a2-4ae6-84e0-f9c5aa584bdc" rule="LHT" id="40" junction="1" length="6.524801058575914">
         <userData code="nuScenesToken" value="16233dfa-88a2-4ae6-84e0-f9c5aa584bdc"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="18" contactPoint="end"/>
-            <successor elementType="road" elementId="25" contactPoint="start"/>
+            <predecessor elementType="road" elementId="19" contactPoint="end"/>
+            <successor elementType="road" elementId="27" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="37.02020158410019" y="-3.143276801629531" hdg="-0.056152805850339986" length="1.9075999630158225">
@@ -1636,7 +1837,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1660,7 +1861,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_1ba067c9-a69c-4cd1-bc3c-8bdc9daec466" rule="LHT" id="37" junction="1" length="12.979149119012597">
+    <road name="nuscenes_connector_1ba067c9-a69c-4cd1-bc3c-8bdc9daec466" rule="LHT" id="41" junction="1" length="12.979149119012597">
         <userData code="nuScenesToken" value="1ba067c9-a69c-4cd1-bc3c-8bdc9daec466"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="left"/>
@@ -1682,7 +1883,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1706,13 +1907,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_26c04569-f75f-4198-8284-e3a1a5ee9f16" rule="LHT" id="38" junction="1" length="42.90378866000387">
+    <road name="nuscenes_connector_26c04569-f75f-4198-8284-e3a1a5ee9f16" rule="LHT" id="42" junction="1" length="42.90378866000387">
         <userData code="nuScenesToken" value="26c04569-f75f-4198-8284-e3a1a5ee9f16"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
             <predecessor elementType="road" elementId="9" contactPoint="end"/>
-            <successor elementType="road" elementId="27" contactPoint="start"/>
+            <successor elementType="road" elementId="29" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="82.46061429232765" y="84.99510007734341" hdg="-1.621194145507099" length="13.647076631963985">
@@ -1737,7 +1938,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1761,7 +1962,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_274d236d-6d4c-4579-b0b4-1dd6fcc30550" rule="LHT" id="39" junction="1" length="6.840971594259163">
+    <road name="nuscenes_connector_274d236d-6d4c-4579-b0b4-1dd6fcc30550" rule="LHT" id="43" junction="1" length="6.840971594259163">
         <userData code="nuScenesToken" value="274d236d-6d4c-4579-b0b4-1dd6fcc30550"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
@@ -1783,7 +1984,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1807,13 +2008,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_28d15254-0ef9-48c3-9e06-dc5a25b31127" rule="LHT" id="40" junction="1" length="44.87044066772909">
+    <road name="nuscenes_connector_28d15254-0ef9-48c3-9e06-dc5a25b31127" rule="LHT" id="44" junction="1" length="44.87044066772909">
         <userData code="nuScenesToken" value="28d15254-0ef9-48c3-9e06-dc5a25b31127"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
             <predecessor elementType="road" elementId="11" contactPoint="end"/>
-            <successor elementType="road" elementId="19" contactPoint="start"/>
+            <successor elementType="road" elementId="21" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="82.2410444657275" y="9.410368883434497" hdg="-1.62296444242606" length="6.6462574683562">
@@ -1829,7 +2030,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1853,12 +2054,58 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_349bd97f-67bc-4f5d-92cb-8f1fb9551767" rule="LHT" id="41" junction="1" length="30.356556555754214">
+    <road name="nuscenes_connector_2be79e09-f17d-4570-aa75-5c1c098d6afd" rule="LHT" id="45" junction="1" length="19.25583683816101">
+        <userData code="nuScenesToken" value="2be79e09-f17d-4570-aa75-5c1c098d6afd"/>
+        <userData code="nuScenesLayer" value="lane_connector"/>
+        <userData code="inferredManeuver" value="straight"/>
+        <link>
+            <predecessor elementType="road" elementId="30" contactPoint="end"/>
+            <successor elementType="road" elementId="32" contactPoint="start"/>
+        </link>
+        <planView>
+            <geometry s="0" x="56.025273316071775" y="-14.696468423394588" hdg="3.0872426895809912" length="3.9819207781229013">
+                <arc curvature="0.001000001000001"/>
+            </geometry>
+            <geometry s="3.9819207781229013" x="52.04881206651592" y="-14.488074412572587" hdg="3.091224614341039" length="11.195203112875769">
+                <line/>
+            </geometry>
+            <geometry s="15.17712389099867" x="40.86780672749464" y="-13.924432374288681" hdg="3.091224614341039" length="4.078712947162338">
+                <arc curvature="-0.001000001000001"/>
+            </geometry>
+        </planView>
+        <elevationProfile/>
+        <lateralProfile/>
+        <lanes>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
+            <laneSection s="0.0">
+                <left>
+                    <lane id="1" type="driving" level="false">
+                        <link>
+                            <predecessor id="1"/>
+                            <successor id="1"/>
+                        </link>
+                        <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
+                        <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
+                            <type name="broken" width="0.12">
+                                <line length="3.0" space="3.0" tOffset="0" width="0.12" sOffset="0" rule="none"/>
+                            </type>
+                        </roadMark>
+                    </lane>
+                </left>
+                <center>
+                    <lane id="0" type="none" level="false">
+                        <roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.1"/>
+                    </lane>
+                </center>
+            </laneSection>
+        </lanes>
+    </road>
+    <road name="nuscenes_connector_349bd97f-67bc-4f5d-92cb-8f1fb9551767" rule="LHT" id="46" junction="1" length="30.356556555754214">
         <userData code="nuScenesToken" value="349bd97f-67bc-4f5d-92cb-8f1fb9551767"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="right"/>
         <link>
-            <predecessor elementType="road" elementId="24" contactPoint="end"/>
+            <predecessor elementType="road" elementId="26" contactPoint="end"/>
             <successor elementType="road" elementId="13" contactPoint="start"/>
         </link>
         <planView>
@@ -1884,7 +2131,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1908,7 +2155,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_368238a4-0296-4d75-8d86-374ecdedf3f3" rule="LHT" id="42" junction="1" length="31.393927276001712">
+    <road name="nuscenes_connector_368238a4-0296-4d75-8d86-374ecdedf3f3" rule="LHT" id="47" junction="1" length="31.393927276001712">
         <userData code="nuScenesToken" value="368238a4-0296-4d75-8d86-374ecdedf3f3"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
@@ -1930,7 +2177,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -1954,7 +2201,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_3f698990-af68-4f9c-a3ec-ab05a6d83baf" rule="LHT" id="43" junction="1" length="14.143634835643418">
+    <road name="nuscenes_connector_3f698990-af68-4f9c-a3ec-ab05a6d83baf" rule="LHT" id="48" junction="1" length="14.143634835643418">
         <userData code="nuScenesToken" value="3f698990-af68-4f9c-a3ec-ab05a6d83baf"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
@@ -1976,7 +2223,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2000,13 +2247,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_47b5a46c-88c0-445f-9193-972d8f7d705e" rule="LHT" id="44" junction="1" length="36.63155591967637">
+    <road name="nuscenes_connector_47b5a46c-88c0-445f-9193-972d8f7d705e" rule="LHT" id="49" junction="1" length="36.63155591967637">
         <userData code="nuScenesToken" value="47b5a46c-88c0-445f-9193-972d8f7d705e"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="25" contactPoint="end"/>
-            <successor elementType="road" elementId="20" contactPoint="start"/>
+            <predecessor elementType="road" elementId="27" contactPoint="end"/>
+            <successor elementType="road" elementId="22" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="59.181732428745974" y="-4.240478788390497" hdg="-0.04812558419674717" length="12.456891512733375">
@@ -2022,7 +2269,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2046,7 +2293,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_51947187-3a3d-4292-ab59-26f650ff0b5e" rule="LHT" id="45" junction="1" length="42.31259970746083">
+    <road name="nuscenes_connector_51947187-3a3d-4292-ab59-26f650ff0b5e" rule="LHT" id="50" junction="1" length="42.31259970746083">
         <userData code="nuScenesToken" value="51947187-3a3d-4292-ab59-26f650ff0b5e"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
@@ -2068,7 +2315,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2092,13 +2339,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_5e479fe8-4129-4ae1-a80c-70f19fd637d6" rule="LHT" id="46" junction="1" length="52.006421664433034">
+    <road name="nuscenes_connector_5e479fe8-4129-4ae1-a80c-70f19fd637d6" rule="LHT" id="51" junction="1" length="52.006421664433034">
         <userData code="nuScenesToken" value="5e479fe8-4129-4ae1-a80c-70f19fd637d6"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="right"/>
         <link>
-            <predecessor elementType="road" elementId="26" contactPoint="end"/>
-            <successor elementType="road" elementId="20" contactPoint="start"/>
+            <predecessor elementType="road" elementId="28" contactPoint="end"/>
+            <successor elementType="road" elementId="22" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="68.58724961778815" y="-35.924051252545354" hdg="1.5333172764215148" length="1.5095801845805918e-05">
@@ -2132,7 +2379,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2156,13 +2403,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_6f489965-2ef5-4299-aa17-9a5bcf4e3d2a" rule="LHT" id="47" junction="1" length="40.955880011581534">
+    <road name="nuscenes_connector_6f489965-2ef5-4299-aa17-9a5bcf4e3d2a" rule="LHT" id="52" junction="1" length="40.955880011581534">
         <userData code="nuScenesToken" value="6f489965-2ef5-4299-aa17-9a5bcf4e3d2a"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="31" contactPoint="end"/>
-            <successor elementType="road" elementId="22" contactPoint="start"/>
+            <predecessor elementType="road" elementId="35" contactPoint="end"/>
+            <successor elementType="road" elementId="24" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="65.37027811001369" y="-35.86157090041196" hdg="1.5218474566806788" length="4.772725927014454">
@@ -2178,7 +2425,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2202,13 +2449,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_7009e98c-4969-4fd8-8289-12075aa068fd" rule="LHT" id="48" junction="1" length="33.1288332832564">
+    <road name="nuscenes_connector_7009e98c-4969-4fd8-8289-12075aa068fd" rule="LHT" id="53" junction="1" length="33.1288332832564">
         <userData code="nuScenesToken" value="7009e98c-4969-4fd8-8289-12075aa068fd"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="right"/>
         <link>
-            <predecessor elementType="road" elementId="29" contactPoint="end"/>
-            <successor elementType="road" elementId="28" contactPoint="start"/>
+            <predecessor elementType="road" elementId="33" contactPoint="end"/>
+            <successor elementType="road" elementId="31" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="93.35044917190356" y="-12.266515263857013" hdg="3.0974574562563375" length="4.423187697943063e-05">
@@ -2224,7 +2471,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2248,13 +2495,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_8f74cf95-642c-4683-abd0-b7f661ba7fbd" rule="LHT" id="49" junction="1" length="33.947338151770595">
+    <road name="nuscenes_connector_8f74cf95-642c-4683-abd0-b7f661ba7fbd" rule="LHT" id="54" junction="1" length="33.947338151770595">
         <userData code="nuScenesToken" value="8f74cf95-642c-4683-abd0-b7f661ba7fbd"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
             <predecessor elementType="road" elementId="15" contactPoint="end"/>
-            <successor elementType="road" elementId="17" contactPoint="start"/>
+            <successor elementType="road" elementId="18" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="-21.69394219513903" y="0.6563898558031225" hdg="-0.05661384329166741" length="15.63450732979513">
@@ -2279,7 +2526,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2303,13 +2550,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_91da635c-b931-4517-89c9-ff90792d75f0" rule="LHT" id="50" junction="1" length="36.275155855507634">
+    <road name="nuscenes_connector_91da635c-b931-4517-89c9-ff90792d75f0" rule="LHT" id="55" junction="1" length="36.275155855507634">
         <userData code="nuScenesToken" value="91da635c-b931-4517-89c9-ff90792d75f0"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
             <predecessor elementType="road" elementId="15" contactPoint="end"/>
-            <successor elementType="road" elementId="18" contactPoint="start"/>
+            <successor elementType="road" elementId="19" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="-21.69394219513903" y="0.6563898558031225" hdg="-0.05661384329166741" length="17.964722044045466">
@@ -2325,7 +2572,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2349,12 +2596,12 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_9b76cd1e-5d2e-4848-b4e8-16681d8a4f14" rule="LHT" id="51" junction="1" length="15.083937952328677">
+    <road name="nuscenes_connector_9b76cd1e-5d2e-4848-b4e8-16681d8a4f14" rule="LHT" id="56" junction="1" length="15.083937952328677">
         <userData code="nuScenesToken" value="9b76cd1e-5d2e-4848-b4e8-16681d8a4f14"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="22" contactPoint="end"/>
+            <predecessor elementType="road" elementId="24" contactPoint="end"/>
             <successor elementType="road" elementId="12" contactPoint="start"/>
         </link>
         <planView>
@@ -2371,7 +2618,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2395,7 +2642,50 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_bfdbd392-4753-485b-96a7-f26ed396ccba" rule="LHT" id="52" junction="1" length="13.86814693933732">
+    <road name="nuscenes_connector_ac11ff67-0f9f-4573-b4c9-681c5b00d5d5" rule="LHT" id="57" junction="1" length="19.44958642964608">
+        <userData code="nuScenesToken" value="ac11ff67-0f9f-4573-b4c9-681c5b00d5d5"/>
+        <userData code="nuScenesLayer" value="lane_connector"/>
+        <userData code="inferredManeuver" value="straight"/>
+        <link>
+            <predecessor elementType="road" elementId="10" contactPoint="end"/>
+            <successor elementType="road" elementId="20" contactPoint="start"/>
+        </link>
+        <planView>
+            <geometry s="0" x="55.73239819314223" y="-11.859626730451158" hdg="3.1009105312563245" length="19.449163127686067">
+                <line/>
+            </geometry>
+            <geometry s="19.449163127686067" x="36.29932736943123" y="-11.068611731872963" hdg="3.1009105312563245" length="0.0004233019600131978">
+                <arc curvature="-58.685443629144714"/>
+            </geometry>
+        </planView>
+        <elevationProfile/>
+        <lateralProfile/>
+        <lanes>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
+            <laneSection s="0.0">
+                <left>
+                    <lane id="1" type="driving" level="false">
+                        <link>
+                            <predecessor id="1"/>
+                            <successor id="1"/>
+                        </link>
+                        <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
+                        <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
+                            <type name="broken" width="0.12">
+                                <line length="3.0" space="3.0" tOffset="0" width="0.12" sOffset="0" rule="none"/>
+                            </type>
+                        </roadMark>
+                    </lane>
+                </left>
+                <center>
+                    <lane id="0" type="none" level="false">
+                        <roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.1"/>
+                    </lane>
+                </center>
+            </laneSection>
+        </lanes>
+    </road>
+    <road name="nuscenes_connector_bfdbd392-4753-485b-96a7-f26ed396ccba" rule="LHT" id="58" junction="1" length="13.86814693933732">
         <userData code="nuScenesToken" value="bfdbd392-4753-485b-96a7-f26ed396ccba"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="left"/>
@@ -2417,7 +2707,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2441,12 +2731,12 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_c119fed8-400d-486a-93a0-6738464a3680" rule="LHT" id="53" junction="1" length="28.254148517792533">
+    <road name="nuscenes_connector_c119fed8-400d-486a-93a0-6738464a3680" rule="LHT" id="59" junction="1" length="28.254148517792533">
         <userData code="nuScenesToken" value="c119fed8-400d-486a-93a0-6738464a3680"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="right"/>
         <link>
-            <predecessor elementType="road" elementId="27" contactPoint="end"/>
+            <predecessor elementType="road" elementId="29" contactPoint="end"/>
             <successor elementType="road" elementId="10" contactPoint="start"/>
         </link>
         <planView>
@@ -2472,7 +2762,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2496,12 +2786,12 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_c290b52f-7678-469f-b6e0-665486d4108a" rule="LHT" id="54" junction="1" length="9.627659701506433">
+    <road name="nuscenes_connector_c290b52f-7678-469f-b6e0-665486d4108a" rule="LHT" id="60" junction="1" length="9.627659701506433">
         <userData code="nuScenesToken" value="c290b52f-7678-469f-b6e0-665486d4108a"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="28" contactPoint="end"/>
+            <predecessor elementType="road" elementId="31" contactPoint="end"/>
             <successor elementType="road" elementId="7" contactPoint="start"/>
         </link>
         <planView>
@@ -2515,7 +2805,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2539,13 +2829,59 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_da3704b9-a68e-47e7-b28e-2a70dce7039f" rule="LHT" id="55" junction="1" length="52.053477336385754">
+    <road name="nuscenes_connector_c7a6f934-182f-4b8f-b3af-a07826caeafa" rule="LHT" id="61" junction="1" length="17.904490270862503">
+        <userData code="nuScenesToken" value="c7a6f934-182f-4b8f-b3af-a07826caeafa"/>
+        <userData code="nuScenesLayer" value="lane_connector"/>
+        <userData code="inferredManeuver" value="left"/>
+        <link>
+            <predecessor elementType="road" elementId="17" contactPoint="end"/>
+            <successor elementType="road" elementId="32" contactPoint="start"/>
+        </link>
+        <planView>
+            <geometry s="0" x="53.823611448895804" y="-18.000657154945415" hdg="2.497641454685722" length="11.724191547238695">
+                <arc curvature="0.050280985013409975"/>
+            </geometry>
+            <geometry s="11.724191547238695" x="42.965836699139906" y="-14.047109964631712" hdg="3.087145354166779" length="6.180287921361676">
+                <line/>
+            </geometry>
+            <geometry s="17.90447946860037" x="36.79470727267989" y="-13.71077621252189" hdg="3.087145354166779" length="1.0802262132259215e-05">
+                <arc curvature="0.050280985013409975"/>
+            </geometry>
+        </planView>
+        <elevationProfile/>
+        <lateralProfile/>
+        <lanes>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
+            <laneSection s="0.0">
+                <left>
+                    <lane id="1" type="driving" level="false">
+                        <link>
+                            <predecessor id="1"/>
+                            <successor id="1"/>
+                        </link>
+                        <width a="3.5" b="0" c="0" d="0" sOffset="0"/>
+                        <roadMark sOffset="0" type="broken" weight="standard" color="standard" width="0.12">
+                            <type name="broken" width="0.12">
+                                <line length="3.0" space="3.0" tOffset="0" width="0.12" sOffset="0" rule="none"/>
+                            </type>
+                        </roadMark>
+                    </lane>
+                </left>
+                <center>
+                    <lane id="0" type="none" level="false">
+                        <roadMark sOffset="0" type="solid" weight="standard" color="standard" width="0.1"/>
+                    </lane>
+                </center>
+            </laneSection>
+        </lanes>
+    </road>
+    <road name="nuscenes_connector_da3704b9-a68e-47e7-b28e-2a70dce7039f" rule="LHT" id="62" junction="1" length="52.053477336385754">
         <userData code="nuScenesToken" value="da3704b9-a68e-47e7-b28e-2a70dce7039f"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
             <predecessor elementType="road" elementId="16" contactPoint="end"/>
-            <successor elementType="road" elementId="30" contactPoint="start"/>
+            <successor elementType="road" elementId="34" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="-33.16654400980905" y="-2.1245380560672054" hdg="-0.049655681149509696" length="26.36761669568471">
@@ -2561,7 +2897,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2585,13 +2921,13 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_dab7c5c2-8558-483c-9c8c-31815fbf2898" rule="LHT" id="56" junction="1" length="16.519619966142034">
+    <road name="nuscenes_connector_dab7c5c2-8558-483c-9c8c-31815fbf2898" rule="LHT" id="63" junction="1" length="16.519619966142034">
         <userData code="nuScenesToken" value="dab7c5c2-8558-483c-9c8c-31815fbf2898"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
             <predecessor elementType="road" elementId="12" contactPoint="end"/>
-            <successor elementType="road" elementId="21" contactPoint="start"/>
+            <successor elementType="road" elementId="23" contactPoint="start"/>
         </link>
         <planView>
             <geometry s="0" x="68.65076251445616" y="33.2715731897963" hdg="1.5202633840549236" length="0.37814841571981206">
@@ -2607,7 +2943,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2631,7 +2967,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_dc732962-4e53-4996-9860-a31a58ccb2eb" rule="LHT" id="57" junction="1" length="11.954668879193056">
+    <road name="nuscenes_connector_dc732962-4e53-4996-9860-a31a58ccb2eb" rule="LHT" id="64" junction="1" length="11.954668879193056">
         <userData code="nuScenesToken" value="dc732962-4e53-4996-9860-a31a58ccb2eb"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
@@ -2653,7 +2989,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2677,12 +3013,12 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_e6c02d87-72ec-45d7-be42-e7dc32917784" rule="LHT" id="58" junction="1" length="10.431959083014096">
+    <road name="nuscenes_connector_e6c02d87-72ec-45d7-be42-e7dc32917784" rule="LHT" id="65" junction="1" length="10.431959083014096">
         <userData code="nuScenesToken" value="e6c02d87-72ec-45d7-be42-e7dc32917784"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="21" contactPoint="end"/>
+            <predecessor elementType="road" elementId="23" contactPoint="end"/>
             <successor elementType="road" elementId="1" contactPoint="start"/>
         </link>
         <planView>
@@ -2699,7 +3035,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2723,7 +3059,7 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_ebe3cf3c-2508-4dbf-92b5-d3be35a240f6" rule="LHT" id="59" junction="1" length="10.705254382700787">
+    <road name="nuscenes_connector_ebe3cf3c-2508-4dbf-92b5-d3be35a240f6" rule="LHT" id="66" junction="1" length="10.705254382700787">
         <userData code="nuScenesToken" value="ebe3cf3c-2508-4dbf-92b5-d3be35a240f6"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="left"/>
@@ -2745,7 +3081,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2769,12 +3105,12 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_f24a067b-d650-47d0-8664-039d648d7c0d" rule="LHT" id="60" junction="1" length="32.22259195098818">
+    <road name="nuscenes_connector_f24a067b-d650-47d0-8664-039d648d7c0d" rule="LHT" id="67" junction="1" length="32.22259195098818">
         <userData code="nuScenesToken" value="f24a067b-d650-47d0-8664-039d648d7c0d"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="23" contactPoint="end"/>
+            <predecessor elementType="road" elementId="25" contactPoint="end"/>
             <successor elementType="road" elementId="11" contactPoint="start"/>
         </link>
         <planView>
@@ -2791,7 +3127,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2815,12 +3151,12 @@
             </laneSection>
         </lanes>
     </road>
-    <road name="nuscenes_connector_fb2f6e0a-4484-4cd2-bbef-deceac7e441f" rule="LHT" id="61" junction="1" length="11.083040372698363">
+    <road name="nuscenes_connector_fb2f6e0a-4484-4cd2-bbef-deceac7e441f" rule="LHT" id="68" junction="1" length="11.083040372698363">
         <userData code="nuScenesToken" value="fb2f6e0a-4484-4cd2-bbef-deceac7e441f"/>
         <userData code="nuScenesLayer" value="lane_connector"/>
         <userData code="inferredManeuver" value="straight"/>
         <link>
-            <predecessor elementType="road" elementId="17" contactPoint="end"/>
+            <predecessor elementType="road" elementId="18" contactPoint="end"/>
             <successor elementType="road" elementId="4" contactPoint="start"/>
         </link>
         <planView>
@@ -2837,7 +3173,7 @@
         <elevationProfile/>
         <lateralProfile/>
         <lanes>
-            <laneOffset s="0" a="1.75" b="0" c="0" d="0"/>
+            <laneOffset s="0" a="-1.75" b="0" c="0" d="0"/>
             <laneSection s="0.0">
                 <left>
                     <lane id="1" type="driving" level="false">
@@ -2863,94 +3199,103 @@
     </road>
     <junction name="scene_0061_native_junction" id="1" type="default">
         <userData code="topologySource" value="nuScenes connectivity"/>
-        <connection incomingRoad="11" id="0" contactPoint="start" connectingRoad="32">
+        <connection incomingRoad="11" id="0" contactPoint="start" connectingRoad="36">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="26" id="1" contactPoint="start" connectingRoad="33">
+        <connection incomingRoad="28" id="1" contactPoint="start" connectingRoad="37">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="14" id="2" contactPoint="start" connectingRoad="34">
+        <connection incomingRoad="14" id="2" contactPoint="start" connectingRoad="38">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="30" id="3" contactPoint="start" connectingRoad="35">
+        <connection incomingRoad="34" id="3" contactPoint="start" connectingRoad="39">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="18" id="4" contactPoint="start" connectingRoad="36">
+        <connection incomingRoad="19" id="4" contactPoint="start" connectingRoad="40">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="12" id="5" contactPoint="start" connectingRoad="37">
+        <connection incomingRoad="12" id="5" contactPoint="start" connectingRoad="41">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="9" id="6" contactPoint="start" connectingRoad="38">
+        <connection incomingRoad="9" id="6" contactPoint="start" connectingRoad="42">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="8" id="7" contactPoint="start" connectingRoad="39">
+        <connection incomingRoad="8" id="7" contactPoint="start" connectingRoad="43">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="11" id="8" contactPoint="start" connectingRoad="40">
+        <connection incomingRoad="11" id="8" contactPoint="start" connectingRoad="44">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="24" id="9" contactPoint="start" connectingRoad="41">
+        <connection incomingRoad="30" id="9" contactPoint="start" connectingRoad="45">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="5" id="10" contactPoint="start" connectingRoad="42">
+        <connection incomingRoad="26" id="10" contactPoint="start" connectingRoad="46">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="7" id="11" contactPoint="start" connectingRoad="43">
+        <connection incomingRoad="5" id="11" contactPoint="start" connectingRoad="47">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="25" id="12" contactPoint="start" connectingRoad="44">
+        <connection incomingRoad="7" id="12" contactPoint="start" connectingRoad="48">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="9" id="13" contactPoint="start" connectingRoad="45">
+        <connection incomingRoad="27" id="13" contactPoint="start" connectingRoad="49">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="26" id="14" contactPoint="start" connectingRoad="46">
+        <connection incomingRoad="9" id="14" contactPoint="start" connectingRoad="50">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="31" id="15" contactPoint="start" connectingRoad="47">
+        <connection incomingRoad="28" id="15" contactPoint="start" connectingRoad="51">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="29" id="16" contactPoint="start" connectingRoad="48">
+        <connection incomingRoad="35" id="16" contactPoint="start" connectingRoad="52">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="15" id="17" contactPoint="start" connectingRoad="49">
+        <connection incomingRoad="33" id="17" contactPoint="start" connectingRoad="53">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="15" id="18" contactPoint="start" connectingRoad="50">
+        <connection incomingRoad="15" id="18" contactPoint="start" connectingRoad="54">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="22" id="19" contactPoint="start" connectingRoad="51">
+        <connection incomingRoad="15" id="19" contactPoint="start" connectingRoad="55">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="4" id="20" contactPoint="start" connectingRoad="52">
+        <connection incomingRoad="24" id="20" contactPoint="start" connectingRoad="56">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="27" id="21" contactPoint="start" connectingRoad="53">
+        <connection incomingRoad="10" id="21" contactPoint="start" connectingRoad="57">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="28" id="22" contactPoint="start" connectingRoad="54">
+        <connection incomingRoad="4" id="22" contactPoint="start" connectingRoad="58">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="16" id="23" contactPoint="start" connectingRoad="55">
+        <connection incomingRoad="29" id="23" contactPoint="start" connectingRoad="59">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="12" id="24" contactPoint="start" connectingRoad="56">
+        <connection incomingRoad="31" id="24" contactPoint="start" connectingRoad="60">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="6" id="25" contactPoint="start" connectingRoad="57">
+        <connection incomingRoad="17" id="25" contactPoint="start" connectingRoad="61">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="21" id="26" contactPoint="start" connectingRoad="58">
+        <connection incomingRoad="16" id="26" contactPoint="start" connectingRoad="62">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="2" id="27" contactPoint="start" connectingRoad="59">
+        <connection incomingRoad="12" id="27" contactPoint="start" connectingRoad="63">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="23" id="28" contactPoint="start" connectingRoad="60">
+        <connection incomingRoad="6" id="28" contactPoint="start" connectingRoad="64">
             <laneLink from="1" to="1"/>
         </connection>
-        <connection incomingRoad="17" id="29" contactPoint="start" connectingRoad="61">
+        <connection incomingRoad="23" id="29" contactPoint="start" connectingRoad="65">
+            <laneLink from="1" to="1"/>
+        </connection>
+        <connection incomingRoad="2" id="30" contactPoint="start" connectingRoad="66">
+            <laneLink from="1" to="1"/>
+        </connection>
+        <connection incomingRoad="25" id="31" contactPoint="start" connectingRoad="67">
+            <laneLink from="1" to="1"/>
+        </connection>
+        <connection incomingRoad="18" id="32" contactPoint="start" connectingRoad="68">
             <laneLink from="1" to="1"/>
         </connection>
     </junction>
