@@ -96,6 +96,8 @@ fake 测试只防回归，不用于关闭环境门禁。
 
 ```powershell
 python runners/run_offline_acceptance.py --output outputs/offline_acceptance.json
+# Optional broader offline checks:
+python runners/run_offline_acceptance.py --extended --output outputs/offline_acceptance_extended.json
 python runners/probe_carla.py --host 127.0.0.1 --port 2000
 ```
 

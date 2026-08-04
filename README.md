@@ -107,10 +107,19 @@ The external algorithm Compose file contains only the algorithm service; CARLA
 0.9.16 remains on the host. See
 [`docs/algorithm_container.md`](docs/algorithm_container.md).
 
-Run every acceptance gate that requires no CARLA, ROS 2, GPU, network, or model:
+Run the core offline MVP gates. This validates the local exchange, dry-run
+closed-loop, metric, and report contracts; it does not execute or validate the
+separate live simulator/model gates:
 
 ```bash
 python runners/run_offline_acceptance.py --output outputs/offline_acceptance.json
+```
+
+Run the optional counterfactual, algorithm-plugin, and render-quality gates as
+an explicitly broader offline check:
+
+```bash
+python runners/run_offline_acceptance.py --extended --output outputs/offline_acceptance_extended.json
 ```
 
 Build ScenarioRunner-oriented config:

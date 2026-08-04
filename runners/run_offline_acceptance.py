@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-DEFAULT_GATES = {
+CORE_MVP_GATES = {
     "shared_protocol": (
         "tests.test_shared_protocol_schemas",
         "tests.test_shared_protocol_validation",
@@ -42,6 +42,9 @@ DEFAULT_GATES = {
         "tests.test_evaluation_criteria",
         "tests.test_metric_collector",
     ),
+}
+
+EXTENDED_OFFLINE_GATES = {
     "scene0061_counterfactual_evaluation": (
         "tests.test_scene0061_counterfactual_matrix",
         "tests.test_extended_metrics",
@@ -60,18 +63,27 @@ DEFAULT_GATES = {
     ),
 }
 
+# Keep the public name used by existing callers, but make the default scope the
+# smallest independently useful product surface.
+DEFAULT_GATES = CORE_MVP_GATES
+
 
 def run_offline_acceptance(
     *,
     python_executable: str = sys.executable,
     runner: Callable[..., Any] = subprocess.run,
     full_suite: bool = False,
+    extended: bool = False,
 ) -> dict[str, Any]:
-    gates = (
-        {"full_suite": ("discover", "-s", "tests")}
-        if full_suite
-        else DEFAULT_GATES
-    )
+    if full_suite:
+        gates = {"full_suite": ("discover", "-s", "tests")}
+        scope = "full_suite"
+    elif extended:
+        gates = {**CORE_MVP_GATES, **EXTENDED_OFFLINE_GATES}
+        scope = "extended_offline"
+    else:
+        gates = CORE_MVP_GATES
+        scope = "core_mvp"
     results = []
     for name, targets in gates.items():
         command = [python_executable, "-m", "unittest", *targets, "-q"]
@@ -97,7 +109,13 @@ def run_offline_acceptance(
     return {
         "schema_version": "closed_loop_offline_acceptance.v0",
         "status": "passed" if all(item["status"] == "passed" for item in results) else "failed",
+        "scope": scope,
         "environment_required": False,
+        "claims": [
+            "Scenario IR and exchange contracts are locally validated.",
+            "Dry-run closed-loop reporting and metric contracts are locally validated.",
+            "This command does not execute or validate the live CARLA, ROS 2, GPU, model, or NuRec gates.",
+        ],
         "gate_count": len(results),
         "passed_gate_count": sum(item["status"] == "passed" for item in results),
         "gates": results,
@@ -113,11 +131,17 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Run ClosedLoopBench gates that need no runtime environment.")
     parser.add_argument("--output", required=True)
     parser.add_argument("--python", default=sys.executable)
+    parser.add_argument(
+        "--extended",
+        action="store_true",
+        help="Include counterfactual, algorithm-plugin, and render-quality offline gates.",
+    )
     parser.add_argument("--full-suite", action="store_true")
     args = parser.parse_args(argv)
     result = run_offline_acceptance(
         python_executable=args.python,
         full_suite=args.full_suite,
+        extended=args.extended,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
