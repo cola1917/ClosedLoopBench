@@ -252,6 +252,7 @@ def run_open_loop_gt_replay(
                         else None
                     ),
                     "actor_count": len(actor_states),
+                    "actor_states": actor_states,
                     "execution_status": result["execution_status"],
                     "control": result["control"],
                     "detail": result.get("detail", {}),
@@ -261,9 +262,11 @@ def run_open_loop_gt_replay(
         executor.close()
 
     source = inputs.scenario_ir.get("source") or {}
+    scene_id = source.get("scene_name") or inputs.scenario_ir["scenario_id"]
     return {
         "schema_version": "open_loop_gt_replay_report.v1",
         "run_id": run_id,
+        "scene_id": scene_id,
         "scenario_id": inputs.scenario_ir["scenario_id"],
         "scene_name": source.get("scene_name"),
         "scene_version": source.get("version"),
@@ -275,6 +278,7 @@ def run_open_loop_gt_replay(
         "control_affects_next_ego_pose": False,
         "claims_m8": False,
         "claims_m9": False,
+        "matrix_actor_ready_ir_bound": False,
         "control_application": "not_applied",
         "frame_count": len(frames),
         "control_count": len(frames) - fallback_count,
@@ -293,6 +297,10 @@ def run_open_loop_gt_replay(
                 "sha256": inputs.opendrive_sha256,
             },
         },
+        "scenario_ir_path": str(inputs.scenario_ir_path),
+        "scenario_ir_sha256": inputs.scenario_ir_sha256,
+        "opendrive_path": str(inputs.opendrive_path),
+        "opendrive_sha256": inputs.opendrive_sha256,
         "frames": frames,
         "pose_ownership": {
             "owner": "scenario_ir_reference_trajectory",
@@ -466,6 +474,28 @@ def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _write_trace(path: Path, report: Mapping[str, Any]) -> None:
+    if path.exists():
+        raise OpenLoopReplayError(f"refusing to overwrite existing output: {path}")
+    identity = {
+        "schema_version": "open_loop_gt_replay_frame.v1",
+        "run_id": report["run_id"],
+        "scene_id": report["scene_id"],
+        "scenario_id": report["scenario_id"],
+        "evidence_classification": report["evidence_classification"],
+        "ego_pose_source": report["ego_pose_source"],
+        "control_affects_next_ego_pose": report["control_affects_next_ego_pose"],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "".join(
+            json.dumps({**identity, **frame}, ensure_ascii=False, sort_keys=True) + "\n"
+            for frame in report["frames"]
+        ),
+        encoding="utf-8",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run open-loop GT replay with Scenario IR pose ownership."
@@ -483,8 +513,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", default="scene-0061-open-loop-m1")
     parser.add_argument("--max-frames", type=int)
     parser.add_argument("--report", required=True, type=Path)
+    parser.add_argument("--trace", type=Path)
     args = parser.parse_args(argv)
     try:
+        if args.trace is not None and args.trace.exists():
+            raise OpenLoopReplayError(
+                f"refusing to overwrite existing output: {args.trace}"
+            )
         config = (
             strict_json_loads(args.plugin_config.read_text(encoding="utf-8"))
             if args.plugin_config
@@ -503,7 +538,12 @@ def main(argv: list[str] | None = None) -> int:
             max_frames=args.max_frames,
         )
         _write_json(args.report, report)
-        print(json.dumps({"status": "written", "report": str(args.report)}, ensure_ascii=False))
+        if args.trace:
+            _write_trace(args.trace, report)
+        result = {"status": "written", "report": str(args.report)}
+        if args.trace:
+            result["trace"] = str(args.trace)
+        print(json.dumps(result, ensure_ascii=False))
         return 0
     except (OSError, ValueError, json.JSONDecodeError, PluginContractError) as exc:
         print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False))

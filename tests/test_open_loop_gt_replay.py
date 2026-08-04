@@ -65,6 +65,9 @@ class OpenLoopGtReplayTests(unittest.TestCase):
         self.assertFalse(report["claims_m9"])
         self.assertEqual(report["control_application"], "not_applied")
         self.assertEqual(report["pose_ownership"]["max_pose_error_m"], 0.0)
+        self.assertEqual(report["scene_id"], "scene-test")
+        self.assertEqual(report["scenario_ir_sha256"], ir_sha)
+        self.assertEqual(report["opendrive_sha256"], xodr_sha)
         for frame in report["frames"][:-1]:
             self.assertEqual(frame["ego_pose_before_control"], frame["ego_pose_after_control"])
             self.assertEqual(frame["next_ego_pose_expected"], frame["next_ego_pose_actual"])
@@ -72,6 +75,7 @@ class OpenLoopGtReplayTests(unittest.TestCase):
                 frame["next_ego_pose_source"],
                 "scenario_ir_reference_trajectory",
             )
+        self.assertEqual(report["frames"][1]["actor_states"][0]["x"], 3.05)
 
     def test_pin_mismatch_fails_closed(self):
         from runners.run_open_loop_gt_replay import OpenLoopReplayError, load_pinned_inputs
