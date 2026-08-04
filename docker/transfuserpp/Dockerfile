@@ -22,10 +22,12 @@ RUN --mount=type=bind,source=docker/transfuserpp/vendor,target=/tmp/tfpp-vendor,
     if [ -f /tmp/tfpp-vendor/torch-2.5.0-cp310-cp310-manylinux1_x86_64.whl ]; then \
       python3 -m pip install --no-cache-dir \
         --index-url "${PIP_INDEX_URL}" \
+        --find-links /tmp/tfpp-vendor \
         /tmp/tfpp-vendor/torch-2.5.0-cp310-cp310-manylinux1_x86_64.whl; \
     fi; \
     python3 -m pip install --no-cache-dir \
       --index-url "${PIP_INDEX_URL}" \
+      --find-links /tmp/tfpp-vendor \
       -r /tmp/requirements.runtime.txt
 
 COPY docker/algorithm/carla_msgs /opt/algorithm-msgs/src/carla_msgs
