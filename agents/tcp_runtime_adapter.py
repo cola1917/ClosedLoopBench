@@ -119,6 +119,10 @@ class TcpRuntimeAdapter:
             result["calibration"] = deepcopy(calibration)
         if observation_metadata is not None:
             result["observation_metadata"] = deepcopy(observation_metadata)
+            if "frame_id" in observation_metadata:
+                result["frame_id"] = observation_metadata["frame_id"]
+            if "t_sec" in observation_metadata:
+                result["timestamp"] = observation_metadata["t_sec"]
         return result
 
 
@@ -138,13 +142,17 @@ def is_valid_vehicle_control(control: Any) -> bool:
 
 
 def normalize_vehicle_control(control: dict[str, Any]) -> dict[str, Any]:
-    return {
+    result = {
         "throttle": float(control["throttle"]),
         "steer": float(control["steer"]),
         "brake": float(control["brake"]),
         "hand_brake": bool(control["hand_brake"]),
         "reverse": bool(control["reverse"]),
     }
+    for field in ("source_frame_id", "inference_ms", "status", "reason", "diagnostics"):
+        if field in control:
+            result[field] = deepcopy(control[field])
+    return result
 
 
 def _in_range(value: Any, lower: float, upper: float) -> bool:

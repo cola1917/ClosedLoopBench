@@ -56,6 +56,11 @@ CANONICAL_RUNNERS = (
         "Score open-loop predictions against pinned Scenario IR ground truth.",
     ),
     RunnerSpec(
+        "open-loop-ros-smoke",
+        "runners.run_open_loop_ros_smoke",
+        "Run Pure Pursuit through the frame-matched local ROS open-loop boundary.",
+    ),
+    RunnerSpec(
         "acceptance-triplicate",
         "runners.run_carla_acceptance_triplicate",
         "Run the strict three-run CARLA acceptance gate.",
