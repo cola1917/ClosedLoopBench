@@ -1,7 +1,8 @@
 # Open-loop multimodal evaluation (scene-0061)
 
 Branch: `feat/open-loop-multimodal`
-Status: planning boundary + IR pin audit. Implementation follows this doc.
+Status: M1-M4 implemented and pushed; M5 Stage A preflight implemented, live
+CARLA/TF++ execution is blocked by remote environment prerequisites.
 
 ## 1. Goal
 
@@ -232,8 +233,8 @@ Closed-loop comfort / route progress / interactive TTC may be attached as
 | Stage | Deliverable | Exit | Status |
 |---|---|---|---|
 | **D0** | Boundary doc + IR/XODR pin | Merged / pushed on open-loop branch | **Done** |
-| **D1** | Runner `open_loop_gt_replay` | scene0061 dry-run, control cannot own next pose | Pending |
-| **D2** | Local ROS + TF++ on CARLA sensors (Stage A) | Intermediates + ADE report | Pending |
+| **D1** | Runner `open_loop_gt_replay` | scene0061 dry-run, control cannot own next pose | **Done (offline)** |
+| **D2** | Local ROS + TF++ on CARLA sensors (Stage A) | Intermediates + ADE report | **M4 done; M5 blocked on runtime** |
 | **D3** | NuRec multimodal at GT poses (Stage B) | Same metrics; still not M8/M9 | Pending |
 | **D4** | Formal acceptance | `S0_original_replay` × 3 seeds + frozen report schema | Pending |
 
@@ -271,11 +272,11 @@ D0 boundary ──► M1 runner skeleton ──► M2 GT replay smoke
 
 | ID | Milestone | Work items | Done when | Est. |
 |---|---|---|---|---|
-| **M1** | Open-loop runner skeleton | Add `open_loop_gt_replay` mode (or flag) on existing CARLA runner; pin IR/XODR paths + SHA checks; `control_affects_next_ego_pose=false` in run config/report | Unit/integration test: after predict, next ego pose equals IR sample N+1 | 1–2 d |
-| **M2** | GT teleport + actor replay smoke | Ego `set_transform` each tick from IR; actors follow IR trajectories; no NuRec/TF++ yet; stub or null control sink | One scene0061 short run log: 39 IR ticks (or subset) with pose error≈0 vs IR | 1–2 d |
-| **M3** | Metrics v0 | ADE/FDE, lateral/heading vs IR; latency/drop counters; report schema draft with §9 fields | Offline JSON report from synthetic or stub predictions validates schema | 1–2 d |
-| **M4** | Local ROS boundary | Reuse `ros2_observation_control`; publish GT-pose observations; Pure Pursuit (or stub plugin) consumes ROS; still no pose authority from control | Matched frame_id obs→control trace; Pure Pursuit open-loop report | 2–3 d |
-| **M5** | TF++ Stage A | Wire TF++ compose/backend to Stage A CARLA RGB+LiDAR at GT poses; dump intermediates; score ADE + sync gates | One successful TF++ open-loop run on scene0061 with intermediates + ADE | 3–5 d |
+| **M1** | Open-loop runner skeleton | Add `open_loop_gt_replay` mode (or flag) on existing CARLA runner; pin IR/XODR paths + SHA checks; `control_affects_next_ego_pose=false` in run config/report | Unit/integration test: after predict, next ego pose equals IR sample N+1 | **Done** |
+| **M2** | GT teleport + actor replay smoke | Ego `set_transform` each tick from IR; actors follow IR trajectories; no NuRec/TF++ yet; stub or null control sink | One scene0061 short run log: 39 IR ticks (or subset) with pose error≈0 vs IR | **Done offline; live CARLA blocked** |
+| **M3** | Metrics v0 | ADE/FDE, lateral/heading vs IR; latency/drop counters; report schema draft with §9 fields | Offline JSON report from synthetic or stub predictions validates schema | **Done** |
+| **M4** | Local ROS boundary | Reuse `ros2_observation_control`; publish GT-pose observations; Pure Pursuit (or stub plugin) consumes ROS; still no pose authority from control | Matched frame_id obs→control trace; Pure Pursuit open-loop report | **Done offline** |
+| **M5** | TF++ Stage A | Wire TF++ compose/backend to Stage A CARLA RGB+LiDAR at GT poses; dump intermediates; score ADE + sync gates | One successful TF++ open-loop run on scene0061 with intermediates + ADE | **Preflight done; blocked on CARLA/TF++ runtime** |
 | **M6** | NuRec Stage B | Swap sensor source to NuRec @ GT pose; keep same TF++/metrics path; disclose M8.2 not claimed | Same report shape as M5 with NuRec modality hashes | 3–5 d |
 | **M7** | Formal acceptance | `S0_original_replay` × seeds `{41,43,47}` (or matrix seeds); perception AP if GT boxes available; freeze schema + artifact hashes | Triplicate mean±var report; CI or remote checklist green | 2–3 d |
 

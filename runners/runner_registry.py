@@ -61,6 +61,11 @@ CANONICAL_RUNNERS = (
         "Run Pure Pursuit through the frame-matched local ROS open-loop boundary.",
     ),
     RunnerSpec(
+        "open-loop-tfpp-stage-a",
+        "runners.run_open_loop_transfuserpp_stage_a",
+        "Run or preflight TransFuser++ on native CARLA Stage A observations at IR poses.",
+    ),
+    RunnerSpec(
         "acceptance-triplicate",
         "runners.run_carla_acceptance_triplicate",
         "Run the strict three-run CARLA acceptance gate.",
