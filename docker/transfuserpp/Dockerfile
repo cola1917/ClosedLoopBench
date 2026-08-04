@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 FROM ros:humble-ros-base-jammy
 
 ARG APT_MIRROR=https://mirrors.aliyun.com/ubuntu
