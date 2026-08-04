@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM ros:humble-ros-base-jammy
 
 ARG APT_MIRROR=https://mirrors.aliyun.com/ubuntu
@@ -17,9 +19,16 @@ RUN set -eux; \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/transfuserpp/requirements.runtime.txt /tmp/requirements.runtime.txt
-RUN python3 -m pip install --no-cache-dir \
-    --index-url "${PIP_INDEX_URL}" \
-    -r /tmp/requirements.runtime.txt
+RUN --mount=type=bind,source=docker/transfuserpp/vendor,target=/tmp/tfpp-vendor,ro \
+    set -eux; \
+    if [ -f /tmp/tfpp-vendor/torch-2.5.0-cp310-cp310-manylinux1_x86_64.whl ]; then \
+      python3 -m pip install --no-cache-dir \
+        --index-url "${PIP_INDEX_URL}" \
+        /tmp/tfpp-vendor/torch-2.5.0-cp310-cp310-manylinux1_x86_64.whl; \
+    fi; \
+    python3 -m pip install --no-cache-dir \
+      --index-url "${PIP_INDEX_URL}" \
+      -r /tmp/requirements.runtime.txt
 
 COPY docker/algorithm/carla_msgs /opt/algorithm-msgs/src/carla_msgs
 RUN . /opt/ros/humble/setup.sh \
