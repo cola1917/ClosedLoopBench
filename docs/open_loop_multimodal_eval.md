@@ -227,18 +227,104 @@ this substitute without re-binding hashes.
 Closed-loop comfort / route progress / interactive TTC may be attached as
 **GT-trajectory proxies** only. They do not decide open-loop pass/fail.
 
-## 7. Delivery stages
+## 7. Delivery stages (overview)
 
-| Stage | Deliverable | Exit |
-|---|---|---|
-| **D0** | This boundary doc + IR pin | Done when merged to the feature branch |
-| **D1** | Runner mode `open_loop_gt_replay` (teleport, no pose authority from control) | One scene0061 case dry-run with Pure Pursuit or stub |
-| **D2** | Local ROS + TF++ on Stage A sensors | Intermediates + ADE report |
-| **D3** | Stage B NuRec multimodal at GT poses | Same metrics; still not M8/M9 |
-| **D4** | scene0061 `S0_original_replay` × 3 seeds acceptance | Frozen report schema + hashes |
+| Stage | Deliverable | Exit | Status |
+|---|---|---|---|
+| **D0** | Boundary doc + IR/XODR pin | Merged / pushed on open-loop branch | **Done** |
+| **D1** | Runner `open_loop_gt_replay` | scene0061 dry-run, control cannot own next pose | Pending |
+| **D2** | Local ROS + TF++ on CARLA sensors (Stage A) | Intermediates + ADE report | Pending |
+| **D3** | NuRec multimodal at GT poses (Stage B) | Same metrics; still not M8/M9 | Pending |
+| **D4** | Formal acceptance | `S0_original_replay` × 3 seeds + frozen report schema | Pending |
 
-Implementation should extend existing runners/adapters rather than fork a new
-repo. Prefer additive evidence labels over renaming closed-loop gates.
+Implementation extends existing runners/adapters. Prefer additive evidence
+labels over renaming closed-loop gates.
+
+## 7.1 Detailed development plan
+
+**Working branch:** `feat/open-loop-multimodal`  
+**Goal product:** open-loop multimodal TF++ eval on scene-0061  
+**Hard rule:** every formal report sets `evidence_classification: open_loop_multimodal`; never claim M8/M9.
+
+### Milestone map
+
+```text
+D0 boundary ──► M1 runner skeleton ──► M2 GT replay smoke
+                      │
+                      ▼
+              M3 metrics v0 (ADE/FDE)
+                      │
+                      ▼
+         M4 ROS local + Pure Pursuit open-loop
+                      │
+                      ▼
+         M5 TF++ Stage A (CARLA sensors)     ← first "usable" demo
+                      │
+                      ▼
+         M6 NuRec Stage B multimodal
+                      │
+                      ▼
+         M7 triplicate acceptance + freeze    ← phase complete
+```
+
+### Small milestones
+
+| ID | Milestone | Work items | Done when | Est. |
+|---|---|---|---|---|
+| **M1** | Open-loop runner skeleton | Add `open_loop_gt_replay` mode (or flag) on existing CARLA runner; pin IR/XODR paths + SHA checks; `control_affects_next_ego_pose=false` in run config/report | Unit/integration test: after predict, next ego pose equals IR sample N+1 | 1–2 d |
+| **M2** | GT teleport + actor replay smoke | Ego `set_transform` each tick from IR; actors follow IR trajectories; no NuRec/TF++ yet; stub or null control sink | One scene0061 short run log: 39 IR ticks (or subset) with pose error≈0 vs IR | 1–2 d |
+| **M3** | Metrics v0 | ADE/FDE, lateral/heading vs IR; latency/drop counters; report schema draft with §9 fields | Offline JSON report from synthetic or stub predictions validates schema | 1–2 d |
+| **M4** | Local ROS boundary | Reuse `ros2_observation_control`; publish GT-pose observations; Pure Pursuit (or stub plugin) consumes ROS; still no pose authority from control | Matched frame_id obs→control trace; Pure Pursuit open-loop report | 2–3 d |
+| **M5** | TF++ Stage A | Wire TF++ compose/backend to Stage A CARLA RGB+LiDAR at GT poses; dump intermediates; score ADE + sync gates | One successful TF++ open-loop run on scene0061 with intermediates + ADE | 3–5 d |
+| **M6** | NuRec Stage B | Swap sensor source to NuRec @ GT pose; keep same TF++/metrics path; disclose M8.2 not claimed | Same report shape as M5 with NuRec modality hashes | 3–5 d |
+| **M7** | Formal acceptance | `S0_original_replay` × seeds `{41,43,47}` (or matrix seeds); perception AP if GT boxes available; freeze schema + artifact hashes | Triplicate mean±var report; CI or remote checklist green | 2–3 d |
+
+**Calendar hint (single engineer, host healthy):**  
+usable demo ≈ **M5 (~1.5–2.5 weeks)**; phase complete ≈ **M7 (~4–6 weeks)** including NuRec.
+
+### Exit checklist per milestone
+
+**M1**
+- [ ] Mode/flag documented in runner help
+- [ ] Fail-closed if IR/XODR SHA mismatch
+- [ ] Test proves control output does not change next ego pose
+
+**M2**
+- [ ] Tick log binds `frame_id` ↔ IR `t_sec` / pose
+- [ ] Actor count / ids audited against IR selection
+- [ ] No claim of perception or TF++
+
+**M3**
+- [ ] ADE/FDE computed at declared horizons
+- [ ] Report includes §9 identity block
+- [ ] `claims_m8` / `claims_m9` always false
+
+**M4**
+- [ ] ROS topics match existing observation/control contract
+- [ ] Zero scored frame mismatches on smoke run
+- [ ] Pure Pursuit (or stub) intermediates optional
+
+**M5**
+- [ ] TF++ consumes `camera_front` + `lidar_top` only as model inputs
+- [ ] Intermediate hashes recorded
+- [ ] ADE report generated from TF++ waypoints
+
+**M6**
+- [ ] Sensor provenance = NuRec (path + hash)
+- [ ] Explicit note: not M8.2 LiDAR–world closure
+- [ ] Metrics path identical to M5 (no forked scorer)
+
+**M7**
+- [ ] Three seeds, same case, comparable config
+- [ ] Frozen `open_loop_multimodal_report.v1` (or named schema)
+- [ ] README/runbook one-pager for remote xt167-style host
+
+### Out of scope until after M7
+
+- Interactive counterfactuals (M10/M11)
+- Claiming Goal closed-loop / M9
+- Replacing IR GT with exchange XODR lane KPIs as primary score
+- Merging dormant M8 experiment branches into this track
 
 ## 8. Relationship to blocked closed-loop work
 
