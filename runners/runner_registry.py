@@ -51,6 +51,11 @@ CANONICAL_RUNNERS = (
         "Replay pinned Scenario IR poses without control-owned ego motion.",
     ),
     RunnerSpec(
+        "evaluate-open-loop",
+        "runners.evaluate_open_loop",
+        "Score open-loop predictions against pinned Scenario IR ground truth.",
+    ),
+    RunnerSpec(
         "acceptance-triplicate",
         "runners.run_carla_acceptance_triplicate",
         "Run the strict three-run CARLA acceptance gate.",
