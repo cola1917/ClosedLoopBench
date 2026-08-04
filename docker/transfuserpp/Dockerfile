@@ -20,14 +20,14 @@ COPY docker/transfuserpp/requirements.runtime.txt /tmp/requirements.runtime.txt
 RUN --mount=type=bind,source=docker/transfuserpp/vendor,target=/tmp/tfpp-vendor,ro \
     set -eux; \
     if [ -f /tmp/tfpp-vendor/torch-2.5.0-cp310-cp310-manylinux1_x86_64.whl ]; then \
+      python3 -m pip install --no-cache-dir --no-deps \
+        /tmp/tfpp-vendor/*.whl; \
       python3 -m pip install --no-cache-dir \
         --index-url "${PIP_INDEX_URL}" \
-        --find-links /tmp/tfpp-vendor \
-        /tmp/tfpp-vendor/torch-2.5.0-cp310-cp310-manylinux1_x86_64.whl; \
+        filelock fsspec jinja2 networkx sympy==1.13.1 typing-extensions; \
     fi; \
     python3 -m pip install --no-cache-dir \
       --index-url "${PIP_INDEX_URL}" \
-      --find-links /tmp/tfpp-vendor \
       -r /tmp/requirements.runtime.txt
 
 COPY docker/algorithm/carla_msgs /opt/algorithm-msgs/src/carla_msgs
