@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 EVIDENCE_CLASSIFICATIONS = (
     "offline_conformance",
+    "open_loop_multimodal",
     "control_only",
     "perception_eligible",
     "quality_stress",

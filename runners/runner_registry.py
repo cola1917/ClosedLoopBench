@@ -46,6 +46,11 @@ CANONICAL_RUNNERS = (
         "Run the CARLA BasicAgent closed-loop path.",
     ),
     RunnerSpec(
+        "open-loop-gt-replay",
+        "runners.run_open_loop_gt_replay",
+        "Replay pinned Scenario IR poses without control-owned ego motion.",
+    ),
+    RunnerSpec(
         "acceptance-triplicate",
         "runners.run_carla_acceptance_triplicate",
         "Run the strict three-run CARLA acceptance gate.",

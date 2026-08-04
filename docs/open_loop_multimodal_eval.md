@@ -1,6 +1,6 @@
 # Open-loop multimodal evaluation (scene-0061)
 
-Branch: `feat/open-loop-multimodal-eval`  
+Branch: `feat/open-loop-multimodal`
 Status: planning boundary + IR pin audit. Implementation follows this doc.
 
 ## 1. Goal
