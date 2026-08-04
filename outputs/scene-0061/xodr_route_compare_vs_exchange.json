@@ -1,0 +1,53 @@
+﻿{
+    "schema_version":  "xodr_route_static_validation.v1",
+    "road_scope":  "all",
+    "baseline":  {
+                     "path":  "E:\\code\\ClosedLoopBench\\outputs\\scene0061_exchange_v2\\road.xodr",
+                     "road_scope":  "all",
+                     "road_count":  229,
+                     "total_road_count":  229,
+                     "map_lane_road_count":  86,
+                     "connector_road_count":  142,
+                     "route_inference_road_count":  1,
+                     "ego_corridor_road_count":  0,
+                     "junction_count":  17,
+                     "lane_width_m":  4.5949142105851539,
+                     "pose_count":  39,
+                     "inside_lane_fraction":  0.51282051282051277,
+                     "centerline_distance_m":  {
+                                                   "p50":  2.3383536178253075,
+                                                   "p95":  3.4225878551254802,
+                                                   "max":  3.4812182214225063
+                                               },
+                     "heading_error_deg":  {
+                                               "p50":  5.371571676467493,
+                                               "p95":  9.995660290002089,
+                                               "max":  11.596918760862138
+                                           }
+                 },
+    "fixed":  {
+                  "path":  "E:\\code\\ClosedLoopBench\\outputs\\scene-0061\\road.xodr",
+                  "road_scope":  "all",
+                  "road_count":  68,
+                  "total_road_count":  68,
+                  "map_lane_road_count":  35,
+                  "connector_road_count":  0,
+                  "route_inference_road_count":  0,
+                  "ego_corridor_road_count":  0,
+                  "junction_count":  1,
+                  "lane_width_m":  3.5,
+                  "pose_count":  39,
+                  "inside_lane_fraction":  0.97435897435897434,
+                  "centerline_distance_m":  {
+                                                "p50":  0.64094531994412429,
+                                                "p95":  1.6324848795549267,
+                                                "max":  1.8231059902939684
+                                            },
+                  "heading_error_deg":  {
+                                            "p50":  4.1990870432956271,
+                                            "p95":  15.61080137515745,
+                                            "max":  19.637678277717541
+                                        }
+              },
+    "runtime_validation":  "required_remote_carla"
+}
