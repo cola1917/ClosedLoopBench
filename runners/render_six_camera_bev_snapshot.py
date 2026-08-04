@@ -33,6 +33,7 @@ CAMERA_ORDER = (
 PANEL_BACKGROUND = (9, 11, 15)
 PANEL_BORDER = (74, 80, 88)
 PANEL_TEXT = (236, 240, 246)
+_RESAMPLE_LANCZOS = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 
 
 def _read_json_object(path: Path, *, label: str) -> dict[str, Any]:
@@ -226,7 +227,7 @@ def _render_camera_panel(
     if source_width < 1 or source_height < 1:
         raise ValueError(f"camera payload has invalid dimensions: {source_path}")
     height = max(1, round(source_height * width / source_width))
-    image = source.resize((width, height), Image.Resampling.LANCZOS)
+    image = source.resize((width, height), _RESAMPLE_LANCZOS)
     draw = ImageDraw.Draw(image)
     scale_x = width / source_width
     scale_y = height / source_height
@@ -361,7 +362,7 @@ def render_six_camera_bev_snapshot(
         )
         with Image.open(bev_path) as opened:
             bev = opened.convert("RGB")
-    bev = bev.resize((bev_width, grid_height), Image.Resampling.LANCZOS)
+    bev = bev.resize((bev_width, grid_height), _RESAMPLE_LANCZOS)
 
     composite = Image.new("RGB", (grid_width + bev_width, grid_height), PANEL_BACKGROUND)
     composite.paste(grid, (0, 0))
