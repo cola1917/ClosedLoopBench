@@ -2,7 +2,7 @@
 
 Date: 2026-08-04  
 Branch: `feat/open-loop-multimodal`  
-Source commit: `7cd7145`
+Source commit: `005a54c`
 
 This is an environment blocker audit, not open-loop score evidence. It must not
 be used as a formal M5, M6, or M7 pass report.
