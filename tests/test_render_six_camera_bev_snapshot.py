@@ -22,6 +22,11 @@ XODR = """<?xml version=\"1.0\"?>
 """
 
 
+def _pixels(image: Image.Image):
+    getter = getattr(image, "get_flattened_data", None)
+    return getter() if callable(getter) else list(image.getdata())
+
+
 class RenderSixCameraBevSnapshotTests(unittest.TestCase):
     def test_renders_hash_bound_six_camera_grid_with_calibrated_box_outlines(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -99,7 +104,7 @@ class RenderSixCameraBevSnapshotTests(unittest.TestCase):
                 camera_cell_width=160,
                 bev_width=320,
             )
-            colors = set(Image.open(output).convert("RGB").get_flattened_data())
+            colors = set(_pixels(Image.open(output).convert("RGB")))
             metadata = json.loads(output.with_suffix(".json").read_text(encoding="utf-8"))
 
         self.assertEqual(result["world_tick_frame"], 123)

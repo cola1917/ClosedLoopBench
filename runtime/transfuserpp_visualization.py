@@ -12,6 +12,9 @@ from agents.plugin_contract import strict_json_loads
 from agents.transfuserpp_contract import validate_intermediate_record
 
 
+_RESAMPLING = getattr(Image, "Resampling", Image)
+
+
 BEV_PALETTE_RGB = np.asarray(
     [
         [0, 0, 0],
@@ -48,7 +51,7 @@ def render_intermediate_debug_frame(
         raise ValueError("dense output SHA-256 mismatch")
 
     rgb = Image.open(rgb_path).convert("RGB")
-    rgb.thumbnail((720, 405), Image.Resampling.LANCZOS)
+    rgb.thumbnail((720, 405), _RESAMPLING.LANCZOS)
     with np.load(dense_path) as dense:
         if "bev_semantic_labels" not in dense:
             raise ValueError("dense output has no bev_semantic_labels")
@@ -59,7 +62,7 @@ def render_intermediate_debug_frame(
     # grid indexes ego-forward on rows and ego-right on columns.
     bev = np.flip(labels, axis=0)
     bev_image = Image.fromarray(BEV_PALETTE_RGB[bev], mode="RGB").resize(
-        (512, 512), Image.Resampling.NEAREST
+        (512, 512), _RESAMPLING.NEAREST
     )
     draw_bev = ImageDraw.Draw(bev_image)
     grid = (row.get("dynamic_bev_proxy") or {}).get("grid") or {}
