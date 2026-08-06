@@ -29,6 +29,14 @@ Environment-only remaining work:
 scene-0061 local counterfactual evaluation and remote handoff:
 [`docs/scene0061_local_evaluation_handoff.md`](docs/scene0061_local_evaluation_handoff.md).
 
+M8 open-loop TransFuser++ three-route (raw/reconstructed/harmonized) bbox
+comparison, debugging history, root-cause analysis, and retained final
+evidence (tracked under `outputs/scene0061-transfuserpp/runtime/`, tag
+`0.0.1`):
+[`docs/open_loop_m8_debug_log.md`](docs/open_loop_m8_debug_log.md).
+Reproducible NuRec dynamic-vehicle LiDAR render diagnostic:
+[`tools/diagnose_nurec_dynamic_vehicle_lidar.py`](tools/diagnose_nurec_dynamic_vehicle_lidar.py).
+
 Unified ego plugin contract, Pure Pursuit, and TCP/TransFuser binding boundary:
 [`docs/algorithm_plugin_contract.md`](docs/algorithm_plugin_contract.md).
 
