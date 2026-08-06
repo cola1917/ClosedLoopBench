@@ -685,7 +685,10 @@ class TransFuserPPModelRuntime:
         from agents.transfuserpp_contract import validate_camera_adaptation_contract
 
         contract = validate_camera_adaptation_contract(
-            adaptation_contract, "camera adaptation"
+            adaptation_contract,
+            "camera adaptation",
+            source_width=int(adaptation_contract.get("source_width", 1600)),
+            source_height=int(adaptation_contract.get("source_height", 900)),
         )
         height, width = image.shape[:2]
         if (width, height) != (

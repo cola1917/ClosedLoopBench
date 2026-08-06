@@ -2,8 +2,19 @@
 
 The reconstruction package stores 800x450 RGB and NRE-axis LiDAR payloads.
 TF++'s formal sensor contract consumes 1600x900 JPEG and CARLA-axis XYZI, so
-this builder records the deterministic RGB resize and LiDAR axis transform in
-the trace instead of hiding either conversion in the runtime.
+this builder records the deterministic RGB handling and LiDAR axis transform
+in the trace instead of hiding either conversion in the runtime.
+
+RGB quality note (M8 follow-up): upsampling the native 800x450 NuRec camera
+canvas to the formal 1600x900 canvas with BILINEAR degraded car-patch edge
+energy by ~15x (Laplacian variance 198 -> 14 at the same canvas resolution),
+which the TF++ CenterNet head could not recover: reconstructed-input inference
+matched 0/39 GT boxes while CARLA-native 1600x900 RGB matched 25/39.  The r5
+builder therefore materializes the camera at its native 800x450 resolution and
+binds an 800x450 camera-adaptation contract, so the adapter's resize becomes a
+single 800x450 -> 1024x512 upsampling pass instead of a double round trip.
+The NVIDIA harmonizer RGB canvas is 2400x900; it is center-cropped to 16:9 and
+downsampled to 800x450 with LANCZOS before the same contract binding.
 """
 
 from __future__ import annotations
@@ -34,7 +45,8 @@ TRACE_SCHEMA = "transfuserpp_triplicate_observation_trace.v1"
 RECONSTRUCTED_SOURCE = "reconstructed_rgb_lidar"
 HARMONIZED_SOURCE = "harmonized_rgb_reconstructed_lidar"
 SOURCE_RGB_SIZE = (800, 450)
-FORMAL_RGB_SIZE = (1600, 900)
+FORMAL_RGB_SIZE = (800, 450)
+HARMONIZER_RGB_SIZE = (2400, 900)
 # NRE 26.04 renders LiDAR in x_forward_y_right_z_up; the CARLA sensor frame is
 # also x_forward_y_right_z_up, so the response is a +90 deg rotation about z
 # (x'=-y, y'=x, z'=z).  Same-frame NN registration against CARLA native clouds
@@ -147,12 +159,21 @@ def _materialize_rgb(source: Path, target: Path) -> dict[str, Any]:
     try:
         with Image.open(source) as image:
             rgb = image.convert("RGB")
-            if rgb.size != SOURCE_RGB_SIZE:
-                raise TriplicateTraceError(
-                    f"RGB source must be {SOURCE_RGB_SIZE[0]}x{SOURCE_RGB_SIZE[1]}: {source}"
+            if rgb.size == SOURCE_RGB_SIZE:
+                resized = rgb
+                method = "native"
+            elif rgb.size == HARMONIZER_RGB_SIZE:
+                left = (HARMONIZER_RGB_SIZE[0] - FORMAL_RGB_SIZE[0]) // 2
+                top = (HARMONIZER_RGB_SIZE[1] - FORMAL_RGB_SIZE[1]) // 2
+                resized = rgb.crop(
+                    (left, top, left + FORMAL_RGB_SIZE[0], top + FORMAL_RGB_SIZE[1])
                 )
-            resampling = getattr(Image, "Resampling", Image)
-            resized = rgb.resize(FORMAL_RGB_SIZE, resampling.BILINEAR)
+                method = "center_crop_2400x900"
+            else:
+                raise TriplicateTraceError(
+                    f"RGB source must be {SOURCE_RGB_SIZE[0]}x{SOURCE_RGB_SIZE[1]} or "
+                    f"{HARMONIZER_RGB_SIZE[0]}x{HARMONIZER_RGB_SIZE[1]}: {source}"
+                )
             target.parent.mkdir(parents=True, exist_ok=True)
             resized.save(target, format="JPEG", quality=95, subsampling=0)
     except OSError as exc:
@@ -160,9 +181,9 @@ def _materialize_rgb(source: Path, target: Path) -> dict[str, Any]:
     return {
         "source_path": str(source.resolve()),
         "source_sha256": sha256_file(source),
-        "source_size": list(SOURCE_RGB_SIZE),
+        "source_size": list(rgb.size),
         "target_size": list(FORMAL_RGB_SIZE),
-        "method": "bilinear_resize",
+        "method": method,
         "target_sha256": sha256_file(target),
     }
 
@@ -317,7 +338,8 @@ def _source_spec(
         len(harmonizer_frames) - 1,
         max(0, int(round(ir_time_sec * harmonizer_fps))),
     )
-    harmonized_rgb = harmonizer_root / f"{harmonizer_index:05d}.jpg"
+    name_width = len(harmonizer_frames[0].stem)
+    harmonized_rgb = harmonizer_root / f"{harmonizer_index:0{name_width}d}.jpg"
     return original_lidar, original_lidar, {
         "source_kind": "nvidia_harmonizer_rgb_only",
         "source_frame_index": recon_index,
@@ -386,7 +408,9 @@ def build_trace(
     calibration = deepcopy(template_frame.get("calibration"))
     if not isinstance(calibration, dict):
         raise TriplicateTraceError("template frame calibration is missing")
-    calibration["camera_adaptation"] = camera_adaptation_contract()
+    calibration["camera_adaptation"] = camera_adaptation_contract(
+        source_width=FORMAL_RGB_SIZE[0], source_height=FORMAL_RGB_SIZE[1]
+    )
     lidar_sensor_to_ego = calibration.get("lidar_sensor_to_ego")
     if not isinstance(lidar_sensor_to_ego, list) or len(lidar_sensor_to_ego) != 16:
         raise TriplicateTraceError("template LiDAR extrinsic is missing")
@@ -507,7 +531,7 @@ def build_trace(
             "harmonizer_root": str(harmonizer_root.resolve()) if harmonizer_root else None,
             "camera_source_size": list(SOURCE_RGB_SIZE),
             "camera_formal_size": list(FORMAL_RGB_SIZE),
-            "camera_materialization": "bilinear_resize",
+            "camera_materialization": "native_800x450",
             "lidar_axis_normalization": {
                 "schema_version": "nre_lidar_axis_normalization.v1",
                 "response_to_sensor": list(LIDAR_RESPONSE_TO_SENSOR),
