@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 from copy import deepcopy
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from statistics import fmean
 from typing import Any, Iterable, Mapping
 
@@ -389,13 +389,24 @@ def _resolve_record_paths(
 def _resolve_evidence_path(
     reference: Mapping[str, Any], *, evidence_root: Path | None
 ) -> Path:
-    declared = Path(str(reference.get("path") or ""))
+    declared_value = str(reference.get("path") or "")
+    declared = Path(declared_value)
     if declared.is_file():
         return declared
     host_value = str(reference.get("host_path") or "")
     host_path = Path(host_value)
     if host_value and host_path.is_file():
         return host_path
+
+    # Runtime records are written inside the container with /sim-data as the
+    # mount root. The host evaluator receives the directory mounted there as
+    # evidence_root, so sibling paths such as /sim-data/payloads and
+    # /sim-data/transfuserpp_intermediates must be resolved from the same root.
+    for value in (declared_value, host_value, str(reference.get("relative_path") or "")):
+        candidate = _resolve_container_evidence_path(value, evidence_root)
+        if candidate is not None:
+            return candidate
+
     relative = str(reference.get("relative_path") or "").replace("\\", "/")
     relative_path = Path(relative)
     if (
@@ -413,6 +424,30 @@ def _resolve_evidence_path(
         if candidate.is_file():
             return candidate
     return declared
+
+
+def _resolve_container_evidence_path(
+    value: str, evidence_root: Path | None
+) -> Path | None:
+    if evidence_root is None or not value:
+        return None
+    declared = PurePosixPath(value.replace("\\", "/"))
+    container_root = PurePosixPath("/sim-data")
+    if not declared.is_absolute():
+        return None
+    try:
+        relative = declared.relative_to(container_root)
+    except ValueError:
+        return None
+    if ".." in relative.parts:
+        return None
+    root = evidence_root.resolve()
+    candidate = (root / Path(*relative.parts)).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate if candidate.is_file() else None
 
 
 def _trace_integrity_problems(rows: list[Mapping[str, Any]]) -> list[str]:

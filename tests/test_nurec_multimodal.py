@@ -64,6 +64,59 @@ def _frame():
 
 
 class NuRecMultimodalTests(unittest.TestCase):
+    def test_open_loop_keeps_gt_pose_in_runtime_target_frame(self):
+        from adapters.nurec_multimodal import build_open_loop_nurec_multimodal_frame
+
+        identity = [
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ]
+        frame = build_open_loop_nurec_multimodal_frame(
+            _scene_package(),
+            frame_id=0,
+            simulation_time_sec=0.05,
+            interval_start_sec=0.0,
+            ego_pose_pair=make_pose_pair(
+                {"x": 0.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+                {"x": 1.0, "y": 0.0, "z": 0.0, "yaw": 0.0},
+            ),
+            camera_specs=[
+                {
+                    "sensor_id": "camera_front",
+                    "model": "recorded_pinhole",
+                    "width": 1600,
+                    "height": 900,
+                    "sensor_to_ego": identity,
+                }
+            ],
+            lidar_specs=[
+                {
+                    "sensor_id": "lidar_top",
+                    "model": "PANDAR128",
+                    "device_type": "PANDAR128",
+                    "sensor_to_ego": identity,
+                }
+            ],
+        )
+        camera = frame["modalities"]["rgb"]["requests"][0]["sensor"]
+        self.assertEqual(camera["pose_pair"]["start"]["position_m"]["x"], 0.0)
+        self.assertEqual(camera["pose_pair"]["end"]["position_m"]["x"], 1.0)
+        self.assertEqual(frame["coordinate_frame"]["render"], "nuscenes_global")
+
     def test_rgb_and_lidar_materialize_the_same_dynamic_object_payload(self):
         from adapters.nurec_multimodal import materialize_nurec_rpc_requests
 

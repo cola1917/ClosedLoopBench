@@ -36,8 +36,11 @@ from runtime.scene0061_lidar_axis_normalization import (  # noqa: E402
 
 # The transform matrix verified by the r22 same-frame physical gate
 # (lidar_axis_evidence.json axis_normalization.response_to_sensor_sha256).
+# NOTE: r22 froze the r18 candidate [-z, -y, -x]; the M8 r3 fix corrected it
+# to a +90 deg rotation about z (x'=-y, y'=x, z'=z, verified by same-frame
+# NRE<->CARLA-native point registration) and re-pinned the sha.
 R22_VERIFIED_MATRIX_SHA256 = (
-    "8277ba837a2779bf041c9a1ee8a8f78f8c912192d06b74082a01a1706d96d925"
+    "e816f07319faa1be566abf1499ae03361ea299b617d4fd399dee6adb560cf586"
 )
 
 

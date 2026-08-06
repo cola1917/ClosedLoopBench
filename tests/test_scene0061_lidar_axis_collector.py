@@ -280,11 +280,12 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
         from runtime.scene0061_lidar_axis_gate import validate_lidar_axis_evidence
         from runtime.scene0061_lidar_axis_normalization import normalize_lidar_xyzi
 
-        # NRE 26.04 response axes observed in r18: CARLA sensor = [-z, -y, -x].
+        # NRE 26.04 response bytes, measured against same-frame CARLA native
+        # capture (M8 r3 fix): sensor_local = [-y, x, z] (z-axis +90 deg).
         transform = [
-            0.0, 0.0, -1.0, 0.0,
             0.0, -1.0, 0.0, 0.0,
-            -1.0, 0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0,
         ]
         contract = {
@@ -302,7 +303,7 @@ class Scene0061LiDARAxisCollectorTests(unittest.TestCase):
             normal = capture_path.read_bytes()
             raw_points = []
             for x, y, z, intensity in struct.iter_unpack("<4f", normal):
-                raw_points.append((-z, -y, -x, intensity))
+                raw_points.append((y, -x, z, intensity))
             raw = b"".join(struct.pack("<4f", *point) for point in raw_points)
             nurec_path = Path(values[1]["records"][0]["response_metadata"]["materialized_payload"]["path"])
             raw_path = nurec_path.with_name("nre-raw.xyzi")
