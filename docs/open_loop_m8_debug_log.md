@@ -67,6 +67,45 @@ final comparison to be meaningful.
 The raw final warm-up report records three excluded warm-up inferences. Formal
 latency and intermediate metrics include only the 39 scored frames.
 
+## External validation (2026-08-06): no public report of this exact bug
+
+Web research (GitHub, NVIDIA Developer Forums, Docker Hub) found **no public
+report of dynamic objects rendering in RGB but missing from LiDAR in NuRec/NRE**,
+but strong corroboration that this is a server-internal defect rather than a
+client-side call error:
+
+- `render_lidar` is an internal/experimental API: the CARLA NuRec example code
+  (`PythonAPI/examples/nvidia/nurec`) contains zero LiDAR code, and
+  carla-simulator/carla#9734 + discussion #9732 (May 2026, unanswered) note the
+  high-level Python integration wraps only `render_rgb` while `LidarRenderRequest`
+  / `SensorsimService.render_lidar` are exposed only in the gRPC layer.
+- Version mismatch signal: nurec-grpc:0.2.0 (the only CARLA-side release)
+  officially targets NuRec 25.07, while NGC only publishes nre-ga 26.x; NVIDIA
+  staff stated (forum 372696, 2026-06-10) "NuRec 26.04 CARLA integration would be
+  available in near future". Our stack (nre-ga:26.04 + nurec-grpc:0.2.0, which
+  does load and render) is therefore an officially not-yet-integrated combination,
+  consistent with a half-wired LiDAR dynamic path.
+- Known silent-failure modes in the dynamic-entity path: forum 368592 documents
+  that gRPC dynamic-object insertion returns success while rendering nothing when
+  the USDZ has no internal dynamic tracks (`LayerTrackIds: Initializing track
+  filtering from 0 available tracks`; NVIDIA root cause: missing NCore
+  CuboidsComponent). Our server reports 223 tracks, so our case is not this exact
+  failure, but it shows the dynamic path can silently degrade without errors.
+- Forum 365761 ("NuRec GA DynamicObject updates bug") reported dynamic-object
+  rendering problems on the latest GA; NVIDIA staff could not reproduce and the
+  thread closed unresolved.
+
+Call-correctness evidence from our own A/B experiments: the dynamic_objects
+payload is contractually only `track_id + pose_pair` (nothing else a client can
+get wrong); the same object lists render correctly in RGB (edited-vs-original
+diff lands on the true target pixels; a 3 m placement renders in RGB at the
+requested spot); the formal-run requests are byte-identical to our probes (f0
+point count 18714 matches the recorded frames.jsonl); the server accepts the
+requests without error and reports 223 available tracks. The LiDAR output is
+pose-invariant for distant objects (identical 136-cell extras at 34.7 m and
+100 m requests) while RGB follows the pose — the bug is internal to the server's
+LiDAR dynamic-object raycasting path.
+
 ## Cleanup
 
 Moved out of the M8 working set after the final comparison passed:
