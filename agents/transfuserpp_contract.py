@@ -435,7 +435,7 @@ def build_runtime_manifest(config: Mapping[str, Any]) -> dict[str, Any]:
             "install_or_build_transfuserpp_runtime",
             "bind_pinned_carla_garage_repository",
             "bind_real_checkpoint_and_model_config",
-            "bind_matching_carla_pythonapi_agents_navigation",
+            "bind_hash_pinned_carla_agents_navigation_source",
             "verify_cuda_inference_and_memory",
             "bind_live_nurec_rgb_lidar_payloads",
             "run_scene0061_s0_s2_s4",

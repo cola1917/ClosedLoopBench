@@ -125,7 +125,7 @@ one NuRec `camera_front`, live `lidar_top`, ego speed/pose, and route
 target/command while preserving the six-camera formal gate. Each control is
 bound to the same frame, dynamic-object digest, case/seed/run identity,
 repository revision, checkpoint/config hashes, and materialized input hashes.
-The matching CARLA PythonAPI navigation package is also hash-bound, and every
+The hash-pinned CARLA `agents/navigation` source is also hash-bound, and every
 run compares the full artifact/package/scenario/matrix/source/variant identity
 between host and sidecar.
 

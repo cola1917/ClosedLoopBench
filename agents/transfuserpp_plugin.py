@@ -43,6 +43,15 @@ class TransFuserPPPlugin:
         self.runtime.reset()
         self._reset = True
 
+    def warmup(self, observation: Mapping[str, Any], *, iterations: int = 1) -> dict[str, Any]:
+        """Warm the loaded model without producing a scored intermediate."""
+        if not self._initialized or self._closed:
+            raise RuntimeError("TransFuser++ plugin is not initialized")
+        warmup = getattr(self.runtime, "warmup", None)
+        if not callable(warmup):
+            raise RuntimeError("TransFuser++ runtime does not expose formal warmup")
+        return deepcopy(dict(warmup(observation, iterations=iterations)))
+
     def predict_control(self, observation: Mapping[str, Any]) -> dict[str, Any]:
         if not self._initialized or not self._reset or self._closed:
             raise RuntimeError("TransFuser++ plugin lifecycle is not ready")

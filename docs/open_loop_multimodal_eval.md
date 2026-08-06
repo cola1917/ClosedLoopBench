@@ -1,8 +1,109 @@
 # Open-loop multimodal evaluation (scene-0061)
 
 Branch: `feat/open-loop-multimodal`
-Status: M1-M4 implemented and pushed; M5 Stage A preflight implemented, live
-CARLA/TF++ execution is blocked by remote environment prerequisites.
+Status: M1-M4 implemented and pushed; M5 Stage A, M6 Stage B, M7 formal
+acceptance, and the M8 three-route comparison with formal actor-aware bbox
+scoring completed on 2026-08-06.
+
+Current M5 evidence:
+
+- report: `outputs/scene0061-transfuserpp/runtime/m5_stage_a_report.v3.json`
+- CUDA gate: `outputs/scene0061-transfuserpp/runtime/transfuserpp.cuda-preflight.json`
+- native trace: `outputs/scene0061-transfuserpp/native-stage-a-3frames-r7/native_stage_a_observations.json`
+
+Current M6 Stage B evidence (the real 39-frame full-run is the sole retained M6 result; superseded smoke attempts are recorded in the debug log):
+
+- report: `outputs/scene0061-transfuserpp/runtime/m6_stage_b_report.full39.json`
+- runtime binding: `outputs/scene0061-transfuserpp/runtime/transfuserpp.m6.stage-b.runtime.v5.json`
+- NuRec trace: `outputs/scene0061-transfuserpp/m6-stage-b-full-r11/nurec_stage_b_observations.json`
+- TF++ image: `closed-loop-bench/transfuserpp-v5:m6-stage-d`, digest
+  `sha256:d5f814b8aab88bbef08e70a4f915771658221190d2501e2894815977d3db6394`
+- result: `execution_status=completed`, 39/39 intermediates, `fallback_count=0`,
+  39/39 matched frames, 0 dropped or mismatched frames
+- NuRec `SensorsimService/26.04` (`26.4.146`): 6 RGB + `lidar_top` on every
+  frame; dynamic actor creation `false`, dynamic object count `0`; trace SHA
+  `d6c61100f4a1b940e0d9f7006dfa9935d0428a1d0bfc504dcfad80316fda8b53`
+- the first three CUDA warm-up passes are excluded from scored frames; formal
+  frame 0 starts after warm-up and remains below the 0.5 s plugin timeout;
+  formal latency mean/p95/max is `158.54/183.77/235.76 ms`
+- this is M6 open-loop evidence only; IR actors are used as offline collision
+  proxies and no CARLA dynamic actors or TF++ control are applied
+- debug history and cleanup record: `docs/open_loop_m6_debug_log.md`
+
+Current M7 formal acceptance evidence:
+
+- frozen triplicate report:
+  `outputs/scene0061-transfuserpp/runtime/open_loop_m7_triplicate_report.v1.json`
+- seed reports: `runtime/m6_stage_b_report.full39.json` (seed 41 retained M6
+  full-run), `runtime/m7_seed_43_report.json`, and
+  `runtime/m7_seed_47_report.json`
+- intermediate evaluations:
+  `runtime/m7_seed_{41,43,47}_intermediate_evaluation.json`; all three are
+  `status=evaluated`, `frame_count=39`, with no fail-closed reasons
+- formal result: `S0_original_replay` x seeds `{41,43,47}`; 39/39 frames and
+  39/39 intermediates for every seed, zero fallback/drop/mismatch, six RGB plus
+  `lidar_top` on every NuRec frame
+- fixed algorithm identity: checkpoint
+  `d6fbdc28f7398354beadc7cf6765d866457c957f7b470c88ba206e73311a3b44`, model
+  config `895e3e9704ceda443169ca32aaef2712b1becf2d42473d7273071ec6ceda113e`,
+  repo revision `72f39a63423a5edef6904b1487e0360a64bcf445`, image digest
+  `sha256:d5f814b8aab88bbef08e70a4f915771658221190d2501e2894815977d3db6394`
+- aggregate SHA-256:
+  `71e49fc7a8532dbfa2b92033c16e2f75516e7bd38d323ac8d4820283bf1d03e5`
+- the aggregate keeps BEV/depth/target-speed dense outputs in the intermediate
+  evaluation boundary; full-scene 3D occupancy remains unavailable
+- reproducible procedure: `docs/open_loop_m7_runbook.md`; debug and cleanup
+  history: `docs/open_loop_m7_debug_log.md`
+
+GUI observability smoke (not formal evidence):
+
+- report: `outputs/scene0061-transfuserpp/runtime/gui-smoke-20260805/gui_smoke.json`
+- screenshot: `outputs/scene0061-transfuserpp/runtime/gui-smoke-20260805/carla_gui_smoke.png`
+- CARLA `0.9.16`, 15.012 s, 702 synchronous ticks; `formal_evidence: false`
+- uses the pinned OpenDRIVE replay world and GT ego trajectory; this is a
+  visual sanity check and does not claim a full Town asset or M5 score
+
+Current M8 three-route comparison and formal bbox evidence:
+
+- comparison report: `outputs/scene0061-transfuserpp/runtime/m8_triplicate_bbox_comparison.v2.json`
+- status: `ready`; 39/39 frames, 39/39 intermediates, zero fallback, zero
+  frame mismatch, and formal actor-aware bbox gate passed on all three routes
+- formal route reports:
+  `runtime/m8_raw_r6_bbox_final_open_loop_report.json`,
+  `runtime/m8_reconstructed_r2_bbox_final_open_loop_report.json`, and
+  `runtime/m8_harmonized_r2_bbox_final_open_loop_report.json`
+- formal intermediate evaluations:
+  `runtime/m8_raw_r6_bbox_final_intermediate_evaluation.json`,
+  `runtime/m8_reconstructed_r2_bbox_final_intermediate_evaluation.json`, and
+  `runtime/m8_harmonized_r2_bbox_final_intermediate_evaluation.json`
+- actor manifest: `inputs/open_loop_bbox_actor_manifest.v1.json`; 68 dynamic
+  actors, 39 frames, shared by all routes
+- comparison SHA-256: `f794520b828877af0292074824d0dbd3048e165d6b4692b643ae0e7f8cb8a666`
+
+The route binding is deliberately asymmetric:
+
+| Route | RGB input | LiDAR input | Ground truth |
+|---|---|---|---|
+| `raw_original` | CARLA Stage-A native RGB | CARLA Stage-A native LiDAR | Original Scenario IR |
+| `reconstructed` | NuRec reconstructed RGB, original-replay branch | NuRec reconstructed LiDAR, original-replay branch | Original Scenario IR |
+| `harmonized` | NVIDIA Harmonizer RGB | The exact same NuRec reconstructed LiDAR as the reconstructed route | Original Scenario IR |
+
+In the NuRec package, a file such as
+`multimodal_20fps/lidar/000000_original.xyzi.bin` is **not** raw CARLA LiDAR.
+`original` names the original-replay branch inside the reconstructed NuRec
+capture. The raw route is the only route using CARLA Stage-A sensor payloads.
+The comparison gate checks the materialized source provenance and requires all
+39 reconstructed/Harmonizer LiDAR SHA-256 values to match. Harmonizer is RGB
+only; it does not regenerate or alter LiDAR.
+
+M8 intermediate metrics currently available for all three routes are waypoint
+ADE/FDE, route-checkpoint error, target-speed error/bin accuracy, and formal
+dynamic actor oriented BEV bbox metrics. The bbox scorer uses GT dimensions
+and yaw, same-frame same-class unique matching, oriented BEV IoU, TP/FP/FN,
+Precision/Recall, AP25/AP50, mAP, center/size/yaw error. Depth is explicitly
+`unavailable` because no bound same-frame camera-LiDAR depth target is present;
+control remains `prediction_only` because Scenario IR has no human-driver
+control labels.
 
 ## 1. Goal
 
@@ -81,6 +182,10 @@ CARLA is the **synchronized replay host**, not a closed-loop world:
 
 `apply_control` may be called only for plumbing smoke tests. Formal open-loop
 acceptance requires **GT teleport ownership** of ego pose every scored frame.
+
+M6 Stage B uses a static NuRec scene instead of a CARLA actor world: no dynamic
+CARLA actors are created, and Scenario IR actor tracks are retained only for
+offline collision-proxy scoring.
 
 ### ROS role
 
@@ -234,9 +339,9 @@ Closed-loop comfort / route progress / interactive TTC may be attached as
 |---|---|---|---|
 | **D0** | Boundary doc + IR/XODR pin | Merged / pushed on open-loop branch | **Done** |
 | **D1** | Runner `open_loop_gt_replay` | scene0061 dry-run, control cannot own next pose | **Done (offline)** |
-| **D2** | Local ROS + TF++ on CARLA sensors (Stage A) | Intermediates + ADE report | **M4 done; M5 blocked on runtime** |
-| **D3** | NuRec multimodal at GT poses (Stage B) | Same metrics; still not M8/M9 | Pending |
-| **D4** | Formal acceptance | `S0_original_replay` × 3 seeds + frozen report schema | Pending |
+| **D2** | Local ROS + TF++ on CARLA sensors (Stage A) | Intermediates + ADE report | **Done; real M5 Stage A evidence captured** |
+| **D3** | NuRec multimodal at GT poses (Stage B) | Same metrics; still not M8/M9 | **Done; real 39-frame M6 full-run** |
+| **D4** | Formal acceptance | `S0_original_replay` × 3 seeds + frozen report schema | **Done; 2026-08-05 triplicate passed** |
 
 Implementation extends existing runners/adapters. Prefer additive evidence
 labels over renaming closed-loop gates.
@@ -265,7 +370,10 @@ D0 boundary ──► M1 runner skeleton ──► M2 GT replay smoke
          M6 NuRec Stage B multimodal
                       │
                       ▼
-         M7 triplicate acceptance + freeze    ← phase complete
+         M7 triplicate acceptance + freeze
+                      │
+                      ▼
+         M8 raw/reconstructed/Harmonizer comparison ← phase complete
 ```
 
 ### Small milestones
@@ -273,12 +381,13 @@ D0 boundary ──► M1 runner skeleton ──► M2 GT replay smoke
 | ID | Milestone | Work items | Done when | Est. |
 |---|---|---|---|---|
 | **M1** | Open-loop runner skeleton | Add `open_loop_gt_replay` mode (or flag) on existing CARLA runner; pin IR/XODR paths + SHA checks; `control_affects_next_ego_pose=false` in run config/report | Unit/integration test: after predict, next ego pose equals IR sample N+1 | **Done** |
-| **M2** | GT teleport + actor replay smoke | Ego `set_transform` each tick from IR; actors follow IR trajectories; no NuRec/TF++ yet; stub or null control sink | One scene0061 short run log: 39 IR ticks (or subset) with pose error≈0 vs IR | **Done offline; live CARLA blocked** |
+| **M2** | GT teleport + actor replay smoke | Ego `set_transform` each tick from IR; actors follow IR trajectories; no NuRec/TF++ yet; stub or null control sink | One scene0061 short run log: 39 IR ticks (or subset) with pose error≈0 vs IR | **Done offline; GUI-only CARLA visual smoke verified; actor replay not claimed** |
 | **M3** | Metrics v0 | ADE/FDE, lateral/heading vs IR; latency/drop counters; report schema draft with §9 fields | Offline JSON report from synthetic or stub predictions validates schema | **Done** |
 | **M4** | Local ROS boundary | Reuse `ros2_observation_control`; publish GT-pose observations; Pure Pursuit (or stub plugin) consumes ROS; still no pose authority from control | Matched frame_id obs→control trace; Pure Pursuit open-loop report | **Done offline** |
-| **M5** | TF++ Stage A | Wire TF++ compose/backend to Stage A CARLA RGB+LiDAR at GT poses; dump intermediates; score ADE + sync gates | One successful TF++ open-loop run on scene0061 with intermediates + ADE | **Preflight done; blocked on CARLA/TF++ runtime** |
-| **M6** | NuRec Stage B | Swap sensor source to NuRec @ GT pose; keep same TF++/metrics path; disclose M8.2 not claimed | Same report shape as M5 with NuRec modality hashes | 3–5 d |
+| **M5** | TF++ Stage A | Wire TF++ compose/backend to Stage A CARLA RGB+LiDAR at GT poses; dump intermediates; score ADE + sync gates | One successful TF++ open-loop run on scene0061 with intermediates + ADE | **Done; 2026-08-05 real smoke** |
+| **M6** | NuRec Stage B | Swap sensor source to NuRec @ GT pose; keep same TF++/metrics path; disclose M8.2 not claimed | Same report shape as M5 with NuRec modality hashes | **Done; 2026-08-05 real 39-frame full-run** |
 | **M7** | Formal acceptance | `S0_original_replay` × seeds `{41,43,47}` (or matrix seeds); perception AP if GT boxes available; freeze schema + artifact hashes | Triplicate mean±var report; CI or remote checklist green | 2–3 d |
+| **M8** | Three-route input comparison and bbox scoring | Hold GT, TF++, runtime, and frame identity fixed while comparing CARLA native, NuRec reconstructed, and Harmonizer RGB + shared NuRec LiDAR; score real actor boxes | Three completed reports, three formal bbox evaluations, and a ready comparison artifact | **Done; 2026-08-06 39-frame comparison** |
 
 **Calendar hint (single engineer, host healthy):**  
 usable demo ≈ **M5 (~1.5–2.5 weeks)**; phase complete ≈ **M7 (~4–6 weeks)** including NuRec.
@@ -311,14 +420,38 @@ usable demo ≈ **M5 (~1.5–2.5 weeks)**; phase complete ≈ **M7 (~4–6 weeks
 - [ ] ADE report generated from TF++ waypoints
 
 **M6**
-- [ ] Sensor provenance = NuRec (path + hash)
-- [ ] Explicit note: not M8.2 LiDAR–world closure
-- [ ] Metrics path identical to M5 (no forked scorer)
+- [x] Sensor provenance = NuRec (path + hash)
+- [x] Explicit note: not M8.2 LiDAR–world closure
+- [x] Metrics path identical to M5 (no forked scorer)
+- [x] No CARLA dynamic actors or TF++ control; IR actors are offline collision proxies
+- [x] Formal in-process CUDA warm-up is excluded from scored frames
+- [x] Full 39-frame Scenario IR trajectory runs with zero fallback and zero frame mismatch
 
 **M7**
-- [ ] Three seeds, same case, comparable config
-- [ ] Frozen `open_loop_multimodal_report.v1` (or named schema)
-- [ ] README/runbook one-pager for remote xt167-style host
+- [x] Three seeds, same case, comparable pinned config
+- [x] Frozen `open_loop_multimodal_m7_triplicate_report.v1` with mean/variance
+- [x] Runbook and debug/cleanup record for the remote xt167-style host
+- [x] Host/container `/sim-data` path binding and intermediate evaluation
+- [x] No M8/M9 claim; static NuRec scene and control-only boundary retained
+
+**M8**
+- [x] Raw route binds native CARLA RGB and native CARLA LiDAR from the same frame
+- [x] Reconstructed route binds NuRec reconstructed RGB and reconstructed LiDAR
+- [x] Harmonizer route binds Harmonizer RGB and the same reconstructed LiDAR SHA per frame
+- [x] All three routes use the original Scenario IR as GT
+- [x] One shared USDZ/Scenario IR actor manifest binds 68 dynamic actors over 39 frames
+- [x] Oriented BEV bbox matching uses GT dimensions/yaw, same-frame class matching, and unique assignments
+- [x] TP/FP/FN, Precision/Recall, AP25/AP50, mAP, IoU, size error, and yaw error are scored for all routes
+- [x] Reconstructed/Harmonizer derived outputs are bound to the current r2 trace without rerunning TF++
+- [x] 39/39 frame and intermediate gates pass with zero fallback and zero mismatch
+- [x] Depth/control/occupancy unavailable boundaries are explicit
+
+### M7 runbook
+
+The exact formal commands and required environment details are in
+`docs/open_loop_m7_runbook.md`. The runbook requires a real report and a real
+intermediate evaluation for each seed; it does not permit copying seed 41
+artifacts to fill a missing seed.
 
 ### Out of scope until after M7
 

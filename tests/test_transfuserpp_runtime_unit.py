@@ -5,6 +5,7 @@ import unittest
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import numpy as np
 
@@ -115,6 +116,39 @@ class TransFuserPPRuntimeUnitTests(unittest.TestCase):
                 np.zeros((450, 800, 3), dtype=np.uint8),
                 camera_adaptation_contract(),
             )
+
+    def test_warmup_does_not_write_intermediate_or_consume_frame(self) -> None:
+        from agents.transfuserpp_runtime import TransFuserPPModelRuntime
+
+        class Cuda:
+            def synchronize(self, _device):
+                pass
+
+        runtime = TransFuserPPModelRuntime.__new__(TransFuserPPModelRuntime)
+        runtime._closed = False
+        runtime.max_sync_error_ms = 1.0
+        runtime.device = "cuda:0"
+        runtime.torch = SimpleNamespace(cuda=Cuda())
+        runtime._successful_inference_count = 0
+        runtime._last_frame_id = None
+        runtime._activate_run = mock.Mock()
+        runtime.reset = mock.Mock()
+        runtime._preprocess = mock.Mock(return_value=({}, {}))
+        runtime._forward = mock.Mock(return_value=tuple(range(10)))
+
+        with mock.patch(
+            "agents.transfuserpp_runtime.validate_observation",
+            return_value={"frame_id": 4},
+        ):
+            result = runtime.warmup({"frame_id": 4}, iterations=2)
+
+        self.assertEqual(result["intermediate_count"], 0)
+        self.assertTrue(result["formal_frame_excluded"])
+        self.assertEqual(result["frame_id"], 4)
+        self.assertEqual(runtime._successful_inference_count, 2)
+        self.assertIsNone(runtime._last_frame_id)
+        self.assertEqual(runtime._preprocess.call_count, 2)
+        self.assertEqual(runtime._forward.call_count, 2)
 
 
 if __name__ == "__main__":

@@ -311,7 +311,12 @@ class AlgorithmPluginExecutor:
         if not self.initialized:
             self.plugin.initialize(deepcopy(self.config))
             self.initialized = True
-        self._require_healthy()
+        health = self._require_healthy()
+        # Configuration is allowed to remain non-assertive until the plugin has
+        # proved the runtime state.  Preserve that distinction while making the
+        # returned identity reflect the actual backend evidence.
+        if isinstance(health, Mapping) and "real_checkpoint_loaded" in health:
+            self.identity["real_checkpoint_loaded"] = health["real_checkpoint_loaded"] is True
         return deepcopy(self.identity)
 
     def reset(self, scene_context: Mapping[str, Any]) -> None:
@@ -370,7 +375,7 @@ class AlgorithmPluginExecutor:
             self.closed = True
             self.reset_complete = False
 
-    def _require_healthy(self) -> None:
+    def _require_healthy(self) -> Any:
         try:
             health = self.plugin.health_check()
         except Exception as exc:
@@ -384,6 +389,7 @@ class AlgorithmPluginExecutor:
             "ok",
         }:
             raise PluginContractError(f"health_check_failure: {dict(health)}")
+        return health
 
     def _safe_stop(self, frame_id: Any, reason: str, **detail: Any) -> dict[str, Any]:
         control = deepcopy(SAFE_STOP_CONTROL)

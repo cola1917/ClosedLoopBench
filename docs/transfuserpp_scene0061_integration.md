@@ -19,8 +19,8 @@ The repo and checkpoint remain external read-only mounts. Formal binding
 requires a 40-hex Git revision plus content hashes for the tracked repo,
 checkpoint, model config, runtime config, formal artifact, Scene Package,
 scenario IR, immutable matrix, source run config, and case variant. The matching
-CARLA PythonAPI `agents/navigation` package is also an external read-only mount
-with a deterministic Python-source snapshot hash; this prevents the local
+CARLA `agents/navigation` source is also an external read-only mount with a
+deterministic Python-source snapshot hash; this prevents the local
 ClosedLoopBench `agents` package from silently shadowing the dependency used by
 upstream `nav_planner.py`.
 The upstream Git origin must normalize to the official autonomousvision URL,
@@ -193,8 +193,9 @@ python -m runners.render_transfuserpp_intermediate `
    history, and obtain the real pretrained checkpoint/config. The runtime
    manifest resolves that ref and uses `merge-base --is-ancestor` to reject a
    same-origin commit that is not in the configured ref history.
-2. Bind repo/checkpoint/config hashes plus a matching CARLA 0.9.15
-   `PythonAPI/carla` mount and `carla_agents_sha256`; require a `prepared`
+2. Bind repo/checkpoint/config hashes plus a hash-pinned `agents/navigation`
+   source mount and `carla_agents_sha256`. The TF++ image supplies
+   `carla==0.9.15`; the host CARLA/ROS runtime remains `0.9.16`. Require a `prepared`
    runtime manifest generated inside the container against the real read-only
    mounts. Container preflight must successfully import both the pinned
    upstream model and `agents.navigation.global_route_planner`.

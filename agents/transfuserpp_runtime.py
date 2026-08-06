@@ -191,6 +191,40 @@ class TransFuserPPModelRuntime:
                         deque(maxlen=int(window.maxlen)),
                     )
 
+    def warmup(self, observation: Mapping[str, Any], *, iterations: int = 1) -> dict[str, Any]:
+        """Run CUDA/model warm-up without writing evidence or consuming a frame."""
+        if self._closed:
+            raise TransFuserPPRuntimeError("runtime is closed")
+        if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
+            raise TransFuserPPRuntimeError("warmup iterations must be a positive integer")
+        obs = validate_observation(
+            observation,
+            max_synchronization_error_ms=self.max_sync_error_ms,
+        )
+        self._activate_run(obs)
+        self.reset()
+        self.torch.cuda.synchronize(self.device)
+        samples: list[float] = []
+        for _ in range(iterations):
+            started = time.perf_counter()
+            tensors, _ = self._preprocess(obs)
+            self._forward(tensors)
+            self.torch.cuda.synchronize(self.device)
+            samples.append((time.perf_counter() - started) * 1000.0)
+        self._successful_inference_count += iterations
+        return {
+            "status": "completed",
+            "iterations": iterations,
+            "frame_id": int(obs["frame_id"]),
+            "latency_ms": {
+                "samples": samples,
+                "max": max(samples),
+            },
+            "formal_frame_excluded": True,
+            "intermediate_count": 0,
+            "real_checkpoint_loaded": True,
+        }
+
     def health_check(self) -> dict[str, Any]:
         return {
             "status": "ready" if self.real_checkpoint_loaded and not self._closed else "closed",
@@ -239,12 +273,7 @@ class TransFuserPPModelRuntime:
         tensors, input_summary = self._preprocess(obs)
         preprocess_ms = (time.perf_counter() - started) * 1000.0
         inference_started = time.perf_counter()
-        with self.torch.inference_mode():
-            outputs = self.net.forward(**tensors)
-        if not isinstance(outputs, (tuple, list)) or len(outputs) != 10:
-            raise TransFuserPPRuntimeError(
-                "unexpected TF++ forward signature; expected 10 outputs from leaderboard_2"
-            )
+        outputs = self._forward(tensors)
         inference_ms = (time.perf_counter() - inference_started) * 1000.0
         self._successful_inference_count += 1
         post_started = time.perf_counter()
@@ -254,6 +283,15 @@ class TransFuserPPModelRuntime:
         record = self._write_record(result)
         self._last_frame_id = frame_id
         return record
+
+    def _forward(self, tensors: Mapping[str, Any]) -> Any:
+        with self.torch.inference_mode():
+            outputs = self.net.forward(**tensors)
+        if not isinstance(outputs, (tuple, list)) or len(outputs) != 10:
+            raise TransFuserPPRuntimeError(
+                "unexpected TF++ forward signature; expected 10 outputs from leaderboard_2"
+            )
+        return outputs
 
     def _activate_run(self, observation: Mapping[str, Any]) -> None:
         context = observation.get("run_context")
@@ -534,6 +572,7 @@ class TransFuserPPModelRuntime:
             "hand_brake": False,
             "reverse": False,
         }
+        observation_provenance = obs.get("provenance") or {}
         return {
             "schema_version": "transfuserpp_intermediate_frame.v1",
             "algorithm_id": ALGORITHM_ID,
@@ -551,6 +590,15 @@ class TransFuserPPModelRuntime:
                 "upstream_repository": self.manifest["upstream"]["repository"],
                 "upstream_branch": self.manifest["upstream"]["branch"],
                 "official_leaderboard_sensor_equivalent": False,
+                "input_source": observation_provenance.get("input_source"),
+                "input_variant": observation_provenance.get("input_variant"),
+                "source_frame_binding": deepcopy(
+                    observation_provenance.get("source_frame_binding")
+                ),
+                # The model does not consume actor metadata.  It is copied into
+                # the scored record so bbox metrics can prove that prediction
+                # and GT came from the same dynamic-object frame.
+                "actor_manifest": deepcopy(observation_provenance.get("actor_manifest")),
             },
             "inputs": dict(input_summary),
             "synchronization": deepcopy(dict(obs["synchronization"])),

@@ -95,6 +95,7 @@ CANONICAL_RUNNERS = (
 
 _CATEGORY_BY_PREFIX = {
     "add": "support",
+    "aggregate": "reporting",
     "attach": "support",
     "audit": "diagnostic",
     "bind": "preparation",

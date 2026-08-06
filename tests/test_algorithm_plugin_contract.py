@@ -119,6 +119,60 @@ class AlgorithmPluginContractTests(unittest.TestCase):
         self.assertEqual(left["repo_sha256"], right["repo_sha256"])
         self.assertNotEqual(left["config_sha256"], right["config_sha256"])
 
+    def test_identity_reflects_runtime_checkpoint_health_after_initialize(self):
+        from agents.plugin_contract import AlgorithmPluginExecutor
+
+        class RealCheckpointPlugin:
+            capability = {
+                "algorithm_id": "test_real_checkpoint",
+                "uses_route": False,
+                "uses_ego_state": False,
+                "required_rgb_cameras": [],
+                "requires_lidar": False,
+                "is_perception_algorithm": True,
+                "requires_gpu": True,
+                "checkpoint_identity": "external_required",
+                "supported_control_hz": 20.0,
+                "timeout_sec": 0.5,
+            }
+
+            def initialize(self, _config):
+                pass
+
+            def reset(self, _context):
+                pass
+
+            def predict_control(self, observation):
+                return {
+                    "throttle": 0.0,
+                    "steer": 0.0,
+                    "brake": 1.0,
+                    "hand_brake": False,
+                    "reverse": False,
+                    "source_frame_id": observation["frame_id"],
+                }
+
+            def health_check(self):
+                return {"status": "ready", "real_checkpoint_loaded": True}
+
+            def close(self):
+                pass
+
+        config = self._config(
+            repo_sha256="a" * 64,
+            checkpoint_sha256="b" * 64,
+            real_checkpoint_loaded=False,
+        )
+        executor = AlgorithmPluginExecutor(
+            RealCheckpointPlugin(),
+            config,
+            already_initialized=True,
+            evidence_classification="remote_validation_required",
+        )
+        identity = executor.initialize()
+        executor.close()
+        self.assertTrue(identity["real_checkpoint_loaded"])
+
 
 if __name__ == "__main__":
     unittest.main()

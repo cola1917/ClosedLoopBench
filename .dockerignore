@@ -16,7 +16,11 @@ docs
 examples
 configs
 metrics
+!metrics/
+!metrics/open_loop.py
 runtime
+!runtime/
+!runtime/scene0061_lidar_axis_normalization.py
 schemas
 tests
 tools

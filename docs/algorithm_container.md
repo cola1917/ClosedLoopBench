@@ -137,9 +137,12 @@ plugin and derived dependency image, not a change to the closed-loop clock.
 
 `docker/compose.transfuserpp.yml` defines the dedicated v5 sidecar. It installs
 the official CARLA Garage Leaderboard 2.0 runtime subset and mounts the pinned
-repo/checkpoint plus the matching CARLA PythonAPI `agents/navigation` package
-read-only. The navigation source is hash-gated and explicitly added to the
-already loaded local `agents` package to avoid import shadowing.
+repo/checkpoint plus only the CARLA Python `agents/navigation` source
+read-only. The sidecar image already contains the TF++ CARLA client wheel
+(`carla==0.9.15`); the host keeps CARLA and the ROS bridge on `0.9.16`.
+The sidecar does not connect to CARLA directly. The navigation source is
+hash-gated and explicitly added to the already loaded local `agents` package
+to avoid import shadowing.
 `SIM_DATA_HOST_PATH` must be the selected matrix or
 triplicate output root: NuRec input payloads are referenced relative to that
 root and remapped to `/sim-data`. Intermediate outputs are namespaced by case,

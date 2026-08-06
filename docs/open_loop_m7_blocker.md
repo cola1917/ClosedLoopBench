@@ -1,11 +1,21 @@
 # Open-loop M7 remote gate audit
 
+> Historical blocker snapshot from 2026-08-04. The M5 prerequisites recorded
+> below were resolved on 2026-08-05; current M5 evidence is maintained in
+> `docs/open_loop_multimodal_eval.md` and the runtime artifacts it references.
+
 Date: 2026-08-04  
 Branch: `feat/open-loop-multimodal`  
 Source commit: `005a54c`
 
 This is an environment blocker audit, not open-loop score evidence. It must not
 be used as a formal M5, M6, or M7 pass report.
+
+Resolution on 2026-08-05: the external checkpoint/config candidate was restored
+and matched the pinned SHA-256 values, the CARLA Garage checkout matched the
+required revision, and the M7 triplicate passed. The current formal result is
+maintained in `docs/open_loop_multimodal_eval.md` and
+`docs/open_loop_m7_runbook.md`; this file remains historical blocker context.
 
 ## Verified
 
@@ -26,26 +36,29 @@ checked on `xt167` and are absent:
 | Required input | Status |
 |---|---|
 | `/home/cwadmin/workspace/external/carla_garage` | Missing |
-| `/home/cwadmin/workspace/checkpoints/model_0030_0.pth` | Missing |
-| `/home/cwadmin/CARLA_0.9.15/PythonAPI/carla` | Missing |
+| `/home/cwadmin/workspace/external/carla_garage/checkpoints/model_0030_0.pth` | Missing |
 
 The host has CARLA `0.9.16` at
-`/home/cwadmin/sim-env/data/CARLA_0.9.16`, which is not a substitute for the
-pinned `0.9.15` Python API mount. The existing NRE/NuRec images and stopped
-containers do not provide a usable TF++ checkpoint/repository binding.
+`/home/cwadmin/sim-env/data/CARLA_0.9.16`. Its `PythonAPI/carla/agents`
+directory is the only host-side source needed by the current sidecar; the
+`carla==0.9.15` client wheel is already in the image. The existing NRE/NuRec
+images and stopped containers do not provide a usable TF++ checkpoint/repository
+binding.
 
 ## Consequence
 
 The image can pass its GPU and ROS import checks, but the real checkpoint
 preflight cannot be run. Therefore M5 Stage A, M6 NuRec Stage B, and the M7
 three-seed freeze remain blocked. No model inference, ADE report, or triplicate
-acceptance claim is valid until the three inputs above are mounted and hashed.
+acceptance claim is valid until the two missing artifacts are mounted and the
+agents source hash is bound in the runtime config.
 
 ## Unlock sequence
 
 1. Provide the exact CARLA Garage checkout, pinned revision, model config, and
    `model_0030_0.pth` under the declared host mounts.
-2. Provide the matching CARLA `0.9.15/PythonAPI/carla` directory.
+2. Bind the host `agents/navigation` source snapshot and its hash in the
+   runtime config.
 3. Run the runtime manifest/preflight and bind its immutable image, repository,
    checkpoint, and config hashes.
 4. Run M5 Stage A, then M6 Stage B, then seeds `41`, `43`, and `47`; freeze

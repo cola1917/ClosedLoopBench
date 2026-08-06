@@ -10,8 +10,8 @@ acceptance gates. Local tests do not claim that a checkpoint was loaded or that
 CARLA/NuRec closed loop passed.
 
 The remaining work is remote-only: install/bind the exact upstream repository,
-checkpoint/config and matching CARLA PythonAPI, prove live LiDAR coordinates,
-build the GPU image, then run and debug real inference.
+checkpoint/config and hash-pinned `agents/navigation` source, prove live LiDAR
+coordinates, build the GPU image, then run and debug real inference.
 
 ## Immutable inputs
 
@@ -39,9 +39,10 @@ environment for every host-side Python command.
    origin to normalize to the official autonomousvision repository, resolves
    `refs/remotes/origin/leaderboard_2`, proves the pinned revision is in that
    ref's history, and requires a clean worktree including untracked files.
-2. Mount the matching CARLA 0.9.15 `PythonAPI/carla` directory. Fill
-   `carla_agents_sha256`; the sidecar will explicitly resolve and verify
-   `agents.navigation.global_route_planner` from this mount.
+2. Mount only the CARLA `agents/navigation` source directory. The sidecar
+   image already contains `carla==0.9.15`; the host CARLA/ROS runtime remains
+   `0.9.16`. Fill `carla_agents_sha256`; the sidecar will explicitly resolve
+   and verify `agents.navigation.global_route_planner` from this mount.
 3. Attach a real LiDAR coordinate-validation JSON path and SHA-256 to the formal
    base run config. Bundle creation verifies the declared convention, and the
    acceptance runner re-reads and re-hashes the file before CARLA starts.
@@ -111,7 +112,7 @@ seeds or a single attempt as a triplicate.
 ## Sidecar preflight and formal execution
 
 Fill a new env file from `docker/transfuserpp.env.example`, including the
-read-only repository/checkpoint/CARLA PythonAPI paths and the exact prepared ROS
+read-only repository/checkpoint/agents-source paths and the exact prepared ROS
 topics. Build the image separately, bind its immutable image ID, then preflight
 before CARLA execution:
 

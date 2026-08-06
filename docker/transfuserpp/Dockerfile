@@ -49,6 +49,9 @@ COPY agents/transfuserpp_plugin.py agents/transfuserpp_ros2_backend.py ./agents/
 COPY runners/run_algorithm_container.py ./runners/
 COPY runners/build_transfuserpp_runtime_manifest.py ./runners/
 COPY runners/run_transfuserpp_cuda_preflight.py ./runners/
+COPY runners/run_open_loop_gt_replay.py ./runners/
+COPY runners/run_open_loop_transfuserpp_stage_a.py ./runners/
+COPY metrics/open_loop.py ./metrics/
 COPY docker/transfuserpp/Dockerfile docker/transfuserpp/requirements.runtime.txt ./docker/transfuserpp/
 COPY docker/compose.transfuserpp.yml ./docker/
 COPY docker/algorithm/entrypoint.sh ./docker/algorithm/
