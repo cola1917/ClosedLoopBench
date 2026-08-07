@@ -1,5 +1,11 @@
 # ClosedLoopBench Architecture and Contract
 
+> Status note: this document describes the target runtime architecture. The
+> current `main` delivery is the CARLA/ROS open-loop evaluation path; GT replay
+> owns the next Ego pose, and the interactive closed-loop runtime remains
+> blocked. See [`docs/open_loop_project_design.md`](open_loop_project_design.md)
+> for the current claim boundary and retained evidence.
+
 ## One-Line Positioning
 
 ClosedLoopBench is the closed-loop evaluation layer that consumes TriggerEngine Scenario IR and compiles it into portable OpenSCENARIO/OpenDRIVE, simulator-ready CARLA/ScenarioRunner fallback artifacts, and report artifacts.

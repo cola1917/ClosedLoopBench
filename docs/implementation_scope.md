@@ -1,5 +1,11 @@
 ﻿# ClosedLoopBench Implementation Scope
 
+> Status note: this is the implementation and target-runtime plan. The current
+> `main` delivery is CARLA/ROS open-loop replay and multimodal evaluation. The
+> CARLA closed-loop control and reactive-actor stages below remain future gates;
+> see [`docs/open_loop_project_design.md`](open_loop_project_design.md) for
+> current evidence and claim boundaries.
+
 ClosedLoopBench is the primary simulation-test engineering project. It owns executable scenario evaluation, not data mining and not neural reconstruction.
 
 ## Primary Goal

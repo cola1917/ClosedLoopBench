@@ -1,9 +1,9 @@
 # Open-loop multimodal evaluation (scene-0061)
 
-Branch: `feat/open-loop-multimodal`
-Status: M1-M4 implemented and pushed; M5 Stage A, M6 Stage B, M7 formal
-acceptance, and the M8 three-route comparison with formal actor-aware bbox
-scoring completed on 2026-08-06.
+Repository branch: `main`
+Status: M1-M4 implemented; M5 Stage A, M6 Stage B, M7 formal acceptance, and
+the M8 three-route comparison with formal actor-aware bbox scoring are merged
+into `main`.
 
 Current M5 evidence:
 
@@ -65,20 +65,20 @@ GUI observability smoke (not formal evidence):
 
 Current M8 three-route comparison and formal bbox evidence:
 
-- comparison report: `outputs/scene0061-transfuserpp/runtime/m8_triplicate_bbox_comparison.v2.json`
+- comparison report: `outputs/scene0061-transfuserpp/runtime/m8_triplicate_bbox_comparison.v5.json`
 - status: `ready`; 39/39 frames, 39/39 intermediates, zero fallback, zero
   frame mismatch, and formal actor-aware bbox gate passed on all three routes
 - formal route reports:
   `runtime/m8_raw_r6_bbox_final_open_loop_report.json`,
-  `runtime/m8_reconstructed_r2_bbox_final_open_loop_report.json`, and
-  `runtime/m8_harmonized_r2_bbox_final_open_loop_report.json`
+  `runtime/m8_reconstructed_r4_bbox_final_open_loop_report.json`, and
+  `runtime/m8_harmonized_r4_bbox_final_open_loop_report.json`
 - formal intermediate evaluations:
   `runtime/m8_raw_r6_bbox_final_intermediate_evaluation.json`,
-  `runtime/m8_reconstructed_r2_bbox_final_intermediate_evaluation.json`, and
-  `runtime/m8_harmonized_r2_bbox_final_intermediate_evaluation.json`
+  `runtime/m8_reconstructed_r4_bbox_final_intermediate_evaluation.json`, and
+  `runtime/m8_harmonized_r4_bbox_final_intermediate_evaluation.json`
 - actor manifest: `inputs/open_loop_bbox_actor_manifest.v1.json`; 68 dynamic
   actors, 39 frames, shared by all routes
-- comparison SHA-256: `f794520b828877af0292074824d0dbd3048e165d6b4692b643ae0e7f8cb8a666`
+- comparison SHA-256: `8630814d43554683d02ec9fdb6acc28fdf1e4e8a88c707adcf67cb8351778184`
 
 The route binding is deliberately asymmetric:
 
@@ -337,7 +337,7 @@ Closed-loop comfort / route progress / interactive TTC may be attached as
 
 | Stage | Deliverable | Exit | Status |
 |---|---|---|---|
-| **D0** | Boundary doc + IR/XODR pin | Merged / pushed on open-loop branch | **Done** |
+| **D0** | Boundary doc + IR/XODR pin | Merged / pushed on `main` | **Done** |
 | **D1** | Runner `open_loop_gt_replay` | scene0061 dry-run, control cannot own next pose | **Done (offline)** |
 | **D2** | Local ROS + TF++ on CARLA sensors (Stage A) | Intermediates + ADE report | **Done; real M5 Stage A evidence captured** |
 | **D3** | NuRec multimodal at GT poses (Stage B) | Same metrics; still not M8/M9 | **Done; real 39-frame M6 full-run** |
@@ -348,7 +348,7 @@ labels over renaming closed-loop gates.
 
 ## 7.1 Detailed development plan
 
-**Working branch:** `feat/open-loop-multimodal`  
+**Working branch:** `main`
 **Goal product:** open-loop multimodal TF++ eval on scene-0061  
 **Hard rule:** every formal report sets `evidence_classification: open_loop_multimodal`; never claim M8/M9.
 
@@ -442,7 +442,7 @@ usable demo ≈ **M5 (~1.5–2.5 weeks)**; phase complete ≈ **M7 (~4–6 weeks
 - [x] One shared USDZ/Scenario IR actor manifest binds 68 dynamic actors over 39 frames
 - [x] Oriented BEV bbox matching uses GT dimensions/yaw, same-frame class matching, and unique assignments
 - [x] TP/FP/FN, Precision/Recall, AP25/AP50, mAP, IoU, size error, and yaw error are scored for all routes
-- [x] Reconstructed/Harmonizer derived outputs are bound to the current r2 trace without rerunning TF++
+- [x] Reconstructed/Harmonizer derived outputs are bound to the current r4 trace without rerunning TF++
 - [x] 39/39 frame and intermediate gates pass with zero fallback and zero mismatch
 - [x] Depth/control/occupancy unavailable boundaries are explicit
 
@@ -458,7 +458,7 @@ artifacts to fill a missing seed.
 - Interactive counterfactuals (M10/M11)
 - Claiming Goal closed-loop / M9
 - Replacing IR GT with exchange XODR lane KPIs as primary score
-- Merging dormant M8 experiment branches into this track
+- Promoting open-loop evidence to a closed-loop M8/M9 claim before the runtime gates pass
 
 ## 8. Relationship to blocked closed-loop work
 
