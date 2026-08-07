@@ -84,6 +84,12 @@ It currently provides:
 The target runtime will add ego control, reactive actors, and per-tick
 feedback-driven execution once the environment acceptance gates pass.
 
+The strongest retained evidence is M8: real TransFuser++ inference on native,
+reconstructed, and Harmonizer routes over 39 frames and 68 dynamic actors.
+Same-frame cross-input A/B testing shows that raw LiDAR restores detection
+while reconstructed LiDAR collapses it; the live probe then identifies the
+dynamic LiDAR editability failure in the upstream rendering path.
+
 ## Main Input
 
 Required:
