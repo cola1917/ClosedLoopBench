@@ -33,13 +33,23 @@ from runtime.scene0061_lidar_axis_normalization import (
 
 DERIVATION_SCHEMA = "scene0061_lidar_axis_config_derivation.v1"
 
-# Candidate established by the read-only r18 analysis.  It is not accepted as
-# a coordinate proof by itself: the subsequent fresh live run must replay it
-# against the raw and normalised payloads plus same-frame CARLA anchors.
+# NRE 26.04 declares its LiDAR response axes as x_forward_y_right_z_up
+# (frames.jsonl response_axis_convention), and the sensor_to_ego convention
+# is carla_x_forward_y_right_z_up.  The r18 candidate [-z, -y, -x] was
+# rejected by the M8 r3 fix: it left a +/-100 m z spread in the ego cloud and
+# only 1.7% same-frame NRE<->CARLA-native point overlap.  The corrected
+# response-to-sensor rotation (verified by same-frame NN registration on
+# frames 0/19/38: ~34-39% <1 m overlap, ~50% in the forward quadrant) is a
+# +90 deg rotation about the z axis: x'=-y, y'=x, z'=z.
+# NOTE: this runtime RPC contract is origin-preserving and stays a pure
+# rotation.  The triplicate trace materialization additionally applies a
+# -1.0 m z translation to correct the measured ~1.0 m vertical offset of the
+# NRE cloud against CARLA native clouds (see
+# build_open_loop_transfuserpp_triplicate_trace.LIDAR_RESPONSE_TO_SENSOR).
 R18_RESPONSE_TO_SENSOR = [
-    0.0, 0.0, -1.0, 0.0,
     0.0, -1.0, 0.0, 0.0,
-    -1.0, 0.0, 0.0, 0.0,
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
     0.0, 0.0, 0.0, 1.0,
 ]
 

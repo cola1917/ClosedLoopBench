@@ -104,16 +104,18 @@ def capability() -> dict[str, Any]:
     }
 
 
-def camera_adaptation_contract() -> dict[str, Any]:
+def camera_adaptation_contract(
+    source_width: int = 1600, source_height: int = 900
+) -> dict[str, Any]:
     """Return the immutable physical-camera-to-model-input boundary.
 
-    NuRec remains the source of the physical 1600x900 RGB frame. The adapter
-    deterministically resizes that source into the 800x450 TF++ input canvas
-    before applying the upstream model crop. The hash covers all static
+    The default contract consumes the formal 1600x900 physical camera source.
+    Reconstruction traces that materialize the native 800x450 NuRec camera
+    canvas bind an 800x450 source contract instead, so the adapter's resize is
+    a no-op rather than a second upsampling pass. The hash covers all static
     transform parameters so a frame trace cannot silently use another resize.
     """
 
-    source_width, source_height = FORMAL_CAMERA_SOURCE_SIZE
     target_width, target_height = MODEL_CAMERA_INPUT_SIZE
     payload = {
         "schema_version": CAMERA_ADAPTATION_SCHEMA_VERSION,
@@ -129,11 +131,16 @@ def camera_adaptation_contract() -> dict[str, Any]:
     return {**payload, "contract_sha256": canonical_sha256(payload)}
 
 
-def validate_camera_adaptation_contract(value: Any, label: str) -> dict[str, Any]:
-    expected = camera_adaptation_contract()
+def validate_camera_adaptation_contract(
+    value: Any, label: str, source_width: int = 1600, source_height: int = 900
+) -> dict[str, Any]:
+    expected = camera_adaptation_contract(
+        source_width=source_width, source_height=source_height
+    )
     if not isinstance(value, Mapping) or dict(value) != expected:
         raise TransFuserPPContractError(
-            f"{label} must exactly match the 1600x900-to-800x450 camera adaptation contract"
+            f"{label} must exactly match the {source_width}x{source_height}-to-800x450 "
+            "camera adaptation contract"
         )
     return deepcopy(expected)
 
@@ -149,7 +156,12 @@ def camera_adaptation_evidence(
 ) -> dict[str, Any]:
     """Bind a materialized physical RGB payload to its resize provenance."""
 
-    checked = validate_camera_adaptation_contract(contract, "camera adaptation")
+    checked = validate_camera_adaptation_contract(
+        contract,
+        "camera adaptation",
+        source_width=int(contract.get("source_width", 1600)),
+        source_height=int(contract.get("source_height", 900)),
+    )
     if not SHA256_RE.fullmatch(str(source_payload.get("sha256") or "")):
         raise TransFuserPPContractError("camera adaptation source payload SHA-256 is invalid")
     byte_count = source_payload.get("byte_count")
@@ -197,11 +209,17 @@ def validate_camera_adaptation_evidence(
     source_payload: Mapping[str, Any],
     calibration: Mapping[str, Any],
     label: str,
+    source_width: int = 1600,
+    source_height: int = 900,
 ) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise TransFuserPPContractError(f"{label} is required")
+    _adaptation = calibration.get("camera_adaptation")
     contract = validate_camera_adaptation_contract(
-        calibration.get("camera_adaptation"), f"{label}.contract"
+        _adaptation,
+        f"{label}.contract",
+        source_width=int((_adaptation or {}).get("source_width", source_width)),
+        source_height=int((_adaptation or {}).get("source_height", source_height)),
     )
     try:
         expected = camera_adaptation_evidence(
@@ -435,7 +453,7 @@ def build_runtime_manifest(config: Mapping[str, Any]) -> dict[str, Any]:
             "install_or_build_transfuserpp_runtime",
             "bind_pinned_carla_garage_repository",
             "bind_real_checkpoint_and_model_config",
-            "bind_matching_carla_pythonapi_agents_navigation",
+            "bind_hash_pinned_carla_agents_navigation_source",
             "verify_cuda_inference_and_memory",
             "bind_live_nurec_rgb_lidar_payloads",
             "run_scene0061_s0_s2_s4",
@@ -478,8 +496,12 @@ def validate_observation(
         raise TransFuserPPContractError("observation calibration is required")
     if calibration.get("camera_sensor_id") != "camera_front":
         raise TransFuserPPContractError("camera calibration sensor ID mismatch")
+    _adaptation = calibration.get("camera_adaptation")
     validate_camera_adaptation_contract(
-        calibration.get("camera_adaptation"), "camera calibration adaptation"
+        _adaptation,
+        "camera calibration adaptation",
+        source_width=int((_adaptation or {}).get("source_width", 1600)),
+        source_height=int((_adaptation or {}).get("source_height", 900)),
     )
     _rigid_matrix(
         calibration.get("camera_sensor_to_ego"),
@@ -653,8 +675,12 @@ def validate_intermediate_record(record: Mapping[str, Any]) -> dict[str, Any]:
         raise TransFuserPPContractError("intermediate calibration is required")
     if calibration.get("camera_sensor_id") != "camera_front":
         raise TransFuserPPContractError("intermediate camera calibration is invalid")
+    _adaptation = calibration.get("camera_adaptation")
     validate_camera_adaptation_contract(
-        calibration.get("camera_adaptation"), "intermediate camera adaptation"
+        _adaptation,
+        "intermediate camera adaptation",
+        source_width=int((_adaptation or {}).get("source_width", 1600)),
+        source_height=int((_adaptation or {}).get("source_height", 900)),
     )
     _rigid_matrix(
         calibration.get("camera_sensor_to_ego"),

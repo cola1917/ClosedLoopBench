@@ -1,0 +1,20 @@
+# M5 Stage A is an additive layer over the already verified TF++ runtime.
+# The build command must pass BASE_IMAGE as the immutable image ID of that
+# runtime; the default is only a local convenience for inspection.
+ARG BASE_IMAGE=closed-loop-bench/transfuserpp-v5:open-loop
+FROM ${BASE_IMAGE}
+
+WORKDIR /opt/closed-loop-bench
+
+# Keep the pre-verified CUDA/Python/CARLA stack intact while adding the current
+# host-side open-loop execution contract to the container.
+COPY agents/plugin_contract.py agents/transfuserpp_plugin.py agents/transfuserpp_ros2_backend.py ./agents/
+COPY agents/transfuserpp_contract.py agents/transfuserpp_runtime.py ./agents/
+COPY runners/build_transfuserpp_runtime_manifest.py ./runners/
+COPY runners/run_open_loop_gt_replay.py ./runners/
+COPY runners/run_open_loop_transfuserpp_stage_a.py ./runners/
+COPY runners/run_open_loop_transfuserpp_stage_b.py ./runners/
+COPY runtime/scene0061_lidar_axis_normalization.py ./runtime/
+COPY metrics/open_loop.py ./metrics/
+
+RUN git config --system --add safe.directory /opt/algorithm/carla_garage

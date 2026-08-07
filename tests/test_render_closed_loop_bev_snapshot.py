@@ -20,6 +20,11 @@ XODR = """<?xml version=\"1.0\"?>
 """
 
 
+def _pixels(image: Image.Image):
+    getter = getattr(image, "get_flattened_data", None)
+    return getter() if callable(getter) else list(image.getdata())
+
+
 class RenderClosedLoopBevSnapshotTests(unittest.TestCase):
     def test_renders_every_runtime_actor_with_a_class_color(self) -> None:
         with tempfile.TemporaryDirectory() as raw_root:
@@ -53,7 +58,7 @@ class RenderClosedLoopBevSnapshotTests(unittest.TestCase):
                 height=320,
             )
 
-            colors = set(Image.open(output).convert("RGB").get_flattened_data())
+            colors = set(_pixels(Image.open(output).convert("RGB")))
 
         self.assertEqual(result["runtime_actor_count"], 2)
         self.assertEqual(result["runtime_actor_type_counts"], {"vehicle": 1, "pedestrian": 1})
@@ -123,7 +128,7 @@ class RenderClosedLoopBevSnapshotTests(unittest.TestCase):
                 width=480,
                 height=320,
             )
-            colors = set(Image.open(output).convert("RGB").get_flattened_data())
+            colors = set(_pixels(Image.open(output).convert("RGB")))
 
         self.assertEqual(result["map_source"], "nuscenes_map_geometry_visual_only")
         self.assertEqual(

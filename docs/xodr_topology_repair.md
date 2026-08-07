@@ -44,25 +44,26 @@ entries remain available when the map/corridor scope must be visible in the
 command itself. All exchange writers fail closed on a single-road or
 corridor-only artifact.
 
-The regenerated scene-0061 artifact contains 86 selected or boundary-closure
-nuScenes lane roads, 141 map junction-local connector roads, one source-gap
-route road, one route access connector, and 17 inferred junctions. The source
-intersection boundary allowance is 20 m, while geometry-only connections remain
-capped at 8 m unless source edge-line or intersection evidence exists. Its
-declared route path is a mixed chain of one source-gap road, two map lanes, and
-two map connectors, and it covers all 39 Ego reference samples. The source-gap
-is explicit and auditable; it is not silently counted as map-lane coverage.
+Against the current Singapore map export, a fresh default scene-0061 build
+contains 67 selected or boundary-closure nuScenes lane roads, 88 map
+junction-local connector roads, one source-gap route road, and 15 inferred
+junctions. The source intersection boundary allowance is 20 m, while
+geometry-only connections remain capped at 8 m unless source edge-line or
+intersection evidence exists. Its declared route path is a mixed chain of one
+source-gap road, map lanes, and map connectors, and it covers all 39 Ego
+reference samples. The source-gap is explicit and auditable; it is not silently
+counted as map-lane coverage. These counts are tied to the external map export
+and must be regenerated when that input changes.
 CARLA waypoint continuity and generated-world lane membership remain runtime
 gates. When explicitly requested it additionally contains one diagnostic
 `ego_route_corridor` road (road id `1000`); that road is never used as proof of
 map topology.
 
 The previous `*_v1.xodr` files remain immutable historical candidates. The
-current canonical mixed-path exchange contains 229 roads (86 lane roads, 141
-map connector roads, one route access connector, and one source-gap route road)
-and no Ego corridor. Its map network has four connected components; roads
-`24`, `56`, and `72` remain explicit source-map boundary roads. Verify
-generated counts from the CLI rather than hard-coding them for other scenes.
+current canonical mixed-path exchange contains 156 roads (67 lane roads, 88
+connector roads, and one source-gap route road) and no Ego corridor for the
+current map export. Verify generated counts from the CLI rather than treating
+ignored output directories or historical artifacts as the source of truth.
 
 The current formal artifacts are:
 

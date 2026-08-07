@@ -336,9 +336,9 @@ class NuRec260ClientTests(unittest.TestCase):
         from adapters.nurec_multimodal import validate_nurec_multimodal_evidence
 
         transform = [
-            0.0, 0.0, -1.0, 0.0,
             0.0, -1.0, 0.0, 0.0,
-            -1.0, 0.0, 0.0, 0.0,
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
             0.0, 0.0, 0.0, 1.0,
         ]
         normalization = {
@@ -366,7 +366,7 @@ class NuRec260ClientTests(unittest.TestCase):
                 "<8f", 1.0, 2.0, 3.0, 0.25, 4.0, 5.0, 6.0, 0.75
             )
             normalized_bytes = struct.pack(
-                "<8f", -3.0, -2.0, -1.0, 0.25, -6.0, -5.0, -4.0, 0.75
+                "<8f", -2.0, 1.0, 3.0, 0.25, -5.0, 4.0, 6.0, 0.75
             )
             self.assertEqual(Path(raw["path"]).read_bytes(), raw_bytes)
             self.assertEqual(Path(normalized["path"]).read_bytes(), normalized_bytes)

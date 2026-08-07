@@ -154,7 +154,7 @@ class DeriveScene0061LiDARAxisConfigTests(unittest.TestCase):
             )
             self.assertEqual(
                 snapshot["nurec_runtime"]["lidar_axis_normalization"]["response_to_sensor"],
-                [-0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                [0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
             )
 
 

@@ -138,6 +138,123 @@ def build_nurec_multimodal_frame(
     return frame
 
 
+def build_open_loop_nurec_multimodal_frame(
+    scene_package: Mapping[str, Any],
+    *,
+    frame_id: int,
+    simulation_time_sec: float,
+    interval_start_sec: float,
+    ego_pose_pair: Mapping[str, Any],
+    camera_specs: Iterable[Mapping[str, Any]],
+    lidar_specs: Iterable[Mapping[str, Any]],
+    dynamic_objects: Iterable[Mapping[str, Any]] | None = None,
+    dynamic_object_provenance: Mapping[str, Any] | None = None,
+    require_runtime_validated_alignment: bool = True,
+) -> dict[str, Any]:
+    """Build a NuRec frame for GT-pose open-loop replay.
+
+    The sensor poses remain bound to the Scenario IR ego pose.  When supplied,
+    ``dynamic_objects`` are actor-manifest poses in the same simulator frame;
+    they are transformed into NuRec global coordinates and attached to both
+    modality requests.  Omitting them retains the legacy static-scene mode.
+    """
+
+    _require_frame(frame_id, simulation_time_sec, interval_start_sec)
+    _validate_sim_pose_pair(ego_pose_pair, "ego")
+    try:
+        validate_document(dict(scene_package))
+    except ValueError as exc:
+        raise NuRecMultimodalError(str(exc)) from exc
+    scene_id = str(scene_package["scene_id"])
+    alignment = scene_package["alignment"]
+    if require_runtime_validated_alignment and alignment["status"] != "runtime_validated":
+        raise NuRecMultimodalError(
+            "NuRec open-loop frames require runtime_validated Scene Package alignment"
+        )
+    sim_from_log = alignment.get("sim_from_log_transform")
+    if not isinstance(sim_from_log, list) or len(sim_from_log) != 16:
+        raise NuRecMultimodalError("Scene Package has no sim_from_log_transform")
+
+    # The alignment matrix maps NuScenes global coordinates into the runtime
+    # target frame (scene_local_ego_start). M6 already receives ego poses in
+    # that target frame, so inverting this matrix here would send large global
+    # coordinates to NuRec instead of the loaded USDZ world. The closed-loop
+    # builder above still performs the global conversion because its actor and
+    # sensor inputs are explicitly simulator-frame samples that need it.
+    cameras = _normalize_open_loop_sensors(
+        "rgb", camera_specs, ego_pose_pair
+    )
+    lidars = _normalize_open_loop_sensors(
+        "lidar", lidar_specs, ego_pose_pair
+    )
+    if not cameras or not lidars:
+        raise NuRecMultimodalError(
+            "a multimodal frame requires at least one RGB camera and one LiDAR"
+        )
+    sensor_ids = [item["sensor_id"] for item in cameras + lidars]
+    if len(sensor_ids) != len(set(sensor_ids)):
+        raise NuRecMultimodalError("sensor IDs must be unique across RGB and LiDAR")
+
+    raw_dynamic_objects = [] if dynamic_objects is None else [
+        deepcopy(dict(item)) for item in dynamic_objects
+    ]
+    if raw_dynamic_objects:
+        _validate_open_loop_dynamic_provenance(
+            dynamic_object_provenance,
+            frame_id=frame_id,
+            active_actor_ids=[str(item.get("track_id") or "") for item in raw_dynamic_objects],
+        )
+    dynamic_objects = _normalize_open_loop_dynamic_objects(
+        raw_dynamic_objects,
+        log_from_sim=_invert_rigid(sim_from_log),
+    )
+    dynamic_digest = _digest(dynamic_objects)
+    request_root = f"{scene_id}:{frame_id}"
+    frame = {
+        "schema_version": "nurec_multimodal_frame.v1",
+        "scene_id": scene_id,
+        "frame_id": frame_id,
+        "simulation_time_sec": float(simulation_time_sec),
+        "pose_interval_sec": {
+            "start": float(interval_start_sec),
+            "end": float(simulation_time_sec),
+        },
+        "coordinate_frame": {
+            "input": "scene_local_ego_start",
+            "render": "nuscenes_global",
+            "transform_source": "closed_loop_scene_package.v1.alignment",
+            "alignment_status": alignment["status"],
+        },
+        "shared_dynamic_objects": dynamic_objects,
+        "shared_dynamic_object_sha256": dynamic_digest,
+        "modalities": {
+            "rgb": {
+                "requests": [
+                    _sensor_request(
+                        f"{request_root}:rgb:{item['sensor_id']}", "rgb", item, dynamic_digest
+                    )
+                    for item in cameras
+                ]
+            },
+            "lidar": {
+                "requests": [
+                    _sensor_request(
+                        f"{request_root}:lidar:{item['sensor_id']}", "lidar", item, dynamic_digest
+                    )
+                    for item in lidars
+                ]
+            },
+        },
+        "synchronization": {
+            "clock": "carla_snapshot",
+            "policy": "same_frame_same_pose_interval_same_dynamic_objects",
+            "fail_closed": True,
+        },
+    }
+    validate_nurec_multimodal_frame(frame)
+    return frame
+
+
 def validate_nurec_multimodal_frame(frame: Mapping[str, Any]) -> None:
     """Validate the invariant that both modalities reference identical actor poses."""
 
@@ -429,6 +546,73 @@ def _dynamic_objects(
     return sorted(result, key=lambda item: item["actor_id"])
 
 
+def _normalize_open_loop_dynamic_objects(
+    objects: Iterable[Mapping[str, Any]],
+    *,
+    log_from_sim: list[float],
+) -> list[dict[str, Any]]:
+    """Convert actor-manifest simulator poses into the NuRec wire frame."""
+
+    result: list[dict[str, Any]] = []
+    actor_ids: set[str] = set()
+    track_ids: set[str] = set()
+    for item in objects:
+        actor_id = str(item.get("actor_id") or "")
+        track_id = str(item.get("track_id") or "")
+        if not actor_id or actor_id in actor_ids:
+            raise NuRecMultimodalError("open-loop dynamic actor IDs must be unique")
+        if not track_id or track_id in track_ids:
+            raise NuRecMultimodalError("open-loop dynamic track IDs must be unique")
+        pose_pair = item.get("pose_pair")
+        _validate_sim_pose_pair(pose_pair, f"actor {track_id}")
+        actor_ids.add(actor_id)
+        track_ids.add(track_id)
+        converted = {
+            "actor_id": actor_id,
+            "track_id": track_id,
+            "actor_type": str(item.get("actor_type") or ""),
+            "pose_source": "scenario_ir_reference_trajectory",
+            # The manifest pose is the source track's bbox center.  The v1
+            # wire contract names this source-track reference explicitly.
+            "pose_reference": "source_track_frame",
+        }
+        converted["pose_pair"] = _transform_pose_pair(pose_pair, log_from_sim)
+        if converted["actor_type"] not in {"vehicle", "pedestrian"}:
+            raise NuRecMultimodalError(f"actor {track_id} has an unsupported actor_type")
+        result.append(converted)
+    result.sort(key=lambda item: str(item["track_id"]))
+    return result
+
+
+def _validate_open_loop_dynamic_provenance(
+    provenance: Mapping[str, Any] | None,
+    *,
+    frame_id: int,
+    active_actor_ids: list[str],
+) -> None:
+    if not isinstance(provenance, Mapping):
+        raise NuRecMultimodalError(
+            "actor-aware open-loop frames require dynamic_object_provenance"
+        )
+    required_digests = (
+        "actor_manifest_sha256",
+        "active_actor_set_sha256",
+        "pose_digest",
+        "manifest_dynamic_object_sha256",
+    )
+    if provenance.get("frame_id") != frame_id:
+        raise NuRecMultimodalError("dynamic-object provenance frame_id mismatch")
+    if any(
+        not _is_sha256(str(provenance.get(name) or ""))
+        for name in required_digests
+    ):
+        raise NuRecMultimodalError("dynamic-object provenance digest is invalid")
+    if provenance.get("active_actor_ids") != active_actor_ids:
+        raise NuRecMultimodalError(
+            "dynamic-object provenance active actor set is inconsistent"
+        )
+
+
 def _normalize_sensors(
     modality: str,
     specs: Iterable[Mapping[str, Any]],
@@ -453,6 +637,62 @@ def _normalize_sensors(
                 "model": model,
                 "parameters": parameters,
                 "pose_pair": _transform_pose_pair(pose_pair, log_from_sim),
+            }
+        )
+    return sorted(result, key=lambda item: item["sensor_id"])
+
+
+def _normalize_open_loop_sensors(
+    modality: str,
+    specs: Iterable[Mapping[str, Any]],
+    ego_pose_pair: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    result = []
+    for spec in specs:
+        item = deepcopy(dict(spec))
+        sensor_id = str(item.get("sensor_id") or "")
+        model = str(item.get("model") or "")
+        if not sensor_id or not model:
+            raise NuRecMultimodalError(
+                f"{modality} sensor_id and model are required"
+            )
+        extrinsic = item.pop("sensor_to_ego", None)
+        if not isinstance(extrinsic, list) or len(extrinsic) != 16:
+            raise NuRecMultimodalError(
+                f"sensor {sensor_id or '<unknown>'} requires sensor_to_ego 4x4 calibration"
+            )
+        matrix_pair = sensor_pose_pair_from_ego(ego_pose_pair, extrinsic)
+        parameters = {
+            str(key): deepcopy(value)
+            for key, value in item.items()
+            if key not in {"sensor_id", "model", "pose_pair"}
+        }
+        result.append(
+            {
+                "sensor_id": sensor_id,
+                "model": model,
+                "parameters": parameters,
+                "pose_pair": _transform_pose_pair(
+                    matrix_pair,
+                    [
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ],
+                ),
             }
         )
     return sorted(result, key=lambda item: item["sensor_id"])

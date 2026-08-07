@@ -69,7 +69,9 @@ def main(argv: list[str] | None = None) -> int:
                 for name, path in container_files.items()
             },
             "external_repo_and_checkpoint_mounted_read_only": True,
-            "carla_pythonapi_agents_mounted_read_only": True,
+            "carla_agents_source_mounted_read_only": True,
+            "carla_client_wheel_in_image": "carla==0.9.15",
+            "host_carla_runtime": "0.9.16",
             "carla_service_in_compose": False,
         }
         missing_container_contract = [

@@ -46,6 +46,26 @@ CANONICAL_RUNNERS = (
         "Run the CARLA BasicAgent closed-loop path.",
     ),
     RunnerSpec(
+        "open-loop-gt-replay",
+        "runners.run_open_loop_gt_replay",
+        "Replay pinned Scenario IR poses without control-owned ego motion.",
+    ),
+    RunnerSpec(
+        "evaluate-open-loop",
+        "runners.evaluate_open_loop",
+        "Score open-loop predictions against pinned Scenario IR ground truth.",
+    ),
+    RunnerSpec(
+        "open-loop-ros-smoke",
+        "runners.run_open_loop_ros_smoke",
+        "Run Pure Pursuit through the frame-matched local ROS open-loop boundary.",
+    ),
+    RunnerSpec(
+        "open-loop-tfpp-stage-a",
+        "runners.run_open_loop_transfuserpp_stage_a",
+        "Run or preflight TransFuser++ on native CARLA Stage A observations at IR poses.",
+    ),
+    RunnerSpec(
         "acceptance-triplicate",
         "runners.run_carla_acceptance_triplicate",
         "Run the strict three-run CARLA acceptance gate.",
@@ -75,6 +95,7 @@ CANONICAL_RUNNERS = (
 
 _CATEGORY_BY_PREFIX = {
     "add": "support",
+    "aggregate": "reporting",
     "attach": "support",
     "audit": "diagnostic",
     "bind": "preparation",

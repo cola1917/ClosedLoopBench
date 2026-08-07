@@ -835,6 +835,57 @@ class TransFuserPPIntermediateTests(unittest.TestCase):
             )
         self.assertEqual(result["status"], "evaluated")
 
+    def test_evaluator_maps_sim_data_sibling_paths_to_host_root(self):
+        from metrics.transfuserpp_intermediate import evaluate_intermediate_trace
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            record = _record(
+                root,
+                frame_id=1,
+                timestamp=0.05,
+                case_id="S0_original_replay",
+                labels=np.zeros((16, 16), dtype=np.uint8),
+                target_speed=4.0,
+                brake=False,
+            )
+            payload_dir = root / "m6-stage-b-full-r11" / "payloads" / "frame_00000001"
+            payload_dir.mkdir(parents=True)
+            for name in ("camera_front", "lidar_top"):
+                source = Path(record["inputs"][name]["path"])
+                target = payload_dir / source.name
+                target.write_bytes(source.read_bytes())
+                record["inputs"][name].update(
+                    path=f"/sim-data/m6-stage-b-full-r11/payloads/frame_00000001/{source.name}",
+                    relative_path=f"payloads/frame_00000001/{source.name}",
+                )
+
+            dense_source = Path(record["dense_outputs"]["path"])
+            dense_target = (
+                root
+                / "transfuserpp_intermediates"
+                / "S0_original_replay"
+                / "seed_41"
+                / "run"
+                / dense_source.name
+            )
+            dense_target.parent.mkdir(parents=True)
+            dense_target.write_bytes(dense_source.read_bytes())
+            record["dense_outputs"].update(
+                path=(
+                    "/sim-data/transfuserpp_intermediates/S0_original_replay/"
+                    f"seed_41/run/{dense_source.name}"
+                ),
+                relative_path=(
+                    "transfuserpp_intermediates/S0_original_replay/"
+                    f"seed_41/run/{dense_source.name}"
+                ),
+            )
+
+            result = evaluate_intermediate_trace([record], evidence_root=root)
+
+        self.assertEqual(result["status"], "evaluated")
+
 
 if __name__ == "__main__":
     unittest.main()

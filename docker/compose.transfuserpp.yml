@@ -15,6 +15,9 @@ services:
       ALGORITHM_RUNTIME_CONFIG: /sim-data/runtime/transfuserpp.runtime.json
       ALGORITHM_READY_FILE: /sim-data/runtime/transfuserpp.ready.json
       SIM_DATA_PATH: /sim-data
+      # The CARLA client wheel is installed in this image (carla==0.9.15).
+      # Only the upstream navigation Python sources are mounted from the host;
+      # the sidecar never uses the host CARLA client or talks to CARLA directly.
       CARLA_AGENTS_PATH: /opt/carla-pythonapi/agents
       TFPP_IMAGE_DIGEST: "${TFPP_IMAGE_DIGEST:?Set immutable built Docker image ID}"
       ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-61}"
@@ -30,7 +33,7 @@ services:
       - "${SIM_DATA_HOST_PATH:?Set SIM_DATA_HOST_PATH}:/sim-data"
       - "${TFPP_REPO_HOST_PATH:?Set TFPP_REPO_HOST_PATH}:/opt/algorithm/carla_garage:ro"
       - "${TFPP_CHECKPOINT_HOST_DIR:?Set TFPP_CHECKPOINT_HOST_DIR}:/opt/algorithm/checkpoints:ro"
-      - "${CARLA_PYTHONAPI_HOST_PATH:?Set CARLA_PYTHONAPI_HOST_PATH}:/opt/carla-pythonapi:ro"
+      - "${CARLA_AGENTS_HOST_PATH:?Set CARLA_AGENTS_HOST_PATH}:/opt/carla-pythonapi/agents:ro"
     healthcheck:
       test: ["CMD", "python3", "-m", "runners.run_algorithm_container", "health"]
       interval: 10s

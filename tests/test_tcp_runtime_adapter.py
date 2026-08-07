@@ -54,6 +54,19 @@ class TcpRuntimeAdapterTests(unittest.TestCase):
         self.assertEqual(backend.seen["ego_state"]["speed_mps"], 4.5)
         self.assertEqual(backend.seen["route"]["route_command"], "LANE_FOLLOW")
 
+    def test_observation_metadata_is_promoted_to_contract_identity(self):
+        from agents.tcp_runtime_adapter import TcpRuntimeAdapter
+
+        observation = TcpRuntimeAdapter().build_observation(
+            sensors={"rgb_front": "frame-001"},
+            ego_state={"speed_mps": 4.5},
+            route={"route_command": "LANE_FOLLOW"},
+            observation_metadata={"frame_id": 17, "t_sec": 0.85},
+        )
+
+        self.assertEqual(observation["frame_id"], 17)
+        self.assertEqual(observation["timestamp"], 0.85)
+
     def test_adapter_falls_back_when_backend_missing(self):
         from agents.tcp_runtime_adapter import TcpRuntimeAdapter
 

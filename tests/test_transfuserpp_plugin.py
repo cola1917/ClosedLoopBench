@@ -148,6 +148,7 @@ class FakeRuntime:
     def __init__(self, _config):
         self.reset_count = 0
         self.closed = False
+        self.warmup_calls = []
 
     def health_check(self):
         return {
@@ -158,6 +159,17 @@ class FakeRuntime:
 
     def reset(self):
         self.reset_count += 1
+
+    def warmup(self, observation, *, iterations=1):
+        self.warmup_calls.append((observation, iterations))
+        return {
+            "status": "completed",
+            "iterations": iterations,
+            "frame_id": observation["frame_id"],
+            "formal_frame_excluded": True,
+            "intermediate_count": 0,
+            "real_checkpoint_loaded": True,
+        }
 
     def predict(self, observation):
         return _record(observation["frame_id"])
@@ -197,6 +209,18 @@ class TransFuserPPPluginTests(unittest.TestCase):
         self.assertEqual(control["source_frame_id"], 9)
         self.assertEqual(control["target_speed_mps"], 5.0)
         self.assertFalse(plugin.health_check()["real_checkpoint_loaded"])
+        plugin.close()
+
+    def test_formal_warmup_is_forwarded_without_a_scored_intermediate(self):
+        from agents.transfuserpp_plugin import TransFuserPPPlugin
+
+        plugin = TransFuserPPPlugin(runtime_factory=FakeRuntime)
+        plugin.initialize({"allow_test_runtime": True})
+        observation = {"frame_id": 0}
+        result = plugin.warmup(observation, iterations=3)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["intermediate_count"], 0)
+        self.assertEqual(plugin.runtime.warmup_calls, [(observation, 3)])
         plugin.close()
 
     def test_fake_runtime_cannot_be_presented_as_real_without_test_flag(self):
