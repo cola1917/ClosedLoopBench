@@ -1,8 +1,16 @@
 ﻿# ClosedLoopBench
 
-ClosedLoopBench consumes Scenario IR from TriggerEngine and compiles it into executable CARLA / ScenarioRunner closed-loop evaluations.
+ClosedLoopBench consumes Scenario IR from TriggerEngine and compiles it into
+portable scenario artifacts, synchronized replay inputs, and comparable
+evaluation reports. The current checked-in delivery is **CARLA/ROS
+open-loop complete**: the logged ego trajectory owns the next pose and the
+CARLA/ROS observation-to-evaluation path is reproducible. Closed-loop control
+and reactive actor acceptance remain blocked by runtime gates.
 
 Architecture and contract boundary: [`docs/architecture.md`](docs/architecture.md).
+
+Current project design and claim boundary:
+[`docs/open_loop_project_design.md`](docs/open_loop_project_design.md).
 
 Core CARLA/ROS2 environment handoff: [`docs/core_closed_loop_integration.md`](docs/core_closed_loop_integration.md).
 
@@ -55,17 +63,26 @@ Next-agent handoff prompt (2026-07-29):
 Algorithm/ODD/seed matrix planning:
 [`docs/offline_experiment_planning.md`](docs/offline_experiment_planning.md).
 
-## Role
+## Current Role
 
-ClosedLoopBench is the interactive evaluation layer: it turns Scenario IR into CARLA run config, ScenarioRunner/OpenSCENARIO/OpenDRIVE exchange artifacts, and comparable closed-loop reports.
+ClosedLoopBench is the CARLA/ROS simulation evaluation layer. It turns
+Scenario IR into CARLA run config, ScenarioRunner/OpenSCENARIO/OpenDRIVE
+exchange artifacts, replay-host observations, and comparable reports. The
+current formal evidence is open-loop; the closed-loop runtime is blocked and
+must not be described as an interactive closed-loop score.
 
-It runs:
+It currently provides:
 
-- ego closed-loop policies
-- replay or reactive actor policies
-- CARLA physics and world stepping
-- closed-loop safety, comfort, rule, and progress metrics
-- optional NuRec / Cosmos sensor realism integration from NeuralSceneBridge
+- Scenario IR validation and portable exchange compilation
+- synchronized GT replay and observation-boundary plumbing
+- open-loop TransFuser++ / multimodal evaluation on pinned trajectories
+- actor-aware offline metrics with provenance and fail-closed reports
+- CARLA/ROS open-loop handoff and synchronized evaluation
+- staged ego-policy and actor-controller runtime adapters for the blocked
+  closed-loop phase
+
+The target runtime will add ego control, reactive actors, and per-tick
+feedback-driven execution once the environment acceptance gates pass.
 
 ## Main Input
 
@@ -80,8 +97,8 @@ Optional:
 
 ## Main Output
 
-- CARLA ScenarioRunner config/scripts
-- closed-loop evaluation reports
+- CARLA / ScenarioRunner config and portable scenario artifacts
+- open-loop evaluation reports and dry-run contract reports
 
 See `docs/data_contract.md` and `schemas/closed_loop_run.mvp.schema.json`.
 
@@ -176,23 +193,23 @@ connected CARLA road network.
 
 The esmini smoke test skips cleanly when esmini is not installed. Set `ESMINI_BIN` to enable it.
 
-## Closed-loop dry run
+## Open-loop / dry-run evaluation
 
-Generate the MVP closed-loop report without launching CARLA:
+Generate the report-shaped MVP evaluation without launching CARLA:
 
 ```bash
 python runners/run_closed_loop.py --run-config outputs/scene-1077/carla_run_config.json --output outputs/scene-1077/closed_loop_report.json
 ```
 
-The same CLI supports dry-run planning and real CARLA execution. The real runner
-owns synchronous stepping, ego control, physical replay/scripted/TrafficManager
-actors, per-tick metrics, cleanup evidence, and an injected fail-closed NuRec
-RGB/LiDAR frame handler. Real simulator/renderer claims still require the
-environment-specific acceptance evidence described above.
+The same CLI contains the planned runtime boundary for CARLA execution. The
+retained M8 evidence instead uses GT replay ownership of the next ego pose;
+model control and actor policy outputs are recorded or scored offline and do
+not change the next scored pose. Real ego/actor closed-loop claims still
+require the environment-specific acceptance evidence described above.
 
 ## Implementation scope
 
-The current implementation scope is documented in `docs/implementation_scope.md`. In short: ClosedLoopBench owns CARLA/ScenarioRunner evaluation and reports, treats UniAD as an optional ego-policy plugin, and uses replay/ghost/TrafficManager/scripted actors as progressive actor-model stages.
+The current implementation scope is documented in `docs/implementation_scope.md`. In short: ClosedLoopBench owns the Scenario IR to evaluation contract, is currently delivered through open-loop replay and dry-run paths, and stages CARLA/ScenarioRunner evaluation, optional ego-policy plugins, and replay/ghost/TrafficManager/scripted actors behind runtime gates.
 
 Ego policy adapters are configured through `agents.ego_policy.build_ego_policy_config()`. Classic E2E stacks should start with TransFuser, InterFuser, or TCP through the ROS2 bridge boundary; UniAD is documented as an optional showcase plugin rather than required runtime.
 
